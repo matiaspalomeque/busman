@@ -1,0 +1,137 @@
+name: Publish Desktop
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+jobs:
+  publish-tauri:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: windows-latest
+            args: ""
+            rust_targets: ""
+          - platform: macos-latest
+            args: --target aarch64-apple-darwin
+            rust_targets: aarch64-apple-darwin
+
+    runs-on: ${{ matrix.platform }}
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+          cache-dependency-path: src-tauri/worker-go/go.sum
+
+      - name: Install Rust toolchain
+        if: matrix.rust_targets == ''
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Rust toolchain (with target)
+        if: matrix.rust_targets != ''
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_targets }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ./src-tauri -> target
+
+      - name: Install frontend dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build and publish release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: Busman ${{ github.ref_name }}
+          releaseBody: See the assets to download and install this version.
+          releaseDraft: false
+          prerelease: false
+          args: ${{ matrix.args }}
+          tauriScript: bun run tauri
+          includeUpdaterJson: true
+          updaterJsonPreferNsis: true
+
+      - name: Create portable Windows executable
+        if: matrix.platform == 'windows-latest'
+        shell: pwsh
+        run: |
+          Copy-Item "src-tauri/target/release/busman.exe" "busman-portable-win64.exe"
+
+      - name: Upload portable executable to release
+        if: matrix.platform == 'windows-latest'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: busman-portable-win64.exe
+          tag_name: ${{ github.ref_name }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  publish-update-manifest:
+    needs: [publish-tauri]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Download latest.json from release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release download ${{ github.ref_name }} --pattern latest.json --repo ${{ github.repository }}
+
+      - name: Download portable executable from release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release download ${{ github.ref_name }} --pattern "busman-portable*" --repo ${{ github.repository }}
+
+      - name: Sign portable executable
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          PORTABLE_FILE=$(ls busman-portable*.exe 2>/dev/null | head -1)
+          if [ -z "$PORTABLE_FILE" ]; then echo "No portable exe found"; exit 1; fi
+          bunx @tauri-apps/cli signer sign "$PORTABLE_FILE"
+
+      - name: Add portable entry to latest.json
+        run: |
+          PORTABLE_FILE=$(ls busman-portable*.exe 2>/dev/null | head -1)
+          if [ -z "$PORTABLE_FILE" ]; then echo "No portable exe found"; exit 1; fi
+          SIGNATURE=$(cat "${PORTABLE_FILE}.sig")
+          PORTABLE_URL="https://github.com/matiaspalomeque/busman/releases/download/${{ github.ref_name }}/$PORTABLE_FILE"
+
+          jq --arg sig "$SIGNATURE" --arg url "$PORTABLE_URL" \
+            '.platforms["windows-x86_64-portable"] = { "signature": $sig, "url": $url }' \
+            latest.json > latest.json.tmp && mv latest.json.tmp latest.json
+
+      - name: Push latest.json to update-channel branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout --orphan update-channel
+          git rm -rf --cached . --quiet
+          git add latest.json
+          git commit -m "chore: update latest.json for ${{ github.ref_name }}"
+          git push origin update-channel --force

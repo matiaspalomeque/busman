@@ -1,0 +1,41 @@
+{
+  "name": "Busman",
+  "private": true,
+  "version": "0.1.1",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "clean": "rm -rf dist node_modules src-tauri/target .vite .cache",
+    "clean:frontend": "rm -rf dist .vite",
+    "clean:tauri": "rm -rf src-tauri/target",
+    "rebuild": "bun run clean && bun install && bun run build",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "tauri": "tauri",
+    "build-sidecar": "bun run ./scripts/prepare-worker-sidecar.ts",
+    "bump-version": "bun run ./scripts/bump-version.ts"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2",
+    "@tauri-apps/plugin-dialog": "^2.6.0",
+    "@tauri-apps/plugin-shell": "^2",
+    "@tauri-apps/plugin-updater": "^2",
+    "i18next": "^25.8.13",
+    "immer": "^10",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-i18next": "^16.5.4",
+    "zustand": "^5"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2",
+    "@types/react": "^18.3.1",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.1",
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.4.47",
+    "tailwindcss": "^3.4.14",
+    "typescript": "^5.6.2",
+    "vite": "^6.0.3"
+  }
+}

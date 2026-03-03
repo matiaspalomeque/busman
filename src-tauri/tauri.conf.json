@@ -1,0 +1,54 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Busman",
+  "version": "0.1.1",
+  "identifier": "com.busman.app",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:1420",
+    "beforeDevCommand": "bun run build-sidecar && bun run dev",
+    "beforeBuildCommand": "bun run build-sidecar && bun run build"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Busman",
+        "width": 1100,
+        "height": 750,
+        "minWidth": 900,
+        "minHeight": 600,
+        "resizable": true,
+        "fullscreen": false
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src ipc: http://ipc.localhost; img-src 'self' asset: http://asset.localhost data:"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "createUpdaterArtifacts": true,
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "resources": {
+      "scripts/*": "scripts/"
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDFGNEY4NTRENDhFRDUwQTYKUldTbVVPMUlUWVZQSDhuQ2VBUzRaUTgrbVdoOHdISDNFVGlKT2huVnJpemdPelJnRmdtU2lueW4K",
+      "endpoints": [
+        "https://raw.githubusercontent.com/matiaspalomeque/busman/update-channel/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
+  }
+}

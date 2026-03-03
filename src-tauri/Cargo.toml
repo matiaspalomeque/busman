@@ -1,0 +1,27 @@
+[package]
+name = "busman"
+version = "0.1.1"
+description = "Azure Service Bus desktop client"
+authors = []
+edition = "2021"
+rust-version = "1.77.2"
+
+[lib]
+name = "busman_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-shell = "2"
+tauri-plugin-dialog = "2"
+tauri-plugin-log = "2"
+tauri-plugin-updater = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+log = "0.4"
+uuid = { version = "1", features = ["v4"] }
+tokio = { version = "1", features = ["io-util", "macros", "process", "sync", "time", "rt", "rt-multi-thread"] }
+chrono = { version = "0.4", features = ["clock"] }
