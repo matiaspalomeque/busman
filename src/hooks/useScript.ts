@@ -30,13 +30,15 @@ export function useScript() {
     async (
       command: string,
       params: Record<string, unknown>
-    ): Promise<number> => {
+    ): Promise<{ exitCode: number; errorMessage?: string }> => {
       if (isRunningRef.current) throw new Error("An operation is already running");
 
       clearOutput();
       const runId = crypto.randomUUID();
       activeRunIdRef.current = runId;
       setRunning(true, runId);
+
+      let lastStderrLine = "";
 
       let resolveDone: (code: number) => void = () => {};
       const exitCodePromise = new Promise<number>((resolve) => {
@@ -47,6 +49,9 @@ export function useScript() {
       const [unlistenOutput, unlistenProgress, unlistenDone] = await Promise.all([
         listen<ScriptOutputEvent>(`script-output:${runId}`, (ev) => {
           appendOutputLine(ev.payload.line, ev.payload.isStderr, ev.payload.elapsedMs);
+          if (ev.payload.isStderr && ev.payload.line.trim()) {
+            lastStderrLine = ev.payload.line.trim();
+          }
         }),
         listen<ScriptProgressEvent>(`script-progress:${runId}`, (ev) => {
           setProgress({ text: ev.payload.text, elapsedMs: ev.payload.elapsedMs });
@@ -64,7 +69,9 @@ export function useScript() {
           args: { ...params, runId },
         });
       } catch (e: unknown) {
-        appendOutputLine(`Error: ${String(e)}`, true, 0);
+        const errMsg = String(e);
+        appendOutputLine(`Error: ${errMsg}`, true, 0);
+        lastStderrLine = errMsg;
         // If backend returns an error before emitting script-done,
         // resolve locally to avoid leaving the UI in a running state.
         resolveDone(-1);
@@ -80,7 +87,10 @@ export function useScript() {
       activeRunIdRef.current = null;
       setRunning(false);
 
-      return code;
+      return {
+        exitCode: code,
+        errorMessage: code !== 0 && lastStderrLine ? lastStderrLine : undefined,
+      };
     },
     // isRunning intentionally omitted — read via ref to keep the callback stable.
     [setRunning, appendOutputLine, setProgress, clearOutput]

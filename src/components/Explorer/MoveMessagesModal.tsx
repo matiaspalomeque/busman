@@ -90,7 +90,7 @@ export function MoveMessagesModal() {
     setMoving(true);
     setStatus(null);
 
-    const exitCode = await runOperation("move_messages", {
+    const { exitCode, errorMessage } = await runOperation("move_messages", {
       sourceQueue: sourceQueue.trim(),
       destQueue: destQueue.trim(),
       mode,
@@ -99,7 +99,7 @@ export function MoveMessagesModal() {
 
     const ok = exitCode === 0;
     const stopped = exitCode === 130;
-    updateEventLogEntry(runId, ok ? "success" : stopped ? "stopped" : "error");
+    updateEventLogEntry(runId, ok ? "success" : stopped ? "stopped" : "error", errorMessage);
     setStatus({
       ok,
       text: ok

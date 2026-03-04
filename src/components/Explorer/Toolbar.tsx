@@ -309,12 +309,12 @@ export function Toolbar() {
       status: "running",
     });
 
-    const exitCode = await runOperation("empty_messages", {
+    const { exitCode, errorMessage } = await runOperation("empty_messages", {
       queueName: entityName,
       mode: peekMode,
       env: { SERVICE_BUS_CONNECTION_STRING: conn.connectionString, ...conn.env },
     });
-    updateEventLogEntry(runId, exitCode === 0 ? "success" : exitCode === 130 ? "stopped" : "error");
+    updateEventLogEntry(runId, exitCode === 0 ? "success" : exitCode === 130 ? "stopped" : "error", errorMessage);
   };
 
   // ── Replay (DLQ → main) ────────────────────────────────────────────────────
@@ -335,13 +335,13 @@ export function Toolbar() {
       status: "running",
     });
 
-    const exitCode = await runOperation("move_messages", {
+    const { exitCode, errorMessage } = await runOperation("move_messages", {
       sourceQueue: entityName,
       destQueue: entityName,
       mode: "dlq",
       env: { SERVICE_BUS_CONNECTION_STRING: conn.connectionString, ...conn.env },
     });
-    updateEventLogEntry(runId, exitCode === 0 ? "success" : exitCode === 130 ? "stopped" : "error");
+    updateEventLogEntry(runId, exitCode === 0 ? "success" : exitCode === 130 ? "stopped" : "error", errorMessage);
   };
 
   const loadMoreDisabled =

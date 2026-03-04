@@ -118,8 +118,9 @@ export function SendMessageModal() {
       setStatus({ ok: true, text: t("explorer.sendModal.success") });
       updateEventLogEntry(runId, "success");
     } catch (err) {
-      setStatus({ ok: false, text: String(err) });
-      updateEventLogEntry(runId, "error");
+      const msg = String(err);
+      setStatus({ ok: false, text: msg });
+      updateEventLogEntry(runId, "error", msg);
     } finally {
       setSending(false);
     }
