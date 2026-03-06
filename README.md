@@ -8,6 +8,8 @@ A desktop client for managing Azure Service Bus queues and topics.
 
 Browse messages, inspect payloads, send test messages, move dead letters back to their queues, and drain queues — all from a native desktop window without writing any code or using the Azure Portal.
 
+![Screenshot](src/assets/screenshot.png)
+
 ---
 
 ## Platforms
