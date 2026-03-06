@@ -1,9 +1,24 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useAppStore, selectActiveConnection } from "../../store/appStore";
 import { useEntityList } from "../../hooks/useEntityList";
 import { Icon } from "../Common/Icon";
 import { extractNamespace } from "../../utils/connection";
+
+interface CountBadgeProps {
+  active: number;
+  dlq: number;
+}
+
+function CountBadge({ active, dlq }: CountBadgeProps) {
+  return (
+    <span className="ml-auto flex items-center gap-1 shrink-0 text-[10px] tabular-nums">
+      <span className="text-zinc-500 dark:text-zinc-400">{active}</span>
+      <span className="text-zinc-300 dark:text-zinc-600">·</span>
+      <span className={dlq > 0 ? "text-amber-500 dark:text-amber-400 font-medium" : "text-zinc-400 dark:text-zinc-600"}>{dlq}</span>
+    </span>
+  );
+}
 
 // ─── Tree primitives ─────────────────────────────────────────────────────────
 
@@ -47,15 +62,16 @@ interface TreeItemProps {
   isSelected: boolean;
   onClick: () => void;
   indent?: boolean;
+  counts?: { active: number; dlq: number } | null;
 }
 
-function TreeItem({ label, icon, isSelected, onClick, indent = false }: TreeItemProps) {
+function TreeItem({ label, icon, isSelected, onClick, indent = false, counts }: TreeItemProps) {
   return (
     <button
       onClick={onClick}
       title={label}
       className={[
-        "flex items-center gap-2 w-full text-left text-xs py-1 pr-2 rounded-sm truncate",
+        "flex items-center gap-2 w-full text-left text-xs py-1 pr-2 rounded-sm",
         indent ? "pl-7" : "pl-4",
         isSelected
           ? "bg-azure-primary/10 text-azure-primary font-medium"
@@ -67,7 +83,8 @@ function TreeItem({ label, icon, isSelected, onClick, indent = false }: TreeItem
         size={13}
         className={isSelected ? "text-azure-primary" : "text-zinc-400 dark:text-zinc-500 shrink-0"}
       />
-      <span className="truncate">{label}</span>
+      <span className="truncate min-w-0 flex-1">{label}</span>
+      {counts != null && <CountBadge active={counts.active} dlq={counts.dlq} />}
     </button>
   );
 }
@@ -75,9 +92,10 @@ function TreeItem({ label, icon, isSelected, onClick, indent = false }: TreeItem
 interface TopicNodeProps {
   topic: string;
   subscriptions: string[];
+  subCounts: Map<string, { active: number; dlq: number }>;
 }
 
-function TopicNode({ topic, subscriptions }: TopicNodeProps) {
+function TopicNode({ topic, subscriptions, subCounts }: TopicNodeProps) {
   const { explorerSelection, setExplorerSubscription } = useAppStore();
   const [expanded, setExpanded] = useState(true);
 
@@ -118,6 +136,7 @@ function TopicNode({ topic, subscriptions }: TopicNodeProps) {
               isSelected={isSelected}
               onClick={() => setExplorerSubscription(topic, sub)}
               indent
+              counts={subCounts.get(`${topic}/${sub}`) ?? null}
             />
           );
         })}
@@ -143,7 +162,24 @@ export function Sidebar() {
     language,
     setLanguage,
     setIsAboutModalOpen,
+    entityCounts,
   } = useAppStore();
+
+  // Build lookup maps for O(1) access in render — memoized to avoid new references on every render
+  const queueCountMap = useMemo(
+    () => new Map((entityCounts?.queues ?? []).map((q) => [q.name, { active: q.active, dlq: q.dlq }])),
+    [entityCounts]
+  );
+  const subCountMap = useMemo(
+    () =>
+      new Map(
+        (entityCounts?.subscriptions ?? []).map((s) => [
+          `${s.topic}/${s.subscription}`,
+          { active: s.active, dlq: s.dlq },
+        ])
+      ),
+    [entityCounts]
+  );
 
   const namespace = conn ? extractNamespace(conn.connectionString) : "";
   const filter = treeFilter.toLowerCase();
@@ -227,6 +263,7 @@ export function Sidebar() {
                   explorerSelection.kind === "queue" && explorerSelection.queueName === queue
                 }
                 onClick={() => setExplorerQueue(queue)}
+                counts={queueCountMap.get(queue) ?? null}
               />
             ))}
           </TreeSection>
@@ -239,7 +276,7 @@ export function Sidebar() {
             onToggle={() => toggleSidebarSection("topics")}
           >
             {Object.entries(filteredTopics).map(([topic, subs]) => (
-              <TopicNode key={topic} topic={topic} subscriptions={subs} />
+              <TopicNode key={topic} topic={topic} subscriptions={subs} subCounts={subCountMap} />
             ))}
           </TreeSection>
         )}

@@ -29,6 +29,7 @@ pub fn run() {
             get_downloaded_files,
             load_downloaded_file,
             list_entities,
+            get_entity_counts,
             write_json_file,
             send_message,
             // Connection commands

@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
 import type {
   Connection,
+  EntityCountsResult,
   EventLogEntry,
   ExplorerSelection,
   NavPage,
@@ -39,6 +40,10 @@ interface AppState {
   entities: { queues: string[]; topics: Record<string, string[]> } | null;
   entitiesLoading: boolean;
   entitiesError: string | null;
+
+  // Message counts per entity (loaded in background after entity list)
+  entityCounts: EntityCountsResult | null;
+  entityCountsLoading: boolean;
 
   // Send message draft (for Resend from Peek)
   sendDraft: SendMessageDraft | null;
@@ -86,6 +91,8 @@ interface AppState {
   setEntities: (entities: { queues: string[]; topics: Record<string, string[]> } | null) => void;
   setEntitiesLoading: (loading: boolean) => void;
   setEntitiesError: (error: string | null) => void;
+  setEntityCounts: (counts: EntityCountsResult | null) => void;
+  setEntityCountsLoading: (loading: boolean) => void;
   setSendDraft: (draft: SendMessageDraft | null) => void;
   setTreeFilter: (filter: string) => void;
   setSelectedMessage: (msg: PeekedMessage | null) => void;
@@ -148,6 +155,8 @@ export const useAppStore = create<AppState>()(
     entities: null,
     entitiesLoading: false,
     entitiesError: null,
+    entityCounts: null,
+    entityCountsLoading: false,
     sendDraft: null,
     lastBrowseError: null,
     treeFilter: "",
@@ -181,6 +190,8 @@ export const useAppStore = create<AppState>()(
         // Clear cached entities when connection changes
         state.entities = null;
         state.entitiesError = null;
+        state.entityCounts = null;
+        state.entityCountsLoading = false;
         state.explorerSelection = {
           kind: "none",
           queueName: null,
@@ -343,6 +354,16 @@ export const useAppStore = create<AppState>()(
     setEntitiesError: (error) =>
       set((state) => {
         state.entitiesError = error;
+      }),
+
+    setEntityCounts: (counts) =>
+      set((state) => {
+        state.entityCounts = counts;
+      }),
+
+    setEntityCountsLoading: (loading) =>
+      set((state) => {
+        state.entityCountsLoading = loading;
       }),
 
     setSendDraft: (draft) =>

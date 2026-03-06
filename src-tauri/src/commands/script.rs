@@ -356,6 +356,60 @@ pub async fn list_entities(
     serde_json::from_value(value).map_err(|e| format!("Failed to parse entity list: {e}"))
 }
 
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct SubscriptionRef {
+    pub topic: String,
+    pub name: String,
+}
+
+#[derive(serde::Deserialize)]
+pub struct GetEntityCountsArgs {
+    pub env: HashMap<String, String>,
+    pub queues: Vec<String>,
+    pub subscriptions: Vec<SubscriptionRef>,
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct QueueCountResult {
+    pub name: String,
+    pub active: i64,
+    pub dlq: i64,
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct SubscriptionCountResult {
+    pub topic: String,
+    pub subscription: String,
+    pub active: i64,
+    pub dlq: i64,
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct EntityCountsResult {
+    pub queues: Vec<QueueCountResult>,
+    pub subscriptions: Vec<SubscriptionCountResult>,
+}
+
+#[tauri::command]
+pub async fn get_entity_counts(
+    app: AppHandle,
+    args: GetEntityCountsArgs,
+) -> Result<EntityCountsResult, String> {
+    let value = call_worker(
+        &app,
+        "getEntityCounts",
+        serde_json::json!({
+            "env": args.env,
+            "queues": args.queues,
+            "subscriptions": args.subscriptions,
+        }),
+        Some(Duration::from_secs(60)),
+    )
+    .await?;
+
+    serde_json::from_value(value).map_err(|e| format!("Failed to parse entity counts: {e}"))
+}
+
 /// Write text content to a file path chosen via the frontend save dialog.
 /// The path must have a `.json` extension to limit the scope of writes.
 #[tauri::command]
