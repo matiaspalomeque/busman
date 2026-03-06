@@ -5,7 +5,7 @@ use super::worker::{
 use crate::models::ScriptOutputLine;
 use serde::Deserialize;
 use serde_json::{json, Value};
-use std::{collections::HashMap, sync::atomic::Ordering, time::Instant};
+use std::{collections::HashMap, sync::atomic::Ordering, time::{Duration, Instant}};
 use tauri::{AppHandle, Emitter, Manager};
 
 // ─── Public commands ─────────────────────────────────────────────────────────
@@ -72,7 +72,7 @@ pub fn check_worker(app: AppHandle) -> bool {
 pub async fn ensure_scripts_ready(app: AppHandle) -> Result<(), String> {
     // Validates the sidecar is reachable (extracts embedded bytes if needed on Windows portable).
     resolve_sidecar_path(&app)?;
-    let _ = call_worker(&app, "health", json!({})).await?;
+    let _ = call_worker(&app, "health", json!({}), Some(Duration::from_secs(30))).await?;
     Ok(())
 }
 
@@ -123,7 +123,9 @@ async fn run_worker_operation(
     run_id: &str,
 ) -> Result<(), String> {
     let started = Instant::now();
-    match call_worker(app, method, params).await {
+    // No timeout: operations like emptyMessages/moveMessages/searchMessages can run for
+    // arbitrarily long on large queues. The user can cancel via the Stop button at any time.
+    match call_worker(app, method, params, None).await {
         Ok(_) => {
             emit_done(app, run_id, 0, started.elapsed().as_millis() as u64);
             Ok(())
@@ -233,6 +235,7 @@ pub async fn peek_messages(app: AppHandle, args: PeekArgs) -> Result<PeekResult,
     }
     std::fs::create_dir_all(&dl_dir).map_err(|e| format!("Cannot create downloads dir: {e}"))?;
 
+    // No timeout: peeking large message counts can take significant time.
     let worker_result = call_worker(
         &app,
         "peekMessages",
@@ -242,6 +245,7 @@ pub async fn peek_messages(app: AppHandle, args: PeekArgs) -> Result<PeekResult,
           "runId": run_id,
           "downloadsDir": dl_dir.to_string_lossy().to_string(),
         }),
+        None,
     )
     .await;
 
@@ -348,7 +352,7 @@ pub async fn list_entities(
     app: AppHandle,
     env: HashMap<String, String>,
 ) -> Result<ListEntitiesResult, String> {
-    let value = call_worker(&app, "listEntities", json!({ "env": env })).await?;
+    let value = call_worker(&app, "listEntities", json!({ "env": env }), Some(Duration::from_secs(60))).await?;
     serde_json::from_value(value).map_err(|e| format!("Failed to parse entity list: {e}"))
 }
 
@@ -397,6 +401,7 @@ pub async fn send_message(app: AppHandle, args: SendMessageArgs) -> Result<(), S
             "env": args.env,
             "message": args.message,
         }),
+        Some(Duration::from_secs(60)),
     )
     .await
     .map(|_| ())

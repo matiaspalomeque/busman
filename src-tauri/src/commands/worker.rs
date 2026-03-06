@@ -416,6 +416,7 @@ pub(crate) async fn call_worker(
     app: &AppHandle,
     method: &str,
     params: Value,
+    timeout: Option<Duration>,
 ) -> Result<Value, String> {
     let mut state = worker_state().lock().await;
     ensure_worker_running(app, &mut state).await?;
@@ -428,54 +429,54 @@ pub(crate) async fn call_worker(
     let serialized = serde_json::to_string(&request)
         .map_err(|e| format!("Worker request serialize failed: {e}"))?;
 
-    let response = {
-        let worker = state
-            .as_mut()
-            .ok_or_else(|| "Worker unavailable".to_string())?;
+    let worker = state
+        .as_mut()
+        .ok_or_else(|| "Worker unavailable".to_string())?;
 
-        let write_result = async {
-            worker
-                .stdin
-                .write_all(serialized.as_bytes())
-                .await
-                .map_err(|e| format!("Failed writing to worker stdin: {e}"))?;
-            worker
-                .stdin
-                .write_all(b"\n")
-                .await
-                .map_err(|e| format!("Failed writing worker request newline: {e}"))?;
-            worker
-                .stdin
-                .flush()
-                .await
-                .map_err(|e| format!("Failed flushing worker stdin: {e}"))
+    let write_result = async {
+        worker
+            .stdin
+            .write_all(serialized.as_bytes())
+            .await
+            .map_err(|e| format!("Failed writing to worker stdin: {e}"))?;
+        worker
+            .stdin
+            .write_all(b"\n")
+            .await
+            .map_err(|e| format!("Failed writing worker request newline: {e}"))?;
+        worker
+            .stdin
+            .flush()
+            .await
+            .map_err(|e| format!("Failed flushing worker stdin: {e}"))
+    }
+    .await;
+
+    if let Err(err) = write_result {
+        stop_worker(&mut state).await;
+        return Err(err);
+    }
+
+    let read_future = read_worker_response(app, worker, &request_id);
+
+    let result = if let Some(dur) = timeout {
+        match tokio::time::timeout(dur, read_future).await {
+            Ok(inner) => inner,
+            Err(_) => {
+                stop_worker(&mut state).await;
+                return Err("Service Bus worker request timed out".to_string());
+            }
         }
-        .await;
-
-        if let Err(err) = write_result {
-            stop_worker(&mut state).await;
-            return Err(err);
-        }
-
-        tokio::time::timeout(
-            Duration::from_secs(60 * 10),
-            read_worker_response(app, worker, &request_id),
-        )
-        .await
+    } else {
+        read_future.await
     };
 
-    match response {
-        Ok(Ok(result)) => Ok(result),
-        Ok(Err(err)) => match err {
-            WorkerCallError::Worker(message) => Err(message),
-            WorkerCallError::Transport(message) => {
-                stop_worker(&mut state).await;
-                Err(message)
-            }
-        },
-        Err(_) => {
+    match result {
+        Ok(value) => Ok(value),
+        Err(WorkerCallError::Worker(message)) => Err(message),
+        Err(WorkerCallError::Transport(message)) => {
             stop_worker(&mut state).await;
-            Err("Service Bus worker request timed out".to_string())
+            Err(message)
         }
     }
 }
