@@ -11,10 +11,14 @@ interface AppProperty {
   value: string;
 }
 
-function extractEntityName(sel: ExplorerSelection): string {
-  if (sel.kind === "queue") return sel.queueName;
-  if (sel.kind === "subscription") return sel.subscriptionName;
-  return "";
+function extractSendTarget(sel: ExplorerSelection): { entityName: string; entityType: "Queue" | "Topic" } {
+  if (sel.kind === "queue") {
+    return { entityName: sel.queueName, entityType: "Queue" };
+  }
+  if (sel.kind === "subscription") {
+    return { entityName: sel.topicName, entityType: "Topic" };
+  }
+  return { entityName: "", entityType: "Queue" };
 }
 
 export function SendMessageModal() {
@@ -29,7 +33,8 @@ export function SendMessageModal() {
     updateEventLogEntry,
   } = useAppStore();
 
-  const [entityName, setEntityName] = useState(extractEntityName(explorerSelection));
+  const initialTarget = extractSendTarget(explorerSelection);
+  const [entityName, setEntityName] = useState(initialTarget.entityName);
   const [body, setBody] = useState(sendDraft?.body ?? "");
   const [contentType, setContentType] = useState(sendDraft?.contentType ?? "application/json");
   const [subject, setSubject] = useState(sendDraft?.subject ?? "");
@@ -77,6 +82,7 @@ export function SendMessageModal() {
 
     const runId = crypto.randomUUID();
     const namespace = extractNamespace(conn.connectionString);
+    const currentTarget = extractSendTarget(explorerSelection);
 
     const builtProps: Record<string, unknown> = {};
     for (const { key, value } of appProps) {
@@ -99,7 +105,7 @@ export function SendMessageModal() {
       time: new Date().toISOString(),
       namespace,
       entity: entityName.trim(),
-      entityType: "Queue",
+      entityType: currentTarget.entityType,
       operation: "Send",
       status: "running",
     });
@@ -166,7 +172,7 @@ export function SendMessageModal() {
               type="text"
               value={entityName}
               onChange={(e) => setEntityName(e.target.value)}
-              placeholder="queue-name or topic-name"
+              placeholder={t("explorer.sendModal.entityPlaceholder")}
               className="text-xs px-2.5 py-1.5 rounded border border-zinc-300 dark:border-zinc-600 bg-transparent focus:outline-none focus:ring-1 focus:ring-azure-primary dark:text-zinc-200"
             />
           </div>
@@ -186,7 +192,7 @@ export function SendMessageModal() {
               value={body}
               onChange={(e) => setBody(e.target.value)}
               rows={8}
-              placeholder='{"key": "value"}'
+              placeholder={t("explorer.sendModal.bodyPlaceholder")}
               className="selectable text-xs px-2.5 py-2 rounded border border-zinc-300 dark:border-zinc-600 bg-transparent focus:outline-none focus:ring-1 focus:ring-azure-primary font-mono resize-y dark:text-zinc-200"
             />
           </div>
@@ -200,7 +206,7 @@ export function SendMessageModal() {
               type="text"
               value={contentType}
               onChange={(e) => setContentType(e.target.value)}
-              placeholder="application/json"
+              placeholder={t("explorer.sendModal.contentTypePlaceholder")}
               className="text-xs px-2.5 py-1.5 rounded border border-zinc-300 dark:border-zinc-600 bg-transparent focus:outline-none focus:ring-1 focus:ring-azure-primary dark:text-zinc-200"
             />
           </div>
@@ -299,14 +305,14 @@ export function SendMessageModal() {
                       type="text"
                       value={row.key}
                       onChange={(e) => updateAppProp(i, "key", e.target.value)}
-                      placeholder="Key"
+                      placeholder={t("explorer.sendModal.appPropKeyPlaceholder")}
                       className="flex-1 text-xs px-2 py-1 rounded border border-zinc-300 dark:border-zinc-600 bg-transparent focus:outline-none focus:ring-1 focus:ring-azure-primary dark:text-zinc-200"
                     />
                     <input
                       type="text"
                       value={row.value}
                       onChange={(e) => updateAppProp(i, "value", e.target.value)}
-                      placeholder="Value"
+                      placeholder={t("explorer.sendModal.appPropValuePlaceholder")}
                       className="flex-1 text-xs px-2 py-1 rounded border border-zinc-300 dark:border-zinc-600 bg-transparent focus:outline-none focus:ring-1 focus:ring-azure-primary dark:text-zinc-200"
                     />
                     <button

@@ -78,7 +78,7 @@ func TestResolveDrainReceiveWaitMs(t *testing.T) {
 			name:      "uses drain default when no env",
 			env:       map[string]string{},
 			maxWaitMs: 60000,
-			want:      1000,
+			want:      3000,
 		},
 		{
 			name: "respects explicit drain wait",
@@ -97,12 +97,12 @@ func TestResolveDrainReceiveWaitMs(t *testing.T) {
 			want:      1000,
 		},
 		{
-			name: "falls back to max default for invalid values",
+			name: "falls back to drain default for invalid values",
 			env: map[string]string{
 				"DRAIN_IDLE_WAIT_TIME_IN_MS": "abc",
 			},
 			maxWaitMs: 60000,
-			want:      1000,
+			want:      3000,
 		},
 		{
 			name:      "caps default drain wait when max wait is smaller",
