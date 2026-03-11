@@ -141,7 +141,9 @@
       "noEntities": "No entities found.",
       "refreshing": "Refreshing…",
       "entityTree": "Entity tree",
-      "refreshTitle": "Refresh entities"
+      "refreshTitle": "Refresh entities",
+      "loadError": "Failed to load entities.",
+      "retry": "Retry"
     },
     "properties": {
       "entityInfo": "Entity Info",

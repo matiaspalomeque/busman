@@ -255,7 +255,22 @@ export function Sidebar() {
       {/* Tree view */}
       <div className="flex-1 overflow-y-auto py-1 space-y-0.5">
         {entitiesLoading && !entities && (
-          <div className="px-3 py-3 text-xs text-zinc-400">{t("explorer.sidebar.loadingEntities")}</div>
+          <div className="px-3 py-4 flex items-center gap-2 text-xs text-zinc-400">
+            <Icon name="loader" size={14} className="animate-spin shrink-0" />
+            {t("explorer.sidebar.loadingEntities")}
+          </div>
+        )}
+
+        {!entitiesLoading && entitiesError && (
+          <div className="px-3 py-3 space-y-1.5">
+            <p className="text-xs text-amber-600 dark:text-amber-400">{t("explorer.sidebar.loadError")}</p>
+            <button
+              onClick={() => void refreshEntities()}
+              className="text-xs text-azure-primary hover:underline"
+            >
+              {t("explorer.sidebar.retry")}
+            </button>
+          </div>
         )}
 
         {!entitiesLoading && !entities && !entitiesError && (
@@ -316,7 +331,7 @@ export function Sidebar() {
             className="p-1 rounded text-zinc-400 hover:text-azure-primary hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-40 transition-colors"
             title={t("explorer.sidebar.refreshTitle")}
           >
-            <Icon name="refresh" size={13} />
+            <Icon name="refresh" size={13} className={entitiesLoading ? "animate-spin" : undefined} />
           </button>
         </div>
 

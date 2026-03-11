@@ -168,6 +168,10 @@ function ChevronDownPaths() {
   return <polyline points="6 9 12 15 18 9" />;
 }
 
+function LoaderPaths() {
+  return <path d="M21 12a9 9 0 1 1-6.219-8.56" />;
+}
+
 // ─── Icon map ─────────────────────────────────────────────────────────────────
 
 export type IconName =
@@ -187,7 +191,8 @@ export type IconName =
   | "box"
   | "close"
   | "info"
-  | "send";
+  | "send"
+  | "loader";
 
 const PATHS: Record<IconName, () => JSX.Element> = {
   queue: QueuePaths,
@@ -207,6 +212,7 @@ const PATHS: Record<IconName, () => JSX.Element> = {
   close: ClosePaths,
   info: InfoPaths,
   send: SendPaths,
+  loader: LoaderPaths,
 };
 
 // ─── Icon component ───────────────────────────────────────────────────────────

@@ -141,7 +141,9 @@
       "noEntities": "No se encontraron entidades.",
       "refreshing": "Actualizando…",
       "entityTree": "Árbol de entidades",
-      "refreshTitle": "Actualizar entidades"
+      "refreshTitle": "Actualizar entidades",
+      "loadError": "Error al cargar entidades.",
+      "retry": "Reintentar"
     },
     "properties": {
       "entityInfo": "Información de Entidad",
