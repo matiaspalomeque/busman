@@ -195,7 +195,9 @@ export const useAppStore = create<AppState>()(
 
     setConnections: (connections) =>
       set((state) => {
-        state.connections = connections;
+        state.connections = [...connections].sort((a, b) =>
+          a.name.localeCompare(b.name, undefined, { sensitivity: "base" })
+        );
       }),
 
     setActiveConnectionId: (id) =>
