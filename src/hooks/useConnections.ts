@@ -31,9 +31,11 @@ export function useConnections() {
       const config = await invoke<ConnectionsConfig>("save_connection", {
         connection: payload,
       });
-      applyConfig(config);
+      // Do not apply activeConnectionId from backend — saving a connection should
+      // never auto-select one. Only sync the connections list.
+      setConnections(config.connections);
     },
-    [applyConfig]
+    [setConnections]
   );
 
   const deleteConnection = useCallback(
