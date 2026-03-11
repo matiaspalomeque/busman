@@ -67,6 +67,9 @@ interface AppState {
   isAboutModalOpen: boolean;
   sidebarCollapsed: { queues: boolean; topics: boolean; system: boolean };
 
+  // Sidebar width (persisted)
+  sidebarWidth: number;
+
   // Theme
   isDark: boolean;
 
@@ -111,6 +114,7 @@ interface AppState {
   setIsConnectionsModalOpen: (open: boolean) => void;
   setIsAboutModalOpen: (open: boolean) => void;
   toggleSidebarSection: (section: "queues" | "topics" | "system") => void;
+  setSidebarWidth: (width: number) => void;
   setIsDark: (dark: boolean) => void;
   toggleDark: () => void;
   setLanguage: (lang: "en" | "es") => void;
@@ -170,6 +174,16 @@ export const useAppStore = create<AppState>()(
     isConnectionsModalOpen: false,
     isAboutModalOpen: false,
     sidebarCollapsed: { queues: false, topics: false, system: false },
+    sidebarWidth: (() => {
+      try {
+        const stored = localStorage.getItem("sidebarWidth");
+        if (stored) {
+          const parsed = Number(stored);
+          if (!isNaN(parsed) && parsed >= 180 && parsed <= 480) return parsed;
+        }
+      } catch {}
+      return 240;
+    })(),
     isDark: false,
     language: (() => {
       try {
@@ -450,6 +464,15 @@ export const useAppStore = create<AppState>()(
       set((state) => {
         state.sidebarCollapsed[section] = !state.sidebarCollapsed[section];
       }),
+
+    setSidebarWidth: (width) => {
+      try {
+        localStorage.setItem("sidebarWidth", String(width));
+      } catch {}
+      set((state) => {
+        state.sidebarWidth = width;
+      });
+    },
 
     setIsDark: (dark) =>
       set((state) => {

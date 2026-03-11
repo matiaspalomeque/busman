@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useAppStore, selectActiveConnection } from "../../store/appStore";
 import { useEntityList } from "../../hooks/useEntityList";
+import { useResizable } from "../../hooks/useResizable";
 import { Icon } from "../Common/Icon";
 import { extractNamespace } from "../../utils/connection";
 
@@ -163,7 +164,16 @@ export function Sidebar() {
     setLanguage,
     setIsAboutModalOpen,
     entityCounts,
+    sidebarWidth,
+    setSidebarWidth,
   } = useAppStore();
+
+  const { widthRef, onPointerDown } = useResizable({
+    initialWidth: sidebarWidth,
+    minWidth: 180,
+    maxWidth: 480,
+    onDragEnd: setSidebarWidth,
+  });
 
   // Build lookup maps for O(1) access in render — memoized to avoid new references on every render
   const queueCountMap = useMemo(
@@ -203,8 +213,14 @@ export function Sidebar() {
   const hasQueues = filteredQueues.length > 0;
   const hasTopics = Object.keys(filteredTopics).length > 0;
 
+  // Keep widthRef in sync with store value (e.g. on first render after persistence loads)
+  widthRef.current = sidebarWidth;
+
   return (
-    <aside className="w-60 flex flex-col border-r border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 overflow-hidden shrink-0">
+    <aside
+      className="flex flex-col border-r border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 overflow-hidden shrink-0 relative"
+      style={{ width: sidebarWidth }}
+    >
       {/* Namespace header */}
       <div className="px-3 py-2.5 border-b border-zinc-200 dark:border-zinc-700">
         <div className="text-[10px] font-semibold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider mb-0.5">
@@ -343,6 +359,16 @@ export function Sidebar() {
             <Icon name="info" size={14} />
           </button>
         </div>
+      </div>
+
+      {/* Drag handle — sits on the right edge, 6px wide, pointer-capture for smooth drag */}
+      <div
+        onPointerDown={onPointerDown}
+        className="absolute top-0 right-0 h-full w-1.5 cursor-col-resize group z-10"
+        title="Drag to resize"
+      >
+        {/* Visible highlight on hover/active */}
+        <div className="absolute inset-y-0 right-0 w-px bg-transparent group-hover:bg-azure-primary/40 group-active:bg-azure-primary/70 transition-colors" />
       </div>
     </aside>
   );
