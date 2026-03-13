@@ -1,6 +1,6 @@
 [package]
 name = "busman"
-version = "0.1.6"
+version = "0.1.7"
 description = "Azure Service Bus desktop client"
 authors = []
 edition = "2021"
