@@ -1,5 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { useAppStore, selectActiveConnection } from "../../store/appStore";
+import { useResizable } from "../../hooks/useResizable";
 import { bodyString } from "./MessageGrid";
 import { extractNamespace } from "../../utils/connection";
 
@@ -51,7 +52,16 @@ function PropRow({ label, value }: { label: string; value: React.ReactNode }) {
 export function PropertiesPanel() {
   const { t } = useTranslation();
   const conn = useAppStore(selectActiveConnection);
-  const { explorerSelection, selectedMessage, setIsSendModalOpen, setSendDraft } = useAppStore();
+  const { explorerSelection, selectedMessage, setIsSendModalOpen, setSendDraft, propertiesPanelWidth, setPropertiesPanelWidth } = useAppStore();
+
+  const { widthRef, onPointerDown } = useResizable({
+    initialWidth: propertiesPanelWidth,
+    minWidth: 200,
+    maxWidth: 600,
+    direction: "left",
+    onDragEnd: setPropertiesPanelWidth,
+  });
+  widthRef.current = propertiesPanelWidth;
 
   const namespace = conn ? extractNamespace(conn.connectionString) : "—";
 
@@ -85,7 +95,18 @@ export function PropertiesPanel() {
   };
 
   return (
-    <aside className="w-80 shrink-0 flex flex-col border-l border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 overflow-hidden">
+    <aside
+      className="relative shrink-0 flex flex-col border-l border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 overflow-hidden"
+      style={{ width: propertiesPanelWidth }}
+    >
+      {/* Drag handle — left edge */}
+      <div
+        onPointerDown={onPointerDown}
+        className="absolute top-0 left-0 h-full w-1.5 cursor-col-resize group z-10"
+      >
+        <div className="absolute inset-y-0 left-0 w-px bg-transparent group-hover:bg-azure-primary/40 group-active:bg-azure-primary/70 transition-colors" />
+      </div>
+
       {/* Entity Info */}
       <SectionHeader label={t("explorer.properties.entityInfo")} />
       <div className="flex flex-col px-3 py-2.5 gap-1 border-b border-zinc-200 dark:border-zinc-700">

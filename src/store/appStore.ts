@@ -70,6 +70,9 @@ interface AppState {
   // Sidebar width (persisted)
   sidebarWidth: number;
 
+  // Properties panel width (persisted)
+  propertiesPanelWidth: number;
+
   // Theme
   isDark: boolean;
 
@@ -115,6 +118,7 @@ interface AppState {
   setIsAboutModalOpen: (open: boolean) => void;
   toggleSidebarSection: (section: "queues" | "topics" | "system") => void;
   setSidebarWidth: (width: number) => void;
+  setPropertiesPanelWidth: (width: number) => void;
   setIsDark: (dark: boolean) => void;
   toggleDark: () => void;
   setLanguage: (lang: "en" | "es") => void;
@@ -183,6 +187,16 @@ export const useAppStore = create<AppState>()(
         }
       } catch {}
       return 240;
+    })(),
+    propertiesPanelWidth: (() => {
+      try {
+        const stored = localStorage.getItem("propertiesPanelWidth");
+        if (stored) {
+          const parsed = Number(stored);
+          if (!isNaN(parsed) && parsed >= 200 && parsed <= 600) return parsed;
+        }
+      } catch {}
+      return 320;
     })(),
     isDark: false,
     language: (() => {
@@ -473,6 +487,15 @@ export const useAppStore = create<AppState>()(
       } catch {}
       set((state) => {
         state.sidebarWidth = width;
+      });
+    },
+
+    setPropertiesPanelWidth: (width) => {
+      try {
+        localStorage.setItem("propertiesPanelWidth", String(width));
+      } catch {}
+      set((state) => {
+        state.propertiesPanelWidth = width;
       });
     },
 

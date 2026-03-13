@@ -5,6 +5,8 @@ interface UseResizableOptions {
   minWidth: number;
   maxWidth: number;
   onDragEnd: (width: number) => void;
+  /** Which edge the handle sits on. "right" (default) grows rightward; "left" grows leftward. */
+  direction?: "right" | "left";
 }
 
 interface UseResizableResult {
@@ -20,7 +22,7 @@ interface UseResizableResult {
  * and applies it via a local state that only updates on pointerup (drag end).
  * The caller receives the final width via onDragEnd.
  */
-export function useResizable({ initialWidth, minWidth, maxWidth, onDragEnd }: UseResizableOptions): UseResizableResult {
+export function useResizable({ initialWidth, minWidth, maxWidth, onDragEnd, direction = "right" }: UseResizableOptions): UseResizableResult {
   const widthRef = useRef(initialWidth);
 
   const onPointerDown = useCallback(
@@ -33,7 +35,8 @@ export function useResizable({ initialWidth, minWidth, maxWidth, onDragEnd }: Us
       const startWidth = widthRef.current;
 
       function onPointerMove(moveEvent: PointerEvent) {
-        const delta = moveEvent.clientX - startX;
+        const rawDelta = moveEvent.clientX - startX;
+        const delta = direction === "left" ? -rawDelta : rawDelta;
         const next = Math.min(maxWidth, Math.max(minWidth, startWidth + delta));
         widthRef.current = next;
         // Apply directly to the sidebar DOM element to avoid React re-render per frame.
@@ -55,7 +58,7 @@ export function useResizable({ initialWidth, minWidth, maxWidth, onDragEnd }: Us
       handle.addEventListener("pointermove", onPointerMove);
       handle.addEventListener("pointerup", onPointerUp);
     },
-    [minWidth, maxWidth, onDragEnd]
+    [minWidth, maxWidth, onDragEnd, direction]
   );
 
   return { widthRef, onPointerDown };
