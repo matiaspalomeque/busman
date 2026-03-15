@@ -148,7 +148,14 @@
       "pin": "Pin to favorites",
       "unpin": "Unpin",
       "createEntityTitle": "Create new entity",
-      "deleteTitle": "Delete"
+      "deleteTitle": "Delete",
+      "dlqThresholdSet": "Set DLQ alert threshold",
+      "dlqThresholdClear": "Clear threshold",
+      "dlqThresholdSave": "Save",
+      "dlqThresholdPlaceholder": "e.g. 5",
+      "dlqThresholdBreached": "DLQ count ({{count}}) exceeds threshold ({{threshold}})",
+      "dlqNotificationsEnabled": "DLQ desktop notifications enabled",
+      "dlqNotificationsDisabled": "DLQ desktop notifications disabled"
     },
     "entityManagement": {
       "createEntity": "Create Entity",

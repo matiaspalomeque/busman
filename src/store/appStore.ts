@@ -84,6 +84,11 @@ interface AppState {
   // Language
   language: "en" | "es";
 
+  // DLQ alert thresholds (persisted per connection in localStorage)
+  dlqThresholds: Record<string, number>;
+  // Whether desktop notifications for DLQ alerts are enabled (global, persisted)
+  dlqNotificationsEnabled: boolean;
+
   // Actions
   setConnections: (connections: Connection[]) => void;
   setActiveConnectionId: (id: string | null) => void;
@@ -131,6 +136,8 @@ interface AppState {
   setIsDark: (dark: boolean) => void;
   toggleDark: () => void;
   setLanguage: (lang: "en" | "es") => void;
+  setDlqThreshold: (entityKey: string, threshold: number | null) => void;
+  setDlqNotificationsEnabled: (enabled: boolean) => void;
 }
 
 function computeMaxSeqNums(messages: PeekedMessage[]): { normal: number | null; dlq: number | null } {
@@ -218,6 +225,14 @@ export const useAppStore = create<AppState>()(
         return "en" as const;
       }
     })(),
+    dlqThresholds: {},
+    dlqNotificationsEnabled: (() => {
+      try {
+        return localStorage.getItem("dlqNotificationsEnabled") === "true";
+      } catch {
+        return false;
+      }
+    })(),
 
     setConnections: (connections) =>
       set((state) => {
@@ -260,8 +275,24 @@ export const useAppStore = create<AppState>()(
           } catch {
             state.pinnedEntities = [];
           }
+          // Load DLQ thresholds for this connection from localStorage
+          try {
+            const storedThresholds = localStorage.getItem(`dlqThresholds:${id}`);
+            const parsedThresholds: unknown = storedThresholds ? JSON.parse(storedThresholds) : {};
+            state.dlqThresholds =
+              typeof parsedThresholds === "object" && parsedThresholds !== null && !Array.isArray(parsedThresholds)
+                ? Object.fromEntries(
+                    Object.entries(parsedThresholds as Record<string, unknown>).filter(
+                      (entry): entry is [string, number] => typeof entry[1] === "number" && entry[1] > 0
+                    )
+                  )
+                : {};
+          } catch {
+            state.dlqThresholds = {};
+          }
         } else {
           state.pinnedEntities = [];
+          state.dlqThresholds = {};
         }
         if (id === null) {
           state.currentPage = "connections";
@@ -611,6 +642,32 @@ export const useAppStore = create<AppState>()(
       set((state) => {
         state.language = lang;
       }),
+
+    setDlqThreshold: (entityKey, threshold) => {
+      set((state) => {
+        if (threshold === null || threshold <= 0) {
+          const { [entityKey]: _, ...rest } = state.dlqThresholds;
+          state.dlqThresholds = rest;
+        } else {
+          state.dlqThresholds = { ...state.dlqThresholds, [entityKey]: threshold };
+        }
+      });
+      const { dlqThresholds, activeConnectionId: connId } = get();
+      if (connId) {
+        try {
+          localStorage.setItem(`dlqThresholds:${connId}`, JSON.stringify(dlqThresholds));
+        } catch {}
+      }
+    },
+
+    setDlqNotificationsEnabled: (enabled) => {
+      try {
+        localStorage.setItem("dlqNotificationsEnabled", String(enabled));
+      } catch {}
+      set((state) => {
+        state.dlqNotificationsEnabled = enabled;
+      });
+    },
   }))
 );
 

@@ -189,6 +189,34 @@ function PlusPaths() {
   );
 }
 
+function BellPaths() {
+  return (
+    <>
+      <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
+      <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+    </>
+  );
+}
+
+function BellFilledPaths() {
+  return (
+    <>
+      <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" fill="currentColor" />
+      <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+    </>
+  );
+}
+
+function AlertTrianglePaths() {
+  return (
+    <>
+      <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+      <line x1="12" y1="9" x2="12" y2="13" />
+      <line x1="12" y1="17" x2="12.01" y2="17" />
+    </>
+  );
+}
+
 // ─── Icon map ─────────────────────────────────────────────────────────────────
 
 export type IconName =
@@ -212,7 +240,10 @@ export type IconName =
   | "loader"
   | "star"
   | "starFilled"
-  | "plus";
+  | "plus"
+  | "bell"
+  | "bellFilled"
+  | "alertTriangle";
 
 const PATHS: Record<IconName, () => JSX.Element> = {
   queue: QueuePaths,
@@ -236,6 +267,9 @@ const PATHS: Record<IconName, () => JSX.Element> = {
   star: StarPaths,
   starFilled: StarFilledPaths,
   plus: PlusPaths,
+  bell: BellPaths,
+  bellFilled: BellFilledPaths,
+  alertTriangle: AlertTrianglePaths,
 };
 
 // ─── Icon component ───────────────────────────────────────────────────────────

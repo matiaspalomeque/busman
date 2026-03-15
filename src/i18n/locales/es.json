@@ -148,7 +148,14 @@
       "pin": "Fijar en favoritos",
       "unpin": "Quitar de favoritos",
       "createEntityTitle": "Crear nueva entidad",
-      "deleteTitle": "Eliminar"
+      "deleteTitle": "Eliminar",
+      "dlqThresholdSet": "Establecer umbral de alerta DLQ",
+      "dlqThresholdClear": "Limpiar umbral",
+      "dlqThresholdSave": "Guardar",
+      "dlqThresholdPlaceholder": "ej. 5",
+      "dlqThresholdBreached": "DLQ ({{count}}) supera el umbral ({{threshold}})",
+      "dlqNotificationsEnabled": "Notificaciones DLQ de escritorio habilitadas",
+      "dlqNotificationsDisabled": "Notificaciones DLQ de escritorio deshabilitadas"
     },
     "entityManagement": {
       "createEntity": "Crear Entidad",
