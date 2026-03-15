@@ -346,6 +346,46 @@ pub struct ListEntitiesResult {
     pub topics: HashMap<String, Vec<String>>,
 }
 
+#[derive(serde::Serialize)]
+pub struct TestConnectionResult {
+    #[serde(rename = "queueCount")]
+    pub queue_count: usize,
+    #[serde(rename = "topicCount")]
+    pub topic_count: usize,
+}
+
+/// Validate a connection string by listing entities with a short timeout.
+///
+/// NOTE: This shares the long-lived worker process with other commands (list_entities,
+/// peek_messages, etc.). If the worker is busy with another operation, this request
+/// will be queued and may exceed the 10s timeout.
+#[tauri::command]
+pub async fn test_connection(
+    app: AppHandle,
+    connection_string: String,
+) -> Result<TestConnectionResult, String> {
+    let trimmed = connection_string.trim();
+    if !trimmed.to_lowercase().starts_with("endpoint=sb://") {
+        return Err("Invalid Service Bus connection string format".to_string());
+    }
+    let mut env = HashMap::new();
+    env.insert("SERVICE_BUS_CONNECTION_STRING".to_string(), trimmed.to_string());
+    let value = call_worker(
+        &app,
+        "listEntities",
+        json!({ "env": env }),
+        Some(Duration::from_secs(10)),
+    )
+    .await
+    .map_err(|e| redact_secrets(&e))?;
+    let entities: ListEntitiesResult =
+        serde_json::from_value(value).map_err(|e| format!("Failed to parse: {e}"))?;
+    Ok(TestConnectionResult {
+        queue_count: entities.queues.len(),
+        topic_count: entities.topics.len(),
+    })
+}
+
 /// List queues/topics/subscriptions through the long-lived Service Bus worker.
 #[tauri::command]
 pub async fn list_entities(

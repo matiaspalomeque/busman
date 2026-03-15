@@ -9,6 +9,14 @@ pub struct Connection {
     pub connection_string: String,
     #[serde(default)]
     pub env: HashMap<String, String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub environment: Option<String>,
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        rename = "environmentColor"
+    )]
+    pub environment_color: Option<String>,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize, Clone)]

@@ -3,6 +3,8 @@ export interface Connection {
   name: string;
   connectionString: string;
   env: Record<string, string>;
+  environment?: string;
+  environmentColor?: string;
 }
 
 export interface ConnectionsConfig {

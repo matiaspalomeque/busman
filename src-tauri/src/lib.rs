@@ -28,6 +28,7 @@ pub fn run() {
             peek_messages,
             get_downloaded_files,
             load_downloaded_file,
+            test_connection,
             list_entities,
             get_entity_counts,
             write_json_file,

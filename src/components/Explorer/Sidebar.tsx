@@ -5,6 +5,8 @@ import { useEntityList } from "../../hooks/useEntityList";
 import { useResizable } from "../../hooks/useResizable";
 import { Icon } from "../Common/Icon";
 import { extractNamespace } from "../../utils/connection";
+import { safeColor } from "../../utils/color";
+import type { Connection } from "../../types";
 
 interface CountBadgeProps {
   active: number;
@@ -206,6 +208,25 @@ type PinnedItem =
   | { type: "queue"; name: string; key: string }
   | { type: "subscription"; topicName: string; subName: string; key: string };
 
+function SidebarEnvironmentBadge({ connection }: { connection: Connection | null | undefined }) {
+  const { t } = useTranslation();
+  const color = safeColor(connection?.environmentColor);
+  if (!connection?.environment || !color) return null;
+  return (
+    <span
+      className="inline-flex items-center gap-1 text-[10px] font-medium mt-0.5"
+      style={{ color }}
+    >
+      <span
+        aria-hidden="true"
+        className="w-1.5 h-1.5 rounded-full"
+        style={{ backgroundColor: color }}
+      />
+      {t(`explorer.connectionsModal.env.${connection.environment}`, connection.environment)}
+    </span>
+  );
+}
+
 // ─── Main Sidebar ─────────────────────────────────────────────────────────────
 
 export function Sidebar() {
@@ -336,6 +357,7 @@ export function Sidebar() {
         >
           {namespace || t("explorer.sidebar.notConnected")}
         </div>
+        <SidebarEnvironmentBadge connection={conn} />
       </div>
 
       {/* Filter input + create button */}

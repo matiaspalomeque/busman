@@ -1,11 +1,23 @@
 import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { invoke } from "@tauri-apps/api/core";
 import { useAppStore } from "../../store/appStore";
 import { useConnections } from "../../hooks/useConnections";
 import { Icon } from "../Common/Icon";
+import { safeColor } from "../../utils/color";
 import type { Connection } from "../../types";
 
 type FormMode = { kind: "add" } | { kind: "edit"; connection: Connection };
+
+const ENV_PRESETS: { value: string; color: string }[] = [
+  { value: "dev", color: "#22c55e" },
+  { value: "staging", color: "#f59e0b" },
+  { value: "prod", color: "#ef4444" },
+];
+
+type TestResult =
+  | { ok: true; queueCount: number; topicCount: number }
+  | { ok: false; error: string };
 
 interface ConnectionFormProps {
   initial?: Partial<Connection>;
@@ -17,8 +29,41 @@ function ConnectionForm({ initial, onSave, onCancel }: ConnectionFormProps) {
   const { t } = useTranslation();
   const [name, setName] = useState(initial?.name ?? "");
   const [connectionString, setConnectionString] = useState(initial?.connectionString ?? "");
+  const [environment, setEnvironment] = useState(initial?.environment ?? "");
+  const [environmentColor, setEnvironmentColor] = useState(initial?.environmentColor ?? "");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<TestResult | null>(null);
+
+  const handleEnvironmentChange = (value: string) => {
+    setEnvironment(value);
+    const preset = ENV_PRESETS.find((p) => p.value === value);
+    setEnvironmentColor(preset?.color ?? "");
+  };
+
+  const handleConnectionStringChange = (value: string) => {
+    setConnectionString(value);
+    setTestResult(null);
+  };
+
+  const handleTest = async () => {
+    if (!connectionString.trim()) return;
+    setTesting(true);
+    setTestResult(null);
+    try {
+      const result = await invoke<{ queueCount: number; topicCount: number }>(
+        "test_connection",
+        { connectionString: connectionString.trim() }
+      );
+      setTestResult({ ok: true, queueCount: result.queueCount, topicCount: result.topicCount });
+    } catch (err) {
+      const msg = String(err);
+      setTestResult({ ok: false, error: msg.length > 200 ? `${msg.slice(0, 200)}…` : msg });
+    } finally {
+      setTesting(false);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -29,7 +74,13 @@ function ConnectionForm({ initial, onSave, onCancel }: ConnectionFormProps) {
     setSaving(true);
     setError("");
     try {
-      await onSave({ ...initial, name: name.trim(), connectionString: connectionString.trim() });
+      await onSave({
+        ...initial,
+        name: name.trim(),
+        connectionString: connectionString.trim(),
+        environment: environment || undefined,
+        environmentColor: environmentColor || undefined,
+      });
     } catch (err) {
       setError(String(err));
     } finally {
@@ -59,37 +110,122 @@ function ConnectionForm({ initial, onSave, onCancel }: ConnectionFormProps) {
         </label>
         <textarea
           value={connectionString}
-          onChange={(e) => setConnectionString(e.target.value)}
+          onChange={(e) => handleConnectionStringChange(e.target.value)}
           rows={3}
           placeholder="Endpoint=sb://your-namespace.servicebus.windows.net/;SharedAccessKeyName=...;SharedAccessKey=..."
           className="selectable text-xs px-2.5 py-2 rounded border border-zinc-300 dark:border-zinc-600 bg-transparent focus:outline-none focus:ring-1 focus:ring-azure-primary font-mono resize-none dark:text-zinc-200"
         />
       </div>
 
+      {/* Environment selector */}
+      <div className="flex flex-col gap-1">
+        <label className="text-xs font-medium text-zinc-600 dark:text-zinc-300">
+          {t("explorer.connectionsModal.environment")}
+        </label>
+        <div className="flex items-center gap-2">
+          <select
+            value={environment}
+            onChange={(e) => handleEnvironmentChange(e.target.value)}
+            className="flex-1 text-xs px-2.5 py-1.5 rounded border border-zinc-300 dark:border-zinc-600 bg-transparent focus:outline-none focus:ring-1 focus:ring-azure-primary dark:text-zinc-200 select-custom-arrow"
+          >
+            <option value="">{t("explorer.connectionsModal.envNone")}</option>
+            {ENV_PRESETS.map((p) => (
+              <option key={p.value} value={p.value}>
+                {t(`explorer.connectionsModal.env.${p.value}`)}
+              </option>
+            ))}
+          </select>
+          {environment && (
+            <span
+              className="w-4 h-4 rounded-full border border-zinc-300 dark:border-zinc-600 shrink-0"
+              style={{ backgroundColor: safeColor(environmentColor) }}
+              title={environmentColor}
+            />
+          )}
+        </div>
+      </div>
+
+      {/* Test result */}
+      {testResult && (
+        <p
+          className={[
+            "text-xs px-2.5 py-1.5 rounded",
+            testResult.ok
+              ? "bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-400"
+              : "bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400",
+          ].join(" ")}
+        >
+          {testResult.ok
+            ? t("explorer.connectionsModal.testSuccess", {
+                queues: testResult.queueCount,
+                topics: testResult.topicCount,
+              })
+            : t("explorer.connectionsModal.testError", { error: testResult.error })}
+        </p>
+      )}
+
       {error && (
         <p className="text-xs text-red-500 dark:text-red-400">{error}</p>
       )}
 
-      <div className="flex justify-end gap-2">
+      <div className="flex justify-between gap-2">
         <button
           type="button"
-          onClick={onCancel}
-          className="text-xs px-3 py-1.5 rounded border border-zinc-300 dark:border-zinc-600 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-300"
+          onClick={() => void handleTest()}
+          disabled={testing || !connectionString.trim()}
+          className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded border border-zinc-300 dark:border-zinc-600 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-300 disabled:opacity-40 disabled:cursor-not-allowed"
         >
-          {t("explorer.connectionsModal.cancel")}
-        </button>
-        <button
-          type="submit"
-          disabled={saving}
-          className="flex items-center gap-1.5 text-xs px-4 py-1.5 rounded bg-azure-primary text-white hover:bg-azure-primary/90 disabled:opacity-40"
-        >
-          {saving && (
-            <span className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
+          {testing && (
+            <span className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" />
           )}
-          {t("explorer.connectionsModal.save")}
+          {testing
+            ? t("explorer.connectionsModal.testing")
+            : t("explorer.connectionsModal.test")}
         </button>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="text-xs px-3 py-1.5 rounded border border-zinc-300 dark:border-zinc-600 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-300"
+          >
+            {t("explorer.connectionsModal.cancel")}
+          </button>
+          <button
+            type="submit"
+            disabled={saving}
+            className="flex items-center gap-1.5 text-xs px-4 py-1.5 rounded bg-azure-primary text-white hover:bg-azure-primary/90 disabled:opacity-40"
+          >
+            {saving && (
+              <span className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
+            )}
+            {t("explorer.connectionsModal.save")}
+          </button>
+        </div>
       </div>
     </form>
+  );
+}
+
+function EnvironmentBadge({ connection }: { connection: Connection }) {
+  const { t } = useTranslation();
+  const color = safeColor(connection.environmentColor);
+  if (!connection.environment || !color) return null;
+  return (
+    <span
+      aria-label={t(`explorer.connectionsModal.env.${connection.environment}`, connection.environment)}
+      className="shrink-0 inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded"
+      style={{
+        backgroundColor: `${color}20`,
+        color,
+      }}
+    >
+      <span
+        aria-hidden="true"
+        className="w-1.5 h-1.5 rounded-full"
+        style={{ backgroundColor: color }}
+      />
+      {t(`explorer.connectionsModal.env.${connection.environment}`, connection.environment)}
+    </span>
   );
 }
 
@@ -182,6 +318,7 @@ export function ConnectionsModal() {
                       <span className="text-xs font-medium text-azure-dark dark:text-zinc-200 truncate">
                         {c.name}
                       </span>
+                      <EnvironmentBadge connection={c} />
                       {activeConnectionId === c.id && (
                         <span className="shrink-0 text-[10px] px-1.5 py-0.5 rounded bg-azure-primary/10 text-azure-primary font-semibold">
                           {t("explorer.connectionsModal.active")}

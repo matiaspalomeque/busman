@@ -280,7 +280,18 @@
       "addConnection": "Agregar Conexión",
       "done": "Listo",
       "editTitle": "Editar",
-      "deleteTitle": "Eliminar"
+      "deleteTitle": "Eliminar",
+      "test": "Probar",
+      "testing": "Probando...",
+      "testSuccess": "Conectado — {{queues}} colas, {{topics}} tópicos",
+      "testError": "Error de conexión: {{error}}",
+      "environment": "Entorno",
+      "envNone": "Ninguno",
+      "env": {
+        "dev": "Desarrollo",
+        "staging": "Staging",
+        "prod": "Producción"
+      }
     }
   }
 }
