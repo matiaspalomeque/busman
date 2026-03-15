@@ -143,7 +143,10 @@
       "entityTree": "Árbol de entidades",
       "refreshTitle": "Actualizar entidades",
       "loadError": "Error al cargar entidades.",
-      "retry": "Reintentar"
+      "retry": "Reintentar",
+      "favoritesSection": "Favoritos",
+      "pin": "Fijar en favoritos",
+      "unpin": "Quitar de favoritos"
     },
     "properties": {
       "entityInfo": "Información de Entidad",

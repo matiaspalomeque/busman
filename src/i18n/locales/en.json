@@ -143,7 +143,10 @@
       "entityTree": "Entity tree",
       "refreshTitle": "Refresh entities",
       "loadError": "Failed to load entities.",
-      "retry": "Retry"
+      "retry": "Retry",
+      "favoritesSection": "Favorites",
+      "pin": "Pin to favorites",
+      "unpin": "Unpin"
     },
     "properties": {
       "entityInfo": "Entity Info",

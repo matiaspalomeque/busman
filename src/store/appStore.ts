@@ -73,6 +73,9 @@ interface AppState {
   // Properties panel width (persisted)
   propertiesPanelWidth: number;
 
+  // Pinned entities (persisted per connection in localStorage)
+  pinnedEntities: string[];
+
   // Theme
   isDark: boolean;
 
@@ -119,6 +122,7 @@ interface AppState {
   toggleSidebarSection: (section: "queues" | "topics" | "system") => void;
   setSidebarWidth: (width: number) => void;
   setPropertiesPanelWidth: (width: number) => void;
+  togglePin: (key: string) => void;
   setIsDark: (dark: boolean) => void;
   toggleDark: () => void;
   setLanguage: (lang: "en" | "es") => void;
@@ -141,7 +145,7 @@ function computeMaxSeqNums(messages: PeekedMessage[]): { normal: number | null; 
 }
 
 export const useAppStore = create<AppState>()(
-  immer((set) => ({
+  immer((set, get) => ({
     connections: [],
     activeConnectionId: null,
     currentPage: "connections",
@@ -198,6 +202,7 @@ export const useAppStore = create<AppState>()(
       } catch {}
       return 320;
     })(),
+    pinnedEntities: [],
     isDark: false,
     language: (() => {
       try {
@@ -237,6 +242,20 @@ export const useAppStore = create<AppState>()(
         state.gridFilters = { messageId: "", deadLetterReason: "", deadLetterErrorDescription: "", body: "" };
         state.gridPage = 1;
         state.lastBrowseError = null;
+        // Load pins for this connection from localStorage
+        if (id !== null) {
+          try {
+            const stored = localStorage.getItem(`pins:${id}`);
+            const parsed: unknown = stored ? JSON.parse(stored) : [];
+            state.pinnedEntities = Array.isArray(parsed)
+              ? parsed.filter((x): x is string => typeof x === "string")
+              : [];
+          } catch {
+            state.pinnedEntities = [];
+          }
+        } else {
+          state.pinnedEntities = [];
+        }
         if (id === null) {
           state.currentPage = "connections";
         } else {
@@ -497,6 +516,23 @@ export const useAppStore = create<AppState>()(
       set((state) => {
         state.propertiesPanelWidth = width;
       });
+    },
+
+    togglePin: (key) => {
+      set((state) => {
+        const idx = state.pinnedEntities.indexOf(key);
+        if (idx >= 0) {
+          state.pinnedEntities.splice(idx, 1);
+        } else {
+          state.pinnedEntities.push(key);
+        }
+      });
+      const { pinnedEntities: pins, activeConnectionId: connId } = get();
+      if (connId) {
+        try {
+          localStorage.setItem(`pins:${connId}`, JSON.stringify(pins));
+        } catch {}
+      }
     },
 
     setIsDark: (dark) =>

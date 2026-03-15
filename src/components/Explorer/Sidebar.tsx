@@ -59,34 +59,63 @@ function TreeSection({ label, collapsed, onToggle, children }: TreeSectionProps)
 
 interface TreeItemProps {
   label: string;
+  itemTitle?: string;
   icon: "queue" | "topic";
   isSelected: boolean;
   onClick: () => void;
   indent?: boolean;
   counts?: { active: number; dlq: number } | null;
+  pinKey?: string;
+  isPinned?: boolean;
+  onTogglePin?: () => void;
 }
 
-function TreeItem({ label, icon, isSelected, onClick, indent = false, counts }: TreeItemProps) {
+function TreeItem({ label, itemTitle, icon, isSelected, onClick, indent = false, counts, pinKey, isPinned = false, onTogglePin }: TreeItemProps) {
+  const { t } = useTranslation();
   return (
-    <button
-      onClick={onClick}
-      title={label}
+    <div
       className={[
-        "flex items-center gap-2 w-full text-left text-xs py-1 pr-2 rounded-sm",
-        indent ? "pl-7" : "pl-4",
+        "group flex items-center w-full rounded-sm",
         isSelected
-          ? "bg-azure-primary/10 text-azure-primary font-medium"
-          : "text-azure-secondary dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800",
+          ? "bg-azure-primary/10"
+          : "hover:bg-zinc-100 dark:hover:bg-zinc-800",
       ].join(" ")}
     >
-      <Icon
-        name={icon}
-        size={13}
-        className={isSelected ? "text-azure-primary" : "text-zinc-400 dark:text-zinc-500 shrink-0"}
-      />
-      <span className="truncate min-w-0 flex-1">{label}</span>
-      {counts != null && <CountBadge active={counts.active} dlq={counts.dlq} />}
-    </button>
+      <button
+        onClick={onClick}
+        title={itemTitle ?? label}
+        className={[
+          "flex items-center gap-2 flex-1 min-w-0 text-left text-xs py-1",
+          indent ? "pl-7" : "pl-4",
+          pinKey != null ? "pr-1" : "pr-2",
+          isSelected
+            ? "text-azure-primary font-medium"
+            : "text-azure-secondary dark:text-zinc-300",
+        ].join(" ")}
+      >
+        <Icon
+          name={icon}
+          size={13}
+          className={isSelected ? "text-azure-primary" : "text-zinc-400 dark:text-zinc-500 shrink-0"}
+        />
+        <span className="truncate min-w-0 flex-1">{label}</span>
+        {counts != null && <CountBadge active={counts.active} dlq={counts.dlq} />}
+      </button>
+      {pinKey != null && (
+        <button
+          onClick={(e) => { e.stopPropagation(); onTogglePin?.(); }}
+          title={isPinned ? t("explorer.sidebar.unpin") : t("explorer.sidebar.pin")}
+          className={[
+            "shrink-0 p-0.5 mr-1 rounded transition-opacity",
+            isPinned
+              ? "text-amber-400 opacity-100"
+              : "text-zinc-400 opacity-0 group-hover:opacity-100 hover:text-amber-400",
+          ].join(" ")}
+        >
+          <Icon name={isPinned ? "starFilled" : "star"} size={11} />
+        </button>
+      )}
+    </div>
   );
 }
 
@@ -97,7 +126,8 @@ interface TopicNodeProps {
 }
 
 function TopicNode({ topic, subscriptions, subCounts }: TopicNodeProps) {
-  const { explorerSelection, setExplorerSubscription } = useAppStore();
+  const { explorerSelection, setExplorerSubscription, pinnedEntities, togglePin } = useAppStore();
+  const pinnedSet = useMemo(() => new Set(pinnedEntities), [pinnedEntities]);
   const [expanded, setExpanded] = useState(true);
 
   return (
@@ -129,6 +159,7 @@ function TopicNode({ topic, subscriptions, subCounts }: TopicNodeProps) {
             explorerSelection.kind === "subscription" &&
             explorerSelection.topicName === topic &&
             explorerSelection.subscriptionName === sub;
+          const pinKey = `subscription:${topic}\0${sub}`;
           return (
             <TreeItem
               key={sub}
@@ -138,12 +169,21 @@ function TopicNode({ topic, subscriptions, subCounts }: TopicNodeProps) {
               onClick={() => setExplorerSubscription(topic, sub)}
               indent
               counts={subCounts.get(`${topic}/${sub}`) ?? null}
+              pinKey={pinKey}
+              isPinned={pinnedSet.has(pinKey)}
+              onTogglePin={() => togglePin(pinKey)}
             />
           );
         })}
     </div>
   );
 }
+
+// ─── Pinned item types ────────────────────────────────────────────────────────
+
+type PinnedItem =
+  | { type: "queue"; name: string; key: string }
+  | { type: "subscription"; topicName: string; subName: string; key: string };
 
 // ─── Main Sidebar ─────────────────────────────────────────────────────────────
 
@@ -156,6 +196,7 @@ export function Sidebar() {
     treeFilter,
     setTreeFilter,
     setExplorerQueue,
+    setExplorerSubscription,
     sidebarCollapsed,
     toggleSidebarSection,
     isDark,
@@ -166,6 +207,8 @@ export function Sidebar() {
     entityCounts,
     sidebarWidth,
     setSidebarWidth,
+    pinnedEntities,
+    togglePin,
   } = useAppStore();
 
   const { widthRef, onPointerDown } = useResizable({
@@ -190,6 +233,44 @@ export function Sidebar() {
       ),
     [entityCounts]
   );
+
+  const pinnedSet = useMemo(() => new Set(pinnedEntities), [pinnedEntities]);
+
+  // Build a Set of valid pin keys from the loaded entities. This constructs keys
+  // exactly the same way TopicNode / queue TreeItems do, so membership is guaranteed
+  // to match. Avoids property-access lookups like entities.topics[name] which can
+  // silently fail if the object has unexpected prototype/proxy behaviour after Immer.
+  const validPinKeys = useMemo(() => {
+    if (!entities) return new Set<string>();
+    const keys = new Set<string>();
+    for (const q of entities.queues) keys.add(`queue:${q}`);
+    for (const [topic, subs] of Object.entries(entities.topics)) {
+      for (const sub of subs) keys.add(`subscription:${topic}\0${sub}`);
+    }
+    return keys;
+  }, [entities]);
+
+  const pinnedItems = useMemo<PinnedItem[]>(() => {
+    if (pinnedEntities.length === 0 || validPinKeys.size === 0) return [];
+    return pinnedEntities.flatMap<PinnedItem>((key) => {
+      if (!validPinKeys.has(key)) return [];
+      if (key.startsWith("queue:")) {
+        return [{ type: "queue", name: key.slice(6), key }];
+      }
+      if (key.startsWith("subscription:")) {
+        const rest = key.slice(13);
+        const sepIdx = rest.indexOf("\0");
+        if (sepIdx < 1) return [];
+        return [{
+          type: "subscription",
+          topicName: rest.slice(0, sepIdx),
+          subName: rest.slice(sepIdx + 1),
+          key,
+        }];
+      }
+      return [];
+    });
+  }, [pinnedEntities, validPinKeys]);
 
   const namespace = conn ? extractNamespace(conn.connectionString) : "";
   const filter = treeFilter.toLowerCase();
@@ -279,24 +360,73 @@ export function Sidebar() {
           </div>
         )}
 
+        {/* Favorites section — shown regardless of filter, only when there are pins */}
+        {pinnedItems.length > 0 && (
+          <div>
+            <div className="flex items-center gap-1 px-2 py-1 text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">
+              <Icon name="starFilled" size={10} className="text-amber-400 shrink-0" />
+              {t("explorer.sidebar.favoritesSection")}
+            </div>
+            {pinnedItems.map((item) => {
+              if (item.type === "queue") {
+                return (
+                  <TreeItem
+                    key={item.key}
+                    label={item.name}
+                    icon="queue"
+                    isSelected={explorerSelection.kind === "queue" && explorerSelection.queueName === item.name}
+                    onClick={() => setExplorerQueue(item.name)}
+                    counts={queueCountMap.get(item.name) ?? null}
+                    pinKey={item.key}
+                    isPinned={true}
+                    onTogglePin={() => togglePin(item.key)}
+                  />
+                );
+              }
+              return (
+                <TreeItem
+                  key={item.key}
+                  label={item.subName}
+                  itemTitle={`${item.topicName} / ${item.subName}`}
+                  icon="queue"
+                  isSelected={
+                    explorerSelection.kind === "subscription" &&
+                    explorerSelection.topicName === item.topicName &&
+                    explorerSelection.subscriptionName === item.subName
+                  }
+                  onClick={() => setExplorerSubscription(item.topicName, item.subName)}
+                  counts={subCountMap.get(`${item.topicName}/${item.subName}`) ?? null}
+                  pinKey={item.key}
+                  isPinned={true}
+                  onTogglePin={() => togglePin(item.key)}
+                />
+              );
+            })}
+          </div>
+        )}
+
         {hasQueues && (
           <TreeSection
             label={t("explorer.sidebar.queuesSection", { count: filteredQueues.length })}
             collapsed={sidebarCollapsed.queues}
             onToggle={() => toggleSidebarSection("queues")}
           >
-            {filteredQueues.map((queue) => (
-              <TreeItem
-                key={queue}
-                label={queue}
-                icon="queue"
-                isSelected={
-                  explorerSelection.kind === "queue" && explorerSelection.queueName === queue
-                }
-                onClick={() => setExplorerQueue(queue)}
-                counts={queueCountMap.get(queue) ?? null}
-              />
-            ))}
+            {filteredQueues.map((queue) => {
+              const pinKey = `queue:${queue}`;
+              return (
+                <TreeItem
+                  key={queue}
+                  label={queue}
+                  icon="queue"
+                  isSelected={explorerSelection.kind === "queue" && explorerSelection.queueName === queue}
+                  onClick={() => setExplorerQueue(queue)}
+                  counts={queueCountMap.get(queue) ?? null}
+                  pinKey={pinKey}
+                  isPinned={pinnedSet.has(pinKey)}
+                  onTogglePin={() => togglePin(pinKey)}
+                />
+              );
+            })}
           </TreeSection>
         )}
 
