@@ -123,8 +123,4 @@ Busman checks for new releases on startup. When an update is available, you will
 
 Busman runs entirely on your local machine. Connection strings are stored in local application storage and are never sent to any external server. All Service Bus communication goes directly from your machine to Azure.
 
----
 
-## Version
-
-Current release: **0.1.1**

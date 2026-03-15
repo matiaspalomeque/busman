@@ -256,7 +256,7 @@ func handleGetEntityCounts(raw json.RawMessage) (any, error) {
 			defer func() { <-sem }()
 
 			var active, dlq int64
-			if resp, err := adminClient.GetQueueRuntimeProperties(ctx, name, nil); err == nil {
+			if resp, err := adminClient.GetQueueRuntimeProperties(ctx, name, nil); err == nil && resp != nil {
 				active = int64(resp.ActiveMessageCount)
 				dlq = int64(resp.DeadLetterMessageCount)
 			}
@@ -280,7 +280,7 @@ func handleGetEntityCounts(raw json.RawMessage) (any, error) {
 			defer func() { <-sem }()
 
 			var active, dlq int64
-			if resp, err := adminClient.GetSubscriptionRuntimeProperties(ctx, topic, name, nil); err == nil {
+			if resp, err := adminClient.GetSubscriptionRuntimeProperties(ctx, topic, name, nil); err == nil && resp != nil {
 				active = int64(resp.ActiveMessageCount)
 				dlq = int64(resp.DeadLetterMessageCount)
 			}

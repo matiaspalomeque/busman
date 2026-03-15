@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { useAppStore, selectActiveConnection } from "../../store/appStore";
-import { useEntityList } from "../../hooks/useEntityList";
 import { Icon } from "../Common/Icon";
 import { extractNamespace } from "../../utils/connection";
 
@@ -17,8 +16,8 @@ export function DeleteEntityDialog() {
     clearPeekResults,
     addEventLogEntry,
     updateEventLogEntry,
+    removeEntity,
   } = useAppStore();
-  const { refreshEntities } = useEntityList();
 
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -41,7 +40,8 @@ export function DeleteEntityDialog() {
     };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const isSelectedEntity = () => {
     if (type === "queue") {
@@ -102,8 +102,8 @@ export function DeleteEntityDialog() {
         clearPeekResults();
       }
 
+      removeEntity(type, name, topicName);
       close();
-      void refreshEntities();
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       setError(t("explorer.entityManagement.deleteError", { type: typeLabel, error: msg }));

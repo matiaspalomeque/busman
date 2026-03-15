@@ -21,12 +21,13 @@ export function useEntityList() {
     setEntityCountsLoading,
   } = useAppStore();
 
-  // Guard against concurrent calls without closing over entitiesLoading state,
-  // which would create a circular dependency (loading → callback recreated → re-fetch).
-  const fetchingRef = useRef(false);
+  // Tracks which connection ID is currently being fetched, or null if idle.
+  // Prevents duplicate fetches for the same connection while allowing a new
+  // connection to supersede an in-flight fetch.
+  const fetchingConnRef = useRef<string | null>(null);
 
   const fetchCounts = useCallback(
-    async (result: ListEntitiesResult, env: Record<string, string>) => {
+    async (result: ListEntitiesResult, env: Record<string, string>, connId: string) => {
       const subscriptions = Object.entries(result.topics).flatMap(([topic, subs]) =>
         subs.map((name) => ({ topic, name }))
       );
@@ -35,19 +36,23 @@ export function useEntityList() {
         const counts = await invoke<EntityCountsResult>("get_entity_counts", {
           args: { env, queues: result.queues, subscriptions },
         });
+        if (selectActiveConnection(useAppStore.getState())?.id !== connId) return;
         setEntityCounts(counts);
       } catch {
         // Counts are best-effort — silently ignore failures (e.g. insufficient permissions)
       } finally {
-        setEntityCountsLoading(false);
+        if (selectActiveConnection(useAppStore.getState())?.id === connId) {
+          setEntityCountsLoading(false);
+        }
       }
     },
     [setEntityCounts, setEntityCountsLoading]
   );
 
   const fetchEntities = useCallback(async () => {
-    if (!conn || fetchingRef.current) return;
-    fetchingRef.current = true;
+    if (!conn || fetchingConnRef.current === conn.id) return;
+    fetchingConnRef.current = conn.id;
+    const connId = conn.id;
     setEntitiesLoading(true);
     setEntitiesError(null);
     setEntityCounts(null);
@@ -57,20 +62,25 @@ export function useEntityList() {
         ...conn.env,
       };
       const result = await invoke<ListEntitiesResult>("list_entities", { env });
+      // Discard stale results if the active connection changed during the fetch
+      if (selectActiveConnection(useAppStore.getState())?.id !== connId) return;
       setEntities(result);
       // Fire counts fetch in background — does not block or delay tree rendering
-      void fetchCounts(result, env);
+      void fetchCounts(result, env, connId);
     } catch (err) {
+      if (selectActiveConnection(useAppStore.getState())?.id !== connId) return;
       setEntitiesError(String(err));
     } finally {
-      setEntitiesLoading(false);
-      fetchingRef.current = false;
+      if (fetchingConnRef.current === connId) {
+        setEntitiesLoading(false);
+        fetchingConnRef.current = null;
+      }
     }
   }, [conn, setEntities, setEntitiesLoading, setEntitiesError, setEntityCounts, fetchCounts]);
 
-  // Auto-fetch when a connection becomes available and we have no data.
+  // Auto-fetch when the active connection changes.
   useEffect(() => {
-    if (conn && !entities && !entitiesLoading && !entitiesError) {
+    if (conn) {
       void fetchEntities();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps

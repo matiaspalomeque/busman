@@ -104,6 +104,7 @@ interface AppState {
   setEntitiesError: (error: string | null) => void;
   setEntityCounts: (counts: EntityCountsResult | null) => void;
   setEntityCountsLoading: (loading: boolean) => void;
+  removeEntity: (type: "queue" | "topic" | "subscription", name: string, topicName?: string) => void;
   setSendDraft: (draft: SendMessageDraft | null) => void;
   setTreeFilter: (filter: string) => void;
   setSelectedMessage: (msg: PeekedMessage | null) => void;
@@ -419,6 +420,51 @@ export const useAppStore = create<AppState>()(
     setEntityCountsLoading: (loading) =>
       set((state) => {
         state.entityCountsLoading = loading;
+      }),
+
+    removeEntity: (type, name, topicName) =>
+      set((state) => {
+        if (!state.entities) return;
+        if (type === "queue") {
+          state.entities = {
+            ...state.entities,
+            queues: state.entities.queues.filter((q) => q !== name),
+          };
+          if (state.entityCounts) {
+            state.entityCounts = {
+              ...state.entityCounts,
+              queues: state.entityCounts.queues.filter((q) => q.name !== name),
+            };
+          }
+        } else if (type === "topic") {
+          const { [name]: _, ...remainingTopics } = state.entities.topics;
+          state.entities = { ...state.entities, topics: remainingTopics };
+          if (state.entityCounts) {
+            state.entityCounts = {
+              ...state.entityCounts,
+              subscriptions: state.entityCounts.subscriptions.filter((s) => s.topic !== name),
+            };
+          }
+        } else if (type === "subscription" && topicName) {
+          const subs = state.entities.topics[topicName];
+          if (subs) {
+            state.entities = {
+              ...state.entities,
+              topics: {
+                ...state.entities.topics,
+                [topicName]: subs.filter((s) => s !== name),
+              },
+            };
+          }
+          if (state.entityCounts) {
+            state.entityCounts = {
+              ...state.entityCounts,
+              subscriptions: state.entityCounts.subscriptions.filter(
+                (s) => !(s.topic === topicName && s.subscription === name)
+              ),
+            };
+          }
+        }
       }),
 
     setSendDraft: (draft) =>

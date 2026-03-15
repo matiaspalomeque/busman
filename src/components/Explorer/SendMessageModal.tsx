@@ -96,7 +96,9 @@ export function SendMessageModal() {
       messageId: messageId || undefined,
       correlationId: correlationId || undefined,
       sessionId: sessionId || undefined,
-      scheduledEnqueueTimeUtc: scheduled || undefined,
+      scheduledEnqueueTimeUtc: scheduled
+        ? new Date(scheduled).toISOString()
+        : undefined,
       applicationProperties: Object.keys(builtProps).length > 0 ? builtProps : undefined,
     };
 
