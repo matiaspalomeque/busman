@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * bump-version <new-version>
+ * Usage: bun run bump-version [patch|minor|major|<X.Y.Z>]
  *
  * Updates the version in:
  *   - package.json
@@ -13,23 +13,39 @@
 import { execFileSync } from "child_process";
 import { readFileSync, writeFileSync } from "fs";
 
-const version = process.argv[2];
+const arg = process.argv[2];
 
-if (!version) {
-  console.error("Usage: bun run bump-version <new-version>  (e.g. 0.2.0)");
+if (!arg) {
+  console.error("Usage: bun run bump-version [patch|minor|major|<X.Y.Z>]");
   process.exit(1);
 }
 
-if (!/^\d+\.\d+\.\d+$/.test(version)) {
-  console.error(`Invalid version "${version}". Expected format: X.Y.Z`);
+// --- Read current version from package.json ---
+const pkgPath = "package.json";
+const pkg = JSON.parse(readFileSync(pkgPath, "utf8"));
+const current: string = pkg.version;
+const [maj, min, pat] = current.split(".").map(Number);
+
+// --- Resolve target version ---
+let version: string;
+if (arg === "major") {
+  version = `${maj + 1}.0.0`;
+} else if (arg === "minor") {
+  version = `${maj}.${min + 1}.0`;
+} else if (arg === "patch") {
+  version = `${maj}.${min}.${pat + 1}`;
+} else if (/^\d+\.\d+\.\d+$/.test(arg)) {
+  version = arg;
+} else {
+  console.error(`Invalid: "${arg}". Use patch, minor, major, or X.Y.Z`);
   process.exit(1);
 }
+
+console.log(`Bumping version: ${current} → ${version}`);
 
 const tag = `v${version}`;
 
 // --- package.json ---
-const pkgPath = "package.json";
-const pkg = JSON.parse(readFileSync(pkgPath, "utf8"));
 pkg.version = version;
 writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + "\n");
 console.log(`✓ ${pkgPath} → ${version}`);
