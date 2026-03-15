@@ -107,14 +107,20 @@ func elapsedSince(start time.Time) int64 {
 type handlerFn func(params json.RawMessage) (any, error)
 
 var handlers = map[string]handlerFn{
-	"health":           handleHealth,
-	"listEntities":     handleListEntities,
-	"getEntityCounts":  handleGetEntityCounts,
-	"emptyMessages":    handleEmptyMessages,
-	"moveMessages":     handleMoveMessages,
-	"searchMessages":   handleSearchMessages,
-	"peekMessages":     handlePeekMessages,
-	"sendMessage":      handleSendMessage,
+	"health":              handleHealth,
+	"listEntities":        handleListEntities,
+	"getEntityCounts":     handleGetEntityCounts,
+	"emptyMessages":       handleEmptyMessages,
+	"moveMessages":        handleMoveMessages,
+	"searchMessages":      handleSearchMessages,
+	"peekMessages":        handlePeekMessages,
+	"sendMessage":         handleSendMessage,
+	"createQueue":         handleCreateQueue,
+	"createTopic":         handleCreateTopic,
+	"createSubscription":  handleCreateSubscription,
+	"deleteQueue":         handleDeleteQueue,
+	"deleteTopic":         handleDeleteTopic,
+	"deleteSubscription":  handleDeleteSubscription,
 }
 
 func handleHealth(_ json.RawMessage) (any, error) {

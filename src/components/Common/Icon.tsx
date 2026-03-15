@@ -180,6 +180,15 @@ function StarFilledPaths() {
   return <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" fill="currentColor" />;
 }
 
+function PlusPaths() {
+  return (
+    <>
+      <line x1="12" y1="5" x2="12" y2="19" />
+      <line x1="5" y1="12" x2="19" y2="12" />
+    </>
+  );
+}
+
 // ─── Icon map ─────────────────────────────────────────────────────────────────
 
 export type IconName =
@@ -202,7 +211,8 @@ export type IconName =
   | "send"
   | "loader"
   | "star"
-  | "starFilled";
+  | "starFilled"
+  | "plus";
 
 const PATHS: Record<IconName, () => JSX.Element> = {
   queue: QueuePaths,
@@ -225,6 +235,7 @@ const PATHS: Record<IconName, () => JSX.Element> = {
   loader: LoaderPaths,
   star: StarPaths,
   starFilled: StarFilledPaths,
+  plus: PlusPaths,
 };
 
 // ─── Icon component ───────────────────────────────────────────────────────────

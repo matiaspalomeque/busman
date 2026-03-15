@@ -32,6 +32,12 @@ pub fn run() {
             get_entity_counts,
             write_json_file,
             send_message,
+            create_queue,
+            create_topic,
+            create_subscription,
+            delete_queue,
+            delete_topic,
+            delete_subscription,
             // Connection commands
             load_connections,
             save_connection,

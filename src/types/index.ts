@@ -130,7 +130,7 @@ export interface EventLogEntry {
   namespace: string;
   entity: string;
   entityType: "Queue" | "Subscription" | "Topic";
-  operation: "Browse" | "Send" | "Receive" | "Replay" | "Move";
+  operation: "Browse" | "Send" | "Receive" | "Replay" | "Move" | "Create" | "Delete";
   status: "running" | "success" | "error" | "stopped";
   errorMessage?: string;
 }

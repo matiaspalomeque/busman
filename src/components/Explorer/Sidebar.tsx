@@ -68,9 +68,10 @@ interface TreeItemProps {
   pinKey?: string;
   isPinned?: boolean;
   onTogglePin?: () => void;
+  onDelete?: () => void;
 }
 
-function TreeItem({ label, itemTitle, icon, isSelected, onClick, indent = false, counts, pinKey, isPinned = false, onTogglePin }: TreeItemProps) {
+function TreeItem({ label, itemTitle, icon, isSelected, onClick, indent = false, counts, pinKey, isPinned = false, onTogglePin, onDelete }: TreeItemProps) {
   const { t } = useTranslation();
   return (
     <div
@@ -87,7 +88,7 @@ function TreeItem({ label, itemTitle, icon, isSelected, onClick, indent = false,
         className={[
           "flex items-center gap-2 flex-1 min-w-0 text-left text-xs py-1",
           indent ? "pl-7" : "pl-4",
-          pinKey != null ? "pr-1" : "pr-2",
+          pinKey != null || onDelete != null ? "pr-1" : "pr-2",
           isSelected
             ? "text-azure-primary font-medium"
             : "text-azure-secondary dark:text-zinc-300",
@@ -101,6 +102,15 @@ function TreeItem({ label, itemTitle, icon, isSelected, onClick, indent = false,
         <span className="truncate min-w-0 flex-1">{label}</span>
         {counts != null && <CountBadge active={counts.active} dlq={counts.dlq} />}
       </button>
+      {onDelete != null && (
+        <button
+          onClick={(e) => { e.stopPropagation(); onDelete(); }}
+          title={t("explorer.sidebar.deleteTitle")}
+          className="shrink-0 p-0.5 rounded text-zinc-400 opacity-0 group-hover:opacity-100 hover:text-red-500 transition-opacity"
+        >
+          <Icon name="trash" size={11} />
+        </button>
+      )}
       {pinKey != null && (
         <button
           onClick={(e) => { e.stopPropagation(); onTogglePin?.(); }}
@@ -126,33 +136,43 @@ interface TopicNodeProps {
 }
 
 function TopicNode({ topic, subscriptions, subCounts }: TopicNodeProps) {
-  const { explorerSelection, setExplorerSubscription, pinnedEntities, togglePin } = useAppStore();
+  const { t } = useTranslation();
+  const { explorerSelection, setExplorerSubscription, pinnedEntities, togglePin, setDeleteEntityTarget } = useAppStore();
   const pinnedSet = useMemo(() => new Set(pinnedEntities), [pinnedEntities]);
   const [expanded, setExpanded] = useState(true);
 
   return (
     <div>
-      <button
-        onClick={() => setExpanded((e) => !e)}
-        title={topic}
-        className="flex items-center gap-1.5 w-full text-left text-xs py-1 pl-4 pr-2 rounded-sm text-azure-secondary dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 truncate"
-      >
-        <svg
-          width={11}
-          height={11}
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth={2.5}
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          className={`shrink-0 transition-transform ${expanded ? "rotate-90" : ""}`}
+      <div className="group flex items-center w-full rounded-sm hover:bg-zinc-100 dark:hover:bg-zinc-800">
+        <button
+          onClick={() => setExpanded((e) => !e)}
+          title={topic}
+          className="flex items-center gap-1.5 flex-1 min-w-0 text-left text-xs py-1 pl-4 pr-1 text-azure-secondary dark:text-zinc-300 truncate"
         >
-          <polyline points="9 18 15 12 9 6" />
-        </svg>
-        <Icon name="topic" size={13} className="text-zinc-400 dark:text-zinc-500 shrink-0" />
-        <span className="truncate">{topic}</span>
-      </button>
+          <svg
+            width={11}
+            height={11}
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={2.5}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className={`shrink-0 transition-transform ${expanded ? "rotate-90" : ""}`}
+          >
+            <polyline points="9 18 15 12 9 6" />
+          </svg>
+          <Icon name="topic" size={13} className="text-zinc-400 dark:text-zinc-500 shrink-0" />
+          <span className="truncate">{topic}</span>
+        </button>
+        <button
+          onClick={(e) => { e.stopPropagation(); setDeleteEntityTarget({ type: "topic", name: topic }); }}
+          title={t("explorer.sidebar.deleteTitle")}
+          className="shrink-0 p-0.5 mr-1 rounded text-zinc-400 opacity-0 group-hover:opacity-100 hover:text-red-500 transition-opacity"
+        >
+          <Icon name="trash" size={11} />
+        </button>
+      </div>
       {expanded &&
         subscriptions.map((sub) => {
           const isSelected =
@@ -172,6 +192,7 @@ function TopicNode({ topic, subscriptions, subCounts }: TopicNodeProps) {
               pinKey={pinKey}
               isPinned={pinnedSet.has(pinKey)}
               onTogglePin={() => togglePin(pinKey)}
+              onDelete={() => setDeleteEntityTarget({ type: "subscription", name: sub, topicName: topic })}
             />
           );
         })}
@@ -209,6 +230,8 @@ export function Sidebar() {
     setSidebarWidth,
     pinnedEntities,
     togglePin,
+    setIsCreateEntityModalOpen,
+    setDeleteEntityTarget,
   } = useAppStore();
 
   const { widthRef, onPointerDown } = useResizable({
@@ -315,9 +338,9 @@ export function Sidebar() {
         </div>
       </div>
 
-      {/* Filter input */}
-      <div className="px-2 py-2 border-b border-zinc-200 dark:border-zinc-700">
-        <div className="relative">
+      {/* Filter input + create button */}
+      <div className="px-2 py-2 border-b border-zinc-200 dark:border-zinc-700 flex items-center gap-1.5">
+        <div className="relative flex-1">
           <Icon
             name="search"
             size={12}
@@ -331,6 +354,15 @@ export function Sidebar() {
             className="w-full text-xs pl-6 pr-2 py-1.5 rounded border border-zinc-200 dark:border-zinc-600 bg-transparent focus:outline-none focus:ring-1 focus:ring-azure-primary placeholder-zinc-400 dark:placeholder-zinc-600 dark:text-zinc-200"
           />
         </div>
+        {entities && (
+          <button
+            onClick={() => setIsCreateEntityModalOpen(true)}
+            title={t("explorer.sidebar.createEntityTitle")}
+            className="shrink-0 p-1 rounded text-zinc-400 hover:text-azure-primary hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+          >
+            <Icon name="plus" size={14} />
+          </button>
+        )}
       </div>
 
       {/* Tree view */}
@@ -424,6 +456,7 @@ export function Sidebar() {
                   pinKey={pinKey}
                   isPinned={pinnedSet.has(pinKey)}
                   onTogglePin={() => togglePin(pinKey)}
+                  onDelete={() => setDeleteEntityTarget({ type: "queue", name: queue })}
                 />
               );
             })}

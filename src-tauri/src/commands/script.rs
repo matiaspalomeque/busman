@@ -410,6 +410,137 @@ pub async fn get_entity_counts(
     serde_json::from_value(value).map_err(|e| format!("Failed to parse entity counts: {e}"))
 }
 
+// ─── Entity management commands ──────────────────────────────────────────────
+
+#[derive(serde::Deserialize)]
+pub struct CreateQueueArgs {
+    pub env: HashMap<String, String>,
+    pub name: String,
+    #[serde(default)]
+    pub options: serde_json::Value,
+}
+
+#[tauri::command]
+pub async fn create_queue(app: AppHandle, args: CreateQueueArgs) -> Result<(), String> {
+    call_worker(
+        &app,
+        "createQueue",
+        json!({ "env": args.env, "name": args.name, "options": args.options }),
+        Some(Duration::from_secs(60)),
+    )
+    .await
+    .map(|_| ())
+}
+
+#[derive(serde::Deserialize)]
+pub struct CreateTopicArgs {
+    pub env: HashMap<String, String>,
+    pub name: String,
+    #[serde(default)]
+    pub options: serde_json::Value,
+}
+
+#[tauri::command]
+pub async fn create_topic(app: AppHandle, args: CreateTopicArgs) -> Result<(), String> {
+    call_worker(
+        &app,
+        "createTopic",
+        json!({ "env": args.env, "name": args.name, "options": args.options }),
+        Some(Duration::from_secs(60)),
+    )
+    .await
+    .map(|_| ())
+}
+
+#[derive(serde::Deserialize)]
+pub struct CreateSubscriptionArgs {
+    pub env: HashMap<String, String>,
+    #[serde(rename = "topicName")]
+    pub topic_name: String,
+    #[serde(rename = "subscriptionName")]
+    pub subscription_name: String,
+    #[serde(default)]
+    pub options: serde_json::Value,
+}
+
+#[tauri::command]
+pub async fn create_subscription(app: AppHandle, args: CreateSubscriptionArgs) -> Result<(), String> {
+    call_worker(
+        &app,
+        "createSubscription",
+        json!({
+            "env": args.env,
+            "topicName": args.topic_name,
+            "subscriptionName": args.subscription_name,
+            "options": args.options,
+        }),
+        Some(Duration::from_secs(60)),
+    )
+    .await
+    .map(|_| ())
+}
+
+#[derive(serde::Deserialize)]
+pub struct DeleteQueueArgs {
+    pub env: HashMap<String, String>,
+    pub name: String,
+}
+
+#[tauri::command]
+pub async fn delete_queue(app: AppHandle, args: DeleteQueueArgs) -> Result<(), String> {
+    call_worker(
+        &app,
+        "deleteQueue",
+        json!({ "env": args.env, "name": args.name }),
+        Some(Duration::from_secs(60)),
+    )
+    .await
+    .map(|_| ())
+}
+
+#[derive(serde::Deserialize)]
+pub struct DeleteTopicArgs {
+    pub env: HashMap<String, String>,
+    pub name: String,
+}
+
+#[tauri::command]
+pub async fn delete_topic(app: AppHandle, args: DeleteTopicArgs) -> Result<(), String> {
+    call_worker(
+        &app,
+        "deleteTopic",
+        json!({ "env": args.env, "name": args.name }),
+        Some(Duration::from_secs(60)),
+    )
+    .await
+    .map(|_| ())
+}
+
+#[derive(serde::Deserialize)]
+pub struct DeleteSubscriptionArgs {
+    pub env: HashMap<String, String>,
+    #[serde(rename = "topicName")]
+    pub topic_name: String,
+    #[serde(rename = "subscriptionName")]
+    pub subscription_name: String,
+}
+
+#[tauri::command]
+pub async fn delete_subscription(app: AppHandle, args: DeleteSubscriptionArgs) -> Result<(), String> {
+    call_worker(
+        &app,
+        "deleteSubscription",
+        json!({
+            "env": args.env,
+            "topicName": args.topic_name,
+            "subscriptionName": args.subscription_name,
+        }),
+        Some(Duration::from_secs(60)),
+    )
+    .await
+    .map(|_| ())
+}
+
 /// Write text content to a file path chosen via the frontend save dialog.
 /// The path must have a `.json` extension to limit the scope of writes.
 #[tauri::command]

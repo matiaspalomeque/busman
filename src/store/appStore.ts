@@ -65,6 +65,8 @@ interface AppState {
   isMoveModalOpen: boolean;
   isConnectionsModalOpen: boolean;
   isAboutModalOpen: boolean;
+  isCreateEntityModalOpen: boolean;
+  deleteEntityTarget: { type: "queue" | "topic" | "subscription"; name: string; topicName?: string } | null;
   sidebarCollapsed: { queues: boolean; topics: boolean; system: boolean };
 
   // Sidebar width (persisted)
@@ -119,6 +121,8 @@ interface AppState {
   setIsMoveModalOpen: (open: boolean) => void;
   setIsConnectionsModalOpen: (open: boolean) => void;
   setIsAboutModalOpen: (open: boolean) => void;
+  setIsCreateEntityModalOpen: (open: boolean) => void;
+  setDeleteEntityTarget: (target: { type: "queue" | "topic" | "subscription"; name: string; topicName?: string } | null) => void;
   toggleSidebarSection: (section: "queues" | "topics" | "system") => void;
   setSidebarWidth: (width: number) => void;
   setPropertiesPanelWidth: (width: number) => void;
@@ -181,6 +185,8 @@ export const useAppStore = create<AppState>()(
     isMoveModalOpen: false,
     isConnectionsModalOpen: false,
     isAboutModalOpen: false,
+    isCreateEntityModalOpen: false,
+    deleteEntityTarget: null,
     sidebarCollapsed: { queues: false, topics: false, system: false },
     sidebarWidth: (() => {
       try {
@@ -493,6 +499,16 @@ export const useAppStore = create<AppState>()(
     setIsAboutModalOpen: (open) =>
       set((state) => {
         state.isAboutModalOpen = open;
+      }),
+
+    setIsCreateEntityModalOpen: (open) =>
+      set((state) => {
+        state.isCreateEntityModalOpen = open;
+      }),
+
+    setDeleteEntityTarget: (target) =>
+      set((state) => {
+        state.deleteEntityTarget = target;
       }),
 
     toggleSidebarSection: (section) =>

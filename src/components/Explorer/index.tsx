@@ -7,10 +7,20 @@ import { EventLog } from "./EventLog";
 import { SendMessageModal } from "./SendMessageModal";
 import { MoveMessagesModal } from "./MoveMessagesModal";
 import { ConnectionsModal } from "./ConnectionsModal";
+import { CreateEntityModal } from "./CreateEntityModal";
+import { DeleteEntityDialog } from "./DeleteEntityDialog";
 import { AboutModal } from "../Common/AboutModal";
 
 export function Explorer() {
-  const { isSendModalOpen, isMoveModalOpen, isConnectionsModalOpen, isAboutModalOpen, setIsAboutModalOpen } = useAppStore();
+  const {
+    isSendModalOpen,
+    isMoveModalOpen,
+    isConnectionsModalOpen,
+    isAboutModalOpen,
+    setIsAboutModalOpen,
+    isCreateEntityModalOpen,
+    deleteEntityTarget,
+  } = useAppStore();
 
   return (
     <div className="fixed inset-0 flex flex-col">
@@ -28,6 +38,8 @@ export function Explorer() {
       {isMoveModalOpen && <MoveMessagesModal />}
       {isConnectionsModalOpen && <ConnectionsModal />}
       {isAboutModalOpen && <AboutModal onClose={() => setIsAboutModalOpen(false)} />}
+      {isCreateEntityModalOpen && <CreateEntityModal />}
+      {deleteEntityTarget != null && <DeleteEntityDialog />}
     </div>
   );
 }
