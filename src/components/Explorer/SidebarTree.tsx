@@ -161,11 +161,25 @@ export interface TreeItemProps {
   onDelete?: () => void;
   threshold?: number | null;
   onSetThreshold?: (value: number | null) => void;
+  onRefreshCount?: () => Promise<void>;
 }
 
-export function TreeItem({ label, itemTitle, icon, isSelected, onClick, indent = false, counts, pinKey, isPinned = false, onTogglePin, onDelete, threshold, onSetThreshold }: TreeItemProps) {
+export function TreeItem({ label, itemTitle, icon, isSelected, onClick, indent = false, counts, pinKey, isPinned = false, onTogglePin, onDelete, threshold, onSetThreshold, onRefreshCount }: TreeItemProps) {
   const { t } = useTranslation();
   const [showPopover, setShowPopover] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const handleRefreshCount = useCallback(async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!onRefreshCount) return;
+    setRefreshing(true);
+    try {
+      await onRefreshCount();
+    } finally {
+      setRefreshing(false);
+    }
+  }, [onRefreshCount]);
+
   return (
     <div
       className={[
@@ -195,6 +209,16 @@ export function TreeItem({ label, itemTitle, icon, isSelected, onClick, indent =
         <span className="truncate min-w-0 flex-1">{label}</span>
         {counts != null && <CountBadge active={counts.active} dlq={counts.dlq} threshold={threshold} />}
       </button>
+      {onRefreshCount != null && (
+        <button
+          onClick={handleRefreshCount}
+          title={t("explorer.sidebar.refreshCountTitle")}
+          disabled={refreshing}
+          className="shrink-0 p-0.5 rounded text-zinc-400 opacity-0 group-hover:opacity-100 hover:text-azure-primary transition-opacity disabled:opacity-40"
+        >
+          <Icon name="refresh" size={11} className={refreshing ? "animate-spin" : undefined} />
+        </button>
+      )}
       {onDelete != null && (
         <button
           onClick={(e) => { e.stopPropagation(); onDelete(); }}
@@ -251,9 +275,10 @@ interface TopicNodeProps {
   subCounts: Map<string, { active: number; dlq: number }>;
   dlqThresholds: Record<string, number>;
   onSetThreshold: (entityKey: string, value: number | null) => void;
+  onRefreshSubscriptionCount?: (topicName: string, subscriptionName: string) => Promise<void>;
 }
 
-export function TopicNode({ topic, subscriptions, subCounts, dlqThresholds, onSetThreshold }: TopicNodeProps) {
+export function TopicNode({ topic, subscriptions, subCounts, dlqThresholds, onSetThreshold, onRefreshSubscriptionCount }: TopicNodeProps) {
   const { t } = useTranslation();
   const { explorerSelection, setExplorerSubscription, pinnedEntities, togglePin, setDeleteEntityTarget } = useAppStore();
   const pinnedSet = useMemo(() => new Set(pinnedEntities), [pinnedEntities]);
@@ -314,6 +339,7 @@ export function TopicNode({ topic, subscriptions, subCounts, dlqThresholds, onSe
               onDelete={() => setDeleteEntityTarget({ type: "subscription", name: sub, topicName: topic })}
               threshold={dlqThresholds[thresholdKey] ?? null}
               onSetThreshold={(v) => onSetThreshold(thresholdKey, v)}
+              onRefreshCount={onRefreshSubscriptionCount ? () => onRefreshSubscriptionCount(topic, sub) : undefined}
             />
           );
         })}

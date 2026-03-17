@@ -121,5 +121,30 @@ export function useEntityList() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conn?.id]);
 
-  return { entities, entitiesLoading, entitiesError, refreshEntities: fetchEntities };
+  type RefreshTarget =
+    | { type: "queue"; name: string }
+    | { type: "subscription"; topicName: string; subscriptionName: string };
+
+  const refreshEntityCount = useCallback(async (target: RefreshTarget) => {
+    const connId = conn?.id;
+    if (!connId) return;
+
+    try {
+      if (target.type === "queue") {
+        const r = await safeInvoke("get_queue_count", QueueCountResultSchema, {
+          args: { connectionId: connId, queueName: target.name },
+        });
+        batchSetCounts([{ name: r.name, active: r.active, dlq: r.dlq }], []);
+      } else {
+        const r = await safeInvoke("get_subscription_count", SubscriptionCountResultSchema, {
+          args: { connectionId: connId, topicName: target.topicName, subscriptionName: target.subscriptionName },
+        });
+        batchSetCounts([], [{ topic: r.topic, subscription: r.subscription, active: r.active, dlq: r.dlq }]);
+      }
+    } catch (err) {
+      console.warn("[refreshEntityCount] failed:", err);
+    }
+  }, [conn?.id, batchSetCounts]);
+
+  return { entities, entitiesLoading, entitiesError, refreshEntities: fetchEntities, refreshEntityCount };
 }

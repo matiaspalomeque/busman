@@ -149,6 +149,7 @@
       "unpin": "Quitar de favoritos",
       "createEntityTitle": "Crear nueva entidad",
       "deleteTitle": "Eliminar",
+      "refreshCountTitle": "Actualizar conteo de mensajes",
       "dlqThresholdSet": "Establecer umbral de alerta DLQ",
       "dlqThresholdClear": "Limpiar umbral",
       "dlqThresholdSave": "Guardar",

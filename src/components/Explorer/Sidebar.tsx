@@ -40,7 +40,7 @@ function SidebarEnvironmentBadge({ connection }: { connection: Connection | null
 export function Sidebar() {
   const { t } = useTranslation();
   const conn = useAppStore(selectActiveConnection);
-  const { entities, entitiesLoading, entitiesError, refreshEntities } = useEntityList();
+  const { entities, entitiesLoading, entitiesError, refreshEntities, refreshEntityCount } = useEntityList();
   useDlqAlerts();
   const {
     explorerSelection,
@@ -242,6 +242,7 @@ export function Sidebar() {
                     onTogglePin={() => togglePin(item.key)}
                     threshold={dlqThresholds[thresholdKey] ?? null}
                     onSetThreshold={(v) => setDlqThreshold(thresholdKey, v)}
+                    onRefreshCount={() => refreshEntityCount({ type: "queue", name: item.name })}
                   />
                 );
               }
@@ -264,6 +265,7 @@ export function Sidebar() {
                   onTogglePin={() => togglePin(item.key)}
                   threshold={dlqThresholds[thresholdKey] ?? null}
                   onSetThreshold={(v) => setDlqThreshold(thresholdKey, v)}
+                  onRefreshCount={() => refreshEntityCount({ type: "subscription", topicName: item.topicName, subscriptionName: item.subName })}
                 />
               );
             })}
@@ -293,6 +295,7 @@ export function Sidebar() {
                   onDelete={() => setDeleteEntityTarget({ type: "queue", name: queue })}
                   threshold={dlqThresholds[thresholdKey] ?? null}
                   onSetThreshold={(v) => setDlqThreshold(thresholdKey, v)}
+                  onRefreshCount={() => refreshEntityCount({ type: "queue", name: queue })}
                 />
               );
             })}
@@ -306,7 +309,7 @@ export function Sidebar() {
             onToggle={() => toggleSidebarSection("topics")}
           >
             {Object.entries(filteredTopics).map(([topic, subs]) => (
-              <TopicNode key={topic} topic={topic} subscriptions={subs} subCounts={subCountMap} dlqThresholds={dlqThresholds} onSetThreshold={setDlqThreshold} />
+              <TopicNode key={topic} topic={topic} subscriptions={subs} subCounts={subCountMap} dlqThresholds={dlqThresholds} onSetThreshold={setDlqThreshold} onRefreshSubscriptionCount={(t, s) => refreshEntityCount({ type: "subscription", topicName: t, subscriptionName: s })} />
             ))}
           </TreeSection>
         )}

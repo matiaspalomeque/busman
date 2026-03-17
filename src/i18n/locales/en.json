@@ -149,6 +149,7 @@
       "unpin": "Unpin",
       "createEntityTitle": "Create new entity",
       "deleteTitle": "Delete",
+      "refreshCountTitle": "Refresh message count",
       "dlqThresholdSet": "Set DLQ alert threshold",
       "dlqThresholdClear": "Clear threshold",
       "dlqThresholdSave": "Save",
