@@ -88,23 +88,6 @@ export interface PeekResult {
   savedAt: string;
 }
 
-export interface QueueCountResult {
-  name: string;
-  active: number;
-  dlq: number;
-}
-
-export interface SubscriptionCountResult {
-  topic: string;
-  subscription: string;
-  active: number;
-  dlq: number;
-}
-
-export interface EntityCountsResult {
-  queues: QueueCountResult[];
-  subscriptions: SubscriptionCountResult[];
-}
 
 export type ExplorerSelection =
   | {

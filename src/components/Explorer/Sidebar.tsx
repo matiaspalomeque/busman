@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import { useAppStore, selectActiveConnection } from "../../store/appStore";
+import { useAppStore, selectActiveConnection, SUBSCRIPTION_KEY_SEP } from "../../store/appStore";
 import { useEntityList } from "../../hooks/useEntityList";
 import { useDlqAlerts } from "../../hooks/useDlqAlerts";
 import { useResizable } from "../../hooks/useResizable";
@@ -55,7 +55,8 @@ export function Sidebar() {
     language,
     setLanguage,
     setIsAboutModalOpen,
-    entityCounts,
+    queueCounts,
+    subscriptionCounts,
     sidebarWidth,
     setSidebarWidth,
     pinnedEntities,
@@ -76,19 +77,14 @@ export function Sidebar() {
   });
 
   // Build lookup maps for O(1) access in render — memoized to avoid new references on every render
+  // subscriptionCounts uses "\0" separator internally; subCountMap converts to "/" for TopicNode/TreeItem
   const queueCountMap = useMemo(
-    () => new Map((entityCounts?.queues ?? []).map((q) => [q.name, { active: q.active, dlq: q.dlq }])),
-    [entityCounts]
+    () => new Map(Object.entries(queueCounts)),
+    [queueCounts]
   );
   const subCountMap = useMemo(
-    () =>
-      new Map(
-        (entityCounts?.subscriptions ?? []).map((s) => [
-          `${s.topic}/${s.subscription}`,
-          { active: s.active, dlq: s.dlq },
-        ])
-      ),
-    [entityCounts]
+    () => new Map(Object.entries(subscriptionCounts).map(([k, v]) => [k.replace(SUBSCRIPTION_KEY_SEP, "/"), v])),
+    [subscriptionCounts]
   );
 
   const pinnedSet = useMemo(() => new Set(pinnedEntities), [pinnedEntities]);

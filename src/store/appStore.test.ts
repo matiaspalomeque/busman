@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { useAppStore, selectActiveConnection } from "./appStore";
+import { useAppStore, selectActiveConnection, SUBSCRIPTION_KEY_SEP } from "./appStore";
 
 // Reset store to initial state before each test.
 beforeEach(() => {
@@ -167,6 +167,47 @@ describe("appStore", () => {
     });
   });
 
+  // ─── Entity counts ──────────────────────────────────────────────────
+
+  describe("entity counts", () => {
+    it("batchSetCounts stores queue counts by name", () => {
+      useAppStore.getState().batchSetCounts([{ name: "my-queue", active: 5, dlq: 2 }], []);
+      const { queueCounts } = useAppStore.getState();
+      expect(queueCounts["my-queue"]).toEqual({ active: 5, dlq: 2 });
+    });
+
+    it("batchSetCounts stores subscription counts with null-char separator", () => {
+      useAppStore.getState().batchSetCounts([], [{ topic: "my-topic", subscription: "my-sub", active: 3, dlq: 1 }]);
+      const { subscriptionCounts } = useAppStore.getState();
+      expect(subscriptionCounts[`my-topic${SUBSCRIPTION_KEY_SEP}my-sub`]).toEqual({ active: 3, dlq: 1 });
+    });
+
+    it("clearEntityCounts resets maps and loading counter", () => {
+      useAppStore.getState().batchSetCounts([{ name: "q", active: 1, dlq: 0 }], []);
+      useAppStore.getState().incrementCountsLoading();
+      useAppStore.getState().clearEntityCounts();
+      const state = useAppStore.getState();
+      expect(state.queueCounts).toEqual({});
+      expect(state.subscriptionCounts).toEqual({});
+      expect(state.entityCountsLoading).toBe(0);
+    });
+
+    it("incrementCountsLoading / decrementCountsLoading track in-flight requests", () => {
+      useAppStore.getState().incrementCountsLoading();
+      useAppStore.getState().incrementCountsLoading();
+      expect(useAppStore.getState().entityCountsLoading).toBe(2);
+      useAppStore.getState().decrementCountsLoading();
+      expect(useAppStore.getState().entityCountsLoading).toBe(1);
+      useAppStore.getState().decrementCountsLoading();
+      expect(useAppStore.getState().entityCountsLoading).toBe(0);
+    });
+
+    it("decrementCountsLoading does not go below 0", () => {
+      useAppStore.getState().decrementCountsLoading();
+      expect(useAppStore.getState().entityCountsLoading).toBe(0);
+    });
+  });
+
   // ─── Entity removal ────────────────────────────────────────────────
 
   describe("removeEntity", () => {
@@ -175,23 +216,40 @@ describe("appStore", () => {
         queues: ["q1", "q2"],
         topics: { t1: ["s1", "s2"], t2: ["s3"] },
       });
+      useAppStore.getState().batchSetCounts(
+        [{ name: "q1", active: 10, dlq: 0 }, { name: "q2", active: 5, dlq: 1 }],
+        [
+          { topic: "t1", subscription: "s1", active: 3, dlq: 0 },
+          { topic: "t1", subscription: "s2", active: 2, dlq: 0 },
+          { topic: "t2", subscription: "s3", active: 1, dlq: 0 },
+        ]
+      );
     });
 
-    it("removes a queue", () => {
+    it("removes a queue and clears its count", () => {
       useAppStore.getState().removeEntity("queue", "q1");
-      expect(useAppStore.getState().entities?.queues).toEqual(["q2"]);
+      const state = useAppStore.getState();
+      expect(state.entities?.queues).toEqual(["q2"]);
+      expect(state.queueCounts).not.toHaveProperty("q1");
+      expect(state.queueCounts).toHaveProperty("q2");
     });
 
-    it("removes a topic and its subscriptions", () => {
+    it("removes a topic and clears all its subscription counts", () => {
       useAppStore.getState().removeEntity("topic", "t1");
-      const topics = useAppStore.getState().entities?.topics;
-      expect(topics).not.toHaveProperty("t1");
-      expect(topics).toHaveProperty("t2");
+      const state = useAppStore.getState();
+      expect(state.entities?.topics).not.toHaveProperty("t1");
+      expect(state.entities?.topics).toHaveProperty("t2");
+      expect(state.subscriptionCounts).not.toHaveProperty(`t1${SUBSCRIPTION_KEY_SEP}s1`);
+      expect(state.subscriptionCounts).not.toHaveProperty(`t1${SUBSCRIPTION_KEY_SEP}s2`);
+      expect(state.subscriptionCounts).toHaveProperty(`t2${SUBSCRIPTION_KEY_SEP}s3`);
     });
 
-    it("removes a subscription from a topic", () => {
+    it("removes a subscription from a topic and clears its count", () => {
       useAppStore.getState().removeEntity("subscription", "s1", "t1");
-      expect(useAppStore.getState().entities?.topics.t1).toEqual(["s2"]);
+      const state = useAppStore.getState();
+      expect(state.entities?.topics.t1).toEqual(["s2"]);
+      expect(state.subscriptionCounts).not.toHaveProperty(`t1${SUBSCRIPTION_KEY_SEP}s1`);
+      expect(state.subscriptionCounts).toHaveProperty(`t1${SUBSCRIPTION_KEY_SEP}s2`);
     });
   });
 

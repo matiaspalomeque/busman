@@ -73,20 +73,6 @@ pub async fn list_entities(
 // ─── Entity counts ──────────────────────────────────────────────────────────
 
 #[derive(serde::Serialize, serde::Deserialize)]
-pub struct SubscriptionRef {
-    pub topic: String,
-    pub name: String,
-}
-
-#[derive(serde::Deserialize)]
-pub struct GetEntityCountsArgs {
-    #[serde(rename = "connectionId")]
-    pub connection_id: String,
-    pub queues: Vec<String>,
-    pub subscriptions: Vec<SubscriptionRef>,
-}
-
-#[derive(serde::Serialize, serde::Deserialize)]
 pub struct QueueCountResult {
     pub name: String,
     pub active: i64,
@@ -101,32 +87,60 @@ pub struct SubscriptionCountResult {
     pub dlq: i64,
 }
 
-#[derive(serde::Serialize, serde::Deserialize)]
-pub struct EntityCountsResult {
-    pub queues: Vec<QueueCountResult>,
-    pub subscriptions: Vec<SubscriptionCountResult>,
+#[derive(serde::Deserialize)]
+pub struct GetQueueCountArgs {
+    #[serde(rename = "connectionId")]
+    pub connection_id: String,
+    #[serde(rename = "queueName")]
+    pub queue_name: String,
 }
 
 #[tauri::command]
-pub async fn get_entity_counts(
+pub async fn get_queue_count(
     app: AppHandle,
-    args: GetEntityCountsArgs,
-) -> Result<EntityCountsResult, String> {
+    args: GetQueueCountArgs,
+) -> Result<QueueCountResult, String> {
     let env = store::resolve_connection_env(&app, &args.connection_id)?;
     let value = call_worker(
         &app,
-        "getEntityCounts",
-        serde_json::json!({
-            "env": env,
-            "queues": args.queues,
-            "subscriptions": args.subscriptions,
-        }),
-        Some(Duration::from_secs(60)),
+        "getQueueCount",
+        serde_json::json!({ "env": env, "queueName": args.queue_name }),
+        Some(Duration::from_secs(30)),
     )
     .await
     .map_err(|e| redact_secrets(&e))?;
+    serde_json::from_value(value).map_err(|e| format!("Failed to parse queue count: {e}"))
+}
 
-    serde_json::from_value(value).map_err(|e| format!("Failed to parse entity counts: {e}"))
+#[derive(serde::Deserialize)]
+pub struct GetSubscriptionCountArgs {
+    #[serde(rename = "connectionId")]
+    pub connection_id: String,
+    #[serde(rename = "topicName")]
+    pub topic_name: String,
+    #[serde(rename = "subscriptionName")]
+    pub subscription_name: String,
+}
+
+#[tauri::command]
+pub async fn get_subscription_count(
+    app: AppHandle,
+    args: GetSubscriptionCountArgs,
+) -> Result<SubscriptionCountResult, String> {
+    let env = store::resolve_connection_env(&app, &args.connection_id)?;
+    let value = call_worker(
+        &app,
+        "getSubscriptionCount",
+        serde_json::json!({
+            "env": env,
+            "topicName": args.topic_name,
+            "subscriptionName": args.subscription_name,
+        }),
+        Some(Duration::from_secs(30)),
+    )
+    .await
+    .map_err(|e| redact_secrets(&e))?;
+    serde_json::from_value(value).map_err(|e| format!("Failed to parse subscription count: {e}"))
 }
 
 // ─── Entity CRUD ────────────────────────────────────────────────────────────

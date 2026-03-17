@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { useAppStore } from "../store/appStore";
+import { useAppStore, SUBSCRIPTION_KEY_SEP } from "../store/appStore";
 
 /**
  * Monitors DLQ counts against configured thresholds and sends desktop
@@ -8,7 +8,8 @@ import { useAppStore } from "../store/appStore";
  * change). The hook is side-effect only — it returns nothing.
  */
 export function useDlqAlerts() {
-  const entityCounts = useAppStore((s) => s.entityCounts);
+  const queueCounts = useAppStore((s) => s.queueCounts);
+  const subscriptionCounts = useAppStore((s) => s.subscriptionCounts);
   const dlqThresholds = useAppStore((s) => s.dlqThresholds);
   const dlqNotificationsEnabled = useAppStore((s) => s.dlqNotificationsEnabled);
   const activeConnectionId = useAppStore((s) => s.activeConnectionId);
@@ -21,28 +22,30 @@ export function useDlqAlerts() {
 
   // Check thresholds when counts update
   useEffect(() => {
-    if (!entityCounts || !dlqNotificationsEnabled || Object.keys(dlqThresholds).length === 0) return;
+    if (!dlqNotificationsEnabled || Object.keys(dlqThresholds).length === 0) return;
 
     const breaches: { key: string; name: string; dlq: number; threshold: number }[] = [];
 
-    for (const q of entityCounts.queues) {
-      const key = `queue:${q.name}`;
+    for (const [name, counts] of Object.entries(queueCounts)) {
+      const key = `queue:${name}`;
       const threshold = dlqThresholds[key];
-      if (threshold != null && q.dlq > threshold && !notifiedRef.current.has(key)) {
-        breaches.push({ key, name: q.name, dlq: q.dlq, threshold });
+      if (threshold != null && counts.dlq > threshold && !notifiedRef.current.has(key)) {
+        breaches.push({ key, name, dlq: counts.dlq, threshold });
       }
-      if (threshold != null && q.dlq <= threshold) {
+      if (threshold != null && counts.dlq <= threshold) {
         notifiedRef.current.delete(key);
       }
     }
 
-    for (const s of entityCounts.subscriptions) {
-      const key = `subscription:${s.topic}\0${s.subscription}`;
+    // subscriptionCounts key is "topic\0subscription"; dlqThresholds key is "subscription:topic\0subscription"
+    for (const [subKey, counts] of Object.entries(subscriptionCounts)) {
+      const key = `subscription:${subKey}`;
       const threshold = dlqThresholds[key];
-      if (threshold != null && s.dlq > threshold && !notifiedRef.current.has(key)) {
-        breaches.push({ key, name: `${s.topic}/${s.subscription}`, dlq: s.dlq, threshold });
+      const displayName = subKey.replace(SUBSCRIPTION_KEY_SEP, "/");
+      if (threshold != null && counts.dlq > threshold && !notifiedRef.current.has(key)) {
+        breaches.push({ key, name: displayName, dlq: counts.dlq, threshold });
       }
-      if (threshold != null && s.dlq <= threshold) {
+      if (threshold != null && counts.dlq <= threshold) {
         notifiedRef.current.delete(key);
       }
     }
@@ -73,5 +76,5 @@ export function useDlqAlerts() {
         // Notification plugin not available — silently skip
       }
     })();
-  }, [entityCounts, dlqThresholds, dlqNotificationsEnabled]);
+  }, [queueCounts, subscriptionCounts, dlqThresholds, dlqNotificationsEnabled]);
 }

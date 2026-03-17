@@ -44,10 +44,6 @@ export const SubscriptionCountResultSchema = z.object({
   dlq: z.number(),
 });
 
-export const EntityCountsResultSchema = z.object({
-  queues: z.array(QueueCountResultSchema),
-  subscriptions: z.array(SubscriptionCountResultSchema),
-});
 
 export const ConnectionsConfigSchema = z.object({
   connections: z.array(

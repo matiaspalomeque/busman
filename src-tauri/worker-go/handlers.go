@@ -194,18 +194,7 @@ func handleListEntities(raw json.RawMessage) (any, error) {
 	return map[string]any{"queues": queues, "topics": topics}, nil
 }
 
-// ─── 2b. getEntityCounts ─────────────────────────────────────────────────────
-
-type subscriptionRef struct {
-	Topic string `json:"topic"`
-	Name  string `json:"name"`
-}
-
-type entityCountsParams struct {
-	Env           map[string]string `json:"env"`
-	Queues        []string          `json:"queues"`
-	Subscriptions []subscriptionRef `json:"subscriptions"`
-}
+// ─── 2b. getQueueCount / getSubscriptionCount ────────────────────────────────
 
 type queueCountResult struct {
 	Name   string `json:"name"`
@@ -220,13 +209,21 @@ type subscriptionCountResult struct {
 	DLQ          int64  `json:"dlq"`
 }
 
-func handleGetEntityCounts(raw json.RawMessage) (any, error) {
-	var p entityCountsParams
+type queueCountParams struct {
+	Env       map[string]string `json:"env"`
+	QueueName string            `json:"queueName"`
+}
+
+func handleGetQueueCount(raw json.RawMessage) (any, error) {
+	var p queueCountParams
 	if err := json.Unmarshal(raw, &p); err != nil {
 		return nil, fmt.Errorf("invalid params: %w", err)
 	}
 	cs, err := requireConnectionString(p.Env)
 	if err != nil {
+		return nil, err
+	}
+	if err := validateEntityName(p.QueueName, "Queue"); err != nil {
 		return nil, err
 	}
 
@@ -235,67 +232,47 @@ func handleGetEntityCounts(raw json.RawMessage) (any, error) {
 		return nil, fmt.Errorf("admin client error: %w", err)
 	}
 
-	ctx := context.Background()
-	const concurrency = 8
+	var active, dlq int64
+	if resp, err := adminClient.GetQueueRuntimeProperties(context.Background(), p.QueueName, nil); err == nil && resp != nil {
+		active = int64(resp.ActiveMessageCount)
+		dlq = int64(resp.DeadLetterMessageCount)
+	}
+	return queueCountResult{Name: p.QueueName, Active: active, DLQ: dlq}, nil
+}
 
-	sem := make(chan struct{}, concurrency)
-	var mu sync.Mutex
-	var wg sync.WaitGroup
+type subscriptionCountParams struct {
+	Env              map[string]string `json:"env"`
+	TopicName        string            `json:"topicName"`
+	SubscriptionName string            `json:"subscriptionName"`
+}
 
-	queueResults := make([]queueCountResult, 0, len(p.Queues))
-	subResults := make([]subscriptionCountResult, 0, len(p.Subscriptions))
-
-	for _, qName := range p.Queues {
-		if err := validateEntityName(qName, "Queue"); err != nil {
-			return nil, err
-		}
-		wg.Add(1)
-		go func(name string) {
-			defer wg.Done()
-			sem <- struct{}{}
-			defer func() { <-sem }()
-
-			var active, dlq int64
-			if resp, err := adminClient.GetQueueRuntimeProperties(ctx, name, nil); err == nil && resp != nil {
-				active = int64(resp.ActiveMessageCount)
-				dlq = int64(resp.DeadLetterMessageCount)
-			}
-			mu.Lock()
-			queueResults = append(queueResults, queueCountResult{Name: name, Active: active, DLQ: dlq})
-			mu.Unlock()
-		}(qName)
+func handleGetSubscriptionCount(raw json.RawMessage) (any, error) {
+	var p subscriptionCountParams
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return nil, fmt.Errorf("invalid params: %w", err)
+	}
+	cs, err := requireConnectionString(p.Env)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateEntityName(p.TopicName, "Topic"); err != nil {
+		return nil, err
+	}
+	if err := validateEntityName(p.SubscriptionName, "Subscription"); err != nil {
+		return nil, err
 	}
 
-	for _, sub := range p.Subscriptions {
-		if err := validateEntityName(sub.Topic, "Topic"); err != nil {
-			return nil, err
-		}
-		if err := validateEntityName(sub.Name, "Subscription"); err != nil {
-			return nil, err
-		}
-		wg.Add(1)
-		go func(topic, name string) {
-			defer wg.Done()
-			sem <- struct{}{}
-			defer func() { <-sem }()
-
-			var active, dlq int64
-			if resp, err := adminClient.GetSubscriptionRuntimeProperties(ctx, topic, name, nil); err == nil && resp != nil {
-				active = int64(resp.ActiveMessageCount)
-				dlq = int64(resp.DeadLetterMessageCount)
-			}
-			mu.Lock()
-			subResults = append(subResults, subscriptionCountResult{Topic: topic, Subscription: name, Active: active, DLQ: dlq})
-			mu.Unlock()
-		}(sub.Topic, sub.Name)
+	adminClient, err := admin.NewClientFromConnectionString(cs, nil)
+	if err != nil {
+		return nil, fmt.Errorf("admin client error: %w", err)
 	}
 
-	wg.Wait()
-
-	return map[string]any{
-		"queues":        queueResults,
-		"subscriptions": subResults,
-	}, nil
+	var active, dlq int64
+	if resp, err := adminClient.GetSubscriptionRuntimeProperties(context.Background(), p.TopicName, p.SubscriptionName, nil); err == nil && resp != nil {
+		active = int64(resp.ActiveMessageCount)
+		dlq = int64(resp.DeadLetterMessageCount)
+	}
+	return subscriptionCountResult{Topic: p.TopicName, Subscription: p.SubscriptionName, Active: active, DLQ: dlq}, nil
 }
 
 // ─── 3. emptyMessages ────────────────────────────────────────────────────────

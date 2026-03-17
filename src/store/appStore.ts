@@ -2,7 +2,6 @@ import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
 import type {
   Connection,
-  EntityCountsResult,
   EventLogEntry,
   ExplorerSelection,
   NavPage,
@@ -11,6 +10,9 @@ import type {
   ProgressUpdate,
   SendMessageDraft,
 } from "../types";
+
+/** Internal key separator for subscription store entries: "topic\0subscription". */
+export const SUBSCRIPTION_KEY_SEP = "\0";
 
 interface AppState {
   // Connections
@@ -41,9 +43,10 @@ interface AppState {
   entitiesLoading: boolean;
   entitiesError: string | null;
 
-  // Message counts per entity (loaded in background after entity list)
-  entityCounts: EntityCountsResult | null;
-  entityCountsLoading: boolean;
+  // Message counts per entity (loaded progressively in parallel after entity list)
+  queueCounts: Record<string, { active: number; dlq: number }>;
+  subscriptionCounts: Record<string, { active: number; dlq: number }>;
+  entityCountsLoading: number; // number of in-flight per-entity count requests
 
   // Send message draft (for Resend from Peek)
   sendDraft: SendMessageDraft | null;
@@ -107,8 +110,13 @@ interface AppState {
   setEntities: (entities: { queues: string[]; topics: Record<string, string[]> } | null) => void;
   setEntitiesLoading: (loading: boolean) => void;
   setEntitiesError: (error: string | null) => void;
-  setEntityCounts: (counts: EntityCountsResult | null) => void;
-  setEntityCountsLoading: (loading: boolean) => void;
+  batchSetCounts: (
+    queues: { name: string; active: number; dlq: number }[],
+    subscriptions: { topic: string; subscription: string; active: number; dlq: number }[]
+  ) => void;
+  clearEntityCounts: () => void;
+  incrementCountsLoading: (n?: number) => void;
+  decrementCountsLoading: () => void;
   removeEntity: (type: "queue" | "topic" | "subscription", name: string, topicName?: string) => void;
   setSendDraft: (draft: SendMessageDraft | null) => void;
   setTreeFilter: (filter: string) => void;
@@ -191,8 +199,9 @@ export const useAppStore = create<AppState>()(
     entities: null,
     entitiesLoading: false,
     entitiesError: null,
-    entityCounts: null,
-    entityCountsLoading: false,
+    queueCounts: {},
+    subscriptionCounts: {},
+    entityCountsLoading: 0,
     sendDraft: null,
     lastBrowseError: null,
     treeFilter: "",
@@ -259,8 +268,9 @@ export const useAppStore = create<AppState>()(
         // Clear cached entities when connection changes
         state.entities = null;
         state.entitiesError = null;
-        state.entityCounts = null;
-        state.entityCountsLoading = false;
+        state.queueCounts = {};
+        state.subscriptionCounts = {};
+        state.entityCountsLoading = 0;
         state.explorerSelection = {
           kind: "none",
           queueName: null,
@@ -431,14 +441,31 @@ export const useAppStore = create<AppState>()(
         state.entitiesError = error;
       }),
 
-    setEntityCounts: (counts) =>
+    batchSetCounts: (queues, subscriptions) =>
       set((state) => {
-        state.entityCounts = counts;
+        for (const q of queues) {
+          state.queueCounts[q.name] = { active: q.active, dlq: q.dlq };
+        }
+        for (const s of subscriptions) {
+          state.subscriptionCounts[`${s.topic}${SUBSCRIPTION_KEY_SEP}${s.subscription}`] = { active: s.active, dlq: s.dlq };
+        }
       }),
 
-    setEntityCountsLoading: (loading) =>
+    clearEntityCounts: () =>
       set((state) => {
-        state.entityCountsLoading = loading;
+        state.queueCounts = {};
+        state.subscriptionCounts = {};
+        state.entityCountsLoading = 0;
+      }),
+
+    incrementCountsLoading: (n = 1) =>
+      set((state) => {
+        state.entityCountsLoading += n;
+      }),
+
+    decrementCountsLoading: () =>
+      set((state) => {
+        state.entityCountsLoading = Math.max(0, state.entityCountsLoading - 1);
       }),
 
     removeEntity: (type, name, topicName) =>
@@ -449,20 +476,14 @@ export const useAppStore = create<AppState>()(
             ...state.entities,
             queues: state.entities.queues.filter((q) => q !== name),
           };
-          if (state.entityCounts) {
-            state.entityCounts = {
-              ...state.entityCounts,
-              queues: state.entityCounts.queues.filter((q) => q.name !== name),
-            };
-          }
+          delete state.queueCounts[name];
         } else if (type === "topic") {
           const { [name]: _, ...remainingTopics } = state.entities.topics;
           state.entities = { ...state.entities, topics: remainingTopics };
-          if (state.entityCounts) {
-            state.entityCounts = {
-              ...state.entityCounts,
-              subscriptions: state.entityCounts.subscriptions.filter((s) => s.topic !== name),
-            };
+          for (const key of Object.keys(state.subscriptionCounts)) {
+            if (key.startsWith(`${name}${SUBSCRIPTION_KEY_SEP}`)) {
+              delete state.subscriptionCounts[key];
+            }
           }
         } else if (type === "subscription" && topicName) {
           const subs = state.entities.topics[topicName];
@@ -475,14 +496,7 @@ export const useAppStore = create<AppState>()(
               },
             };
           }
-          if (state.entityCounts) {
-            state.entityCounts = {
-              ...state.entityCounts,
-              subscriptions: state.entityCounts.subscriptions.filter(
-                (s) => !(s.topic === topicName && s.subscription === name)
-              ),
-            };
-          }
+          delete state.subscriptionCounts[`${topicName}${SUBSCRIPTION_KEY_SEP}${name}`];
         }
       }),
 

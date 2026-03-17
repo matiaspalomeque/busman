@@ -112,7 +112,8 @@ type handlerFn func(params json.RawMessage) (any, error)
 var handlers = map[string]handlerFn{
 	"health":              handleHealth,
 	"listEntities":        handleListEntities,
-	"getEntityCounts":     handleGetEntityCounts,
+	"getQueueCount":       handleGetQueueCount,
+	"getSubscriptionCount": handleGetSubscriptionCount,
 	"emptyMessages":       handleEmptyMessages,
 	"moveMessages":        handleMoveMessages,
 	"searchMessages":      handleSearchMessages,

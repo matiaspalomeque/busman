@@ -2,7 +2,8 @@ import { describe, it, expect } from "vitest";
 import {
   PeekResultSchema,
   ListEntitiesResultSchema,
-  EntityCountsResultSchema,
+  QueueCountResultSchema,
+  SubscriptionCountResultSchema,
   ConnectionsConfigSchema,
 } from "./ipc";
 
@@ -21,21 +22,26 @@ describe("IPC schemas", () => {
     });
   });
 
-  describe("EntityCountsResultSchema", () => {
-    it("accepts valid counts", () => {
-      const data = {
-        queues: [{ name: "q1", active: 10, dlq: 2 }],
-        subscriptions: [{ topic: "t1", subscription: "s1", active: 5, dlq: 0 }],
-      };
-      expect(EntityCountsResultSchema.parse(data)).toEqual(data);
+  describe("QueueCountResultSchema", () => {
+    it("accepts valid queue count", () => {
+      const data = { name: "q1", active: 10, dlq: 2 };
+      expect(QueueCountResultSchema.parse(data)).toEqual(data);
     });
 
     it("rejects non-numeric counts", () => {
+      expect(() => QueueCountResultSchema.parse({ name: "q1", active: "ten", dlq: 0 })).toThrow();
+    });
+  });
+
+  describe("SubscriptionCountResultSchema", () => {
+    it("accepts valid subscription count", () => {
+      const data = { topic: "t1", subscription: "s1", active: 5, dlq: 0 };
+      expect(SubscriptionCountResultSchema.parse(data)).toEqual(data);
+    });
+
+    it("rejects missing subscription field", () => {
       expect(() =>
-        EntityCountsResultSchema.parse({
-          queues: [{ name: "q1", active: "ten", dlq: 0 }],
-          subscriptions: [],
-        })
+        SubscriptionCountResultSchema.parse({ topic: "t1", active: 5, dlq: 0 })
       ).toThrow();
     });
   });
