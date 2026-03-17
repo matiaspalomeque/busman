@@ -41,6 +41,9 @@ export function useConnections() {
   const deleteConnection = useCallback(
     async (id: string) => {
       const config = await invoke<ConnectionsConfig>("delete_connection", { id });
+      // Clean up per-connection localStorage keys to prevent stale data accumulation.
+      try { localStorage.removeItem(`pins:${id}`); } catch {}
+      try { localStorage.removeItem(`dlqThresholds:${id}`); } catch {}
       applyConfig(config);
     },
     [applyConfig]

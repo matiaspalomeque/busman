@@ -1,8 +1,9 @@
 mod commands;
+pub mod error;
 mod models;
 mod store;
 
-use commands::{connections::*, script::*};
+use commands::{connections::*, entities::*, files::*, operations::*};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {

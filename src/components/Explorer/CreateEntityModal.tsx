@@ -38,13 +38,14 @@ export function CreateEntityModal() {
 
   const close = () => setIsCreateEntityModalOpen(false);
 
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") close();
     };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  });
+  }, []);
 
   const validate = (): string | null => {
     if (!name.trim()) return t("explorer.entityManagement.nameRequired");
@@ -97,12 +98,12 @@ export function CreateEntityModal() {
       }
 
       if (entityType === "queue") {
-        await invoke("create_queue", { args: { env: { SERVICE_BUS_CONNECTION_STRING: conn.connectionString, ...conn.env }, name: name.trim(), options } });
+        await invoke("create_queue", { args: { connectionId: conn.id, name: name.trim(), options } });
       } else if (entityType === "topic") {
-        await invoke("create_topic", { args: { env: { SERVICE_BUS_CONNECTION_STRING: conn.connectionString, ...conn.env }, name: name.trim(), options } });
+        await invoke("create_topic", { args: { connectionId: conn.id, name: name.trim(), options } });
       } else {
         await invoke("create_subscription", {
-          args: { env: { SERVICE_BUS_CONNECTION_STRING: conn.connectionString, ...conn.env }, topicName, subscriptionName: name.trim(), options },
+          args: { connectionId: conn.id, topicName, subscriptionName: name.trim(), options },
         });
       }
 

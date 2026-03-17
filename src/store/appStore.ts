@@ -140,6 +140,18 @@ interface AppState {
   setDlqNotificationsEnabled: (enabled: boolean) => void;
 }
 
+/** Resets all entity-specific grid/peek state. Used when switching connection, queue, or subscription. */
+function resetGridState(state: AppState): void {
+  state.peekMessages = [];
+  state.peekFilename = null;
+  state.lastPeekNormalMaxSeqNum = null;
+  state.lastPeekDlqMaxSeqNum = null;
+  state.selectedMessage = null;
+  state.gridFilters = { messageId: "", deadLetterReason: "", deadLetterErrorDescription: "", body: "" };
+  state.gridPage = 1;
+  state.lastBrowseError = null;
+}
+
 function computeMaxSeqNums(messages: PeekedMessage[]): { normal: number | null; dlq: number | null } {
   let normal: number | null = null;
   let dlq: number | null = null;
@@ -255,15 +267,7 @@ export const useAppStore = create<AppState>()(
           topicName: null,
           subscriptionName: null,
         };
-        // Clear entity-specific grid state
-        state.peekMessages = [];
-        state.peekFilename = null;
-        state.lastPeekNormalMaxSeqNum = null;
-        state.lastPeekDlqMaxSeqNum = null;
-        state.selectedMessage = null;
-        state.gridFilters = { messageId: "", deadLetterReason: "", deadLetterErrorDescription: "", body: "" };
-        state.gridPage = 1;
-        state.lastBrowseError = null;
+        resetGridState(state);
         // Load pins for this connection from localStorage
         if (id !== null) {
           try {
@@ -316,15 +320,7 @@ export const useAppStore = create<AppState>()(
           topicName: null,
           subscriptionName: null,
         };
-        // Clear entity-specific grid state
-        state.peekMessages = [];
-        state.peekFilename = null;
-        state.lastPeekNormalMaxSeqNum = null;
-        state.lastPeekDlqMaxSeqNum = null;
-        state.selectedMessage = null;
-        state.gridFilters = { messageId: "", deadLetterReason: "", deadLetterErrorDescription: "", body: "" };
-        state.gridPage = 1;
-        state.lastBrowseError = null;
+        resetGridState(state);
       }),
 
     setExplorerSubscription: (topicName, subscriptionName) =>
@@ -342,15 +338,7 @@ export const useAppStore = create<AppState>()(
           topicName,
           subscriptionName,
         };
-        // Clear entity-specific grid state
-        state.peekMessages = [];
-        state.peekFilename = null;
-        state.lastPeekNormalMaxSeqNum = null;
-        state.lastPeekDlqMaxSeqNum = null;
-        state.selectedMessage = null;
-        state.gridFilters = { messageId: "", deadLetterReason: "", deadLetterErrorDescription: "", body: "" };
-        state.gridPage = 1;
-        state.lastBrowseError = null;
+        resetGridState(state);
       }),
 
     clearExplorerSelection: () =>

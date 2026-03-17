@@ -94,7 +94,7 @@ export function MoveMessagesModal() {
       sourceQueue: sourceQueue.trim(),
       destQueue: destQueue.trim(),
       mode,
-      env: { SERVICE_BUS_CONNECTION_STRING: conn.connectionString, ...conn.env },
+      connectionId: conn.id,
     });
 
     const ok = exitCode === 0;

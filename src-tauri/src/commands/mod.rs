@@ -1,3 +1,5 @@
 pub mod connections;
-pub mod script;
+pub mod entities;
+pub mod files;
+pub mod operations;
 pub(crate) mod worker;

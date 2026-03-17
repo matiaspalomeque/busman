@@ -18,6 +18,9 @@ var stdout = bufio.NewWriter(os.Stdout)
 // stdoutMu protects stdout from concurrent writes when goroutines emit events.
 var stdoutMu sync.Mutex
 
+// wg tracks in-flight handler goroutines so main() can wait for them before exiting.
+var wg sync.WaitGroup
+
 func writeLine(v any) {
 	data, err := json.Marshal(v)
 	if err != nil {
@@ -153,25 +156,33 @@ func dispatch(line string) {
 		return
 	}
 
-	result, err := handler(req.Params)
-	if err != nil {
-		sendError(req.ID, err.Error())
-		return
-	}
-	sendResponse(req.ID, result)
+	// Dispatch handler to a goroutine for concurrent execution.
+	// Each handler creates its own SDK clients and has no shared mutable state.
+	// stdout writes are protected by stdoutMu.
+	wg.Add(1)
+	go func(id string, fn handlerFn, params json.RawMessage) {
+		defer wg.Done()
+		result, err := fn(params)
+		if err != nil {
+			sendError(id, err.Error())
+			return
+		}
+		sendResponse(id, result)
+	}(req.ID, handler, req.Params)
 }
 
 // ─── Entry point ─────────────────────────────────────────────────────────────
 
 func main() {
 	scanner := bufio.NewScanner(os.Stdin)
-	// 10 MB line buffer — enough for very large message bodies.
-	scanner.Buffer(make([]byte, 10*1024*1024), 10*1024*1024)
+	// Start with 64 KB, grow up to 100 MB — aligned with the Rust-side MAX_LINE_BYTES guard.
+	scanner.Buffer(make([]byte, 64*1024), 100*1024*1024)
 	for scanner.Scan() {
 		dispatch(scanner.Text())
 	}
 	if err := scanner.Err(); err != nil {
 		fmt.Fprintf(os.Stderr, "stdin read error: %v\n", err)
-		os.Exit(1)
 	}
+	// Wait for in-flight handlers to finish before exiting.
+	wg.Wait()
 }

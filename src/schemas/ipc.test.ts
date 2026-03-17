@@ -1,0 +1,102 @@
+import { describe, it, expect } from "vitest";
+import {
+  PeekResultSchema,
+  ListEntitiesResultSchema,
+  EntityCountsResultSchema,
+  ConnectionsConfigSchema,
+} from "./ipc";
+
+describe("IPC schemas", () => {
+  describe("ListEntitiesResultSchema", () => {
+    it("accepts valid result", () => {
+      const data = {
+        queues: ["q1", "q2"],
+        topics: { t1: ["s1", "s2"], t2: [] },
+      };
+      expect(ListEntitiesResultSchema.parse(data)).toEqual(data);
+    });
+
+    it("rejects missing queues", () => {
+      expect(() => ListEntitiesResultSchema.parse({ topics: {} })).toThrow();
+    });
+  });
+
+  describe("EntityCountsResultSchema", () => {
+    it("accepts valid counts", () => {
+      const data = {
+        queues: [{ name: "q1", active: 10, dlq: 2 }],
+        subscriptions: [{ topic: "t1", subscription: "s1", active: 5, dlq: 0 }],
+      };
+      expect(EntityCountsResultSchema.parse(data)).toEqual(data);
+    });
+
+    it("rejects non-numeric counts", () => {
+      expect(() =>
+        EntityCountsResultSchema.parse({
+          queues: [{ name: "q1", active: "ten", dlq: 0 }],
+          subscriptions: [],
+        })
+      ).toThrow();
+    });
+  });
+
+  describe("PeekResultSchema", () => {
+    it("accepts valid peek result with messages", () => {
+      const data = {
+        messages: [
+          {
+            messageId: "msg-1",
+            body: { key: "value" },
+            subject: null,
+            contentType: "application/json",
+            correlationId: null,
+            partitionKey: null,
+            traceParent: null,
+            applicationProperties: null,
+            enqueuedTimeUtc: "2025-01-01T00:00:00Z",
+            expiresAtUtc: null,
+            _source: "Active",
+          },
+        ],
+        filename: "messages.json",
+        savedAt: "2025-01-01T00:00:00Z",
+      };
+      const result = PeekResultSchema.parse(data);
+      expect(result.messages).toHaveLength(1);
+      expect(result.filename).toBe("messages.json");
+    });
+
+    it("accepts empty messages array", () => {
+      const data = { messages: [], filename: "empty.json", savedAt: "2025-01-01" };
+      expect(PeekResultSchema.parse(data).messages).toEqual([]);
+    });
+  });
+
+  describe("ConnectionsConfigSchema", () => {
+    it("accepts valid config", () => {
+      const data = {
+        connections: [
+          {
+            id: "abc",
+            name: "Dev",
+            connectionString: "Endpoint=sb://...",
+            env: {},
+          },
+        ],
+        activeConnectionId: "abc",
+      };
+      expect(ConnectionsConfigSchema.parse(data).connections).toHaveLength(1);
+    });
+
+    it("defaults env to empty object", () => {
+      const data = {
+        connections: [
+          { id: "1", name: "X", connectionString: "cs" },
+        ],
+        activeConnectionId: null,
+      };
+      const result = ConnectionsConfigSchema.parse(data);
+      expect(result.connections[0].env).toEqual({});
+    });
+  });
+});

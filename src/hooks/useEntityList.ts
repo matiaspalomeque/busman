@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useRef } from "react";
-import { invoke } from "@tauri-apps/api/core";
 import { useAppStore, selectActiveConnection } from "../store/appStore";
-import type { EntityCountsResult } from "../types";
+import {
+  safeInvoke,
+  ListEntitiesResultSchema,
+  EntityCountsResultSchema,
+} from "../schemas/ipc";
+import type { z } from "zod";
 
-interface ListEntitiesResult {
-  queues: string[];
-  topics: Record<string, string[]>;
-}
+type ListEntitiesResult = z.infer<typeof ListEntitiesResultSchema>;
 
 export function useEntityList() {
   const conn = useAppStore(selectActiveConnection);
@@ -21,21 +22,20 @@ export function useEntityList() {
     setEntityCountsLoading,
   } = useAppStore();
 
-  // Tracks which connection ID is currently being fetched, or null if idle.
-  // Prevents duplicate fetches for the same connection while allowing a new
-  // connection to supersede an in-flight fetch.
   const fetchingConnRef = useRef<string | null>(null);
 
   const fetchCounts = useCallback(
-    async (result: ListEntitiesResult, env: Record<string, string>, connId: string) => {
+    async (result: ListEntitiesResult, connId: string) => {
       const subscriptions = Object.entries(result.topics).flatMap(([topic, subs]) =>
         subs.map((name) => ({ topic, name }))
       );
       setEntityCountsLoading(true);
       try {
-        const counts = await invoke<EntityCountsResult>("get_entity_counts", {
-          args: { env, queues: result.queues, subscriptions },
-        });
+        const counts = await safeInvoke(
+          "get_entity_counts",
+          EntityCountsResultSchema,
+          { args: { connectionId: connId, queues: result.queues, subscriptions } }
+        );
         if (selectActiveConnection(useAppStore.getState())?.id !== connId) return;
         setEntityCounts(counts);
       } catch {
@@ -57,16 +57,14 @@ export function useEntityList() {
     setEntitiesError(null);
     setEntityCounts(null);
     try {
-      const env = {
-        SERVICE_BUS_CONNECTION_STRING: conn.connectionString,
-        ...conn.env,
-      };
-      const result = await invoke<ListEntitiesResult>("list_entities", { env });
-      // Discard stale results if the active connection changed during the fetch
+      const result = await safeInvoke(
+        "list_entities",
+        ListEntitiesResultSchema,
+        { args: { connectionId: connId } }
+      );
       if (selectActiveConnection(useAppStore.getState())?.id !== connId) return;
       setEntities(result);
-      // Fire counts fetch in background — does not block or delay tree rendering
-      void fetchCounts(result, env, connId);
+      void fetchCounts(result, connId);
     } catch (err) {
       if (selectActiveConnection(useAppStore.getState())?.id !== connId) return;
       setEntitiesError(String(err));
@@ -78,13 +76,12 @@ export function useEntityList() {
     }
   }, [conn, setEntities, setEntitiesLoading, setEntitiesError, setEntityCounts, fetchCounts]);
 
-  // Auto-fetch when the active connection changes.
   useEffect(() => {
     if (conn) {
       void fetchEntities();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [conn?.id]); // intentionally re-runs only when the active connection changes
+  }, [conn?.id]);
 
   return { entities, entitiesLoading, entitiesError, refreshEntities: fetchEntities };
 }

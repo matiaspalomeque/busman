@@ -13,30 +13,38 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "build-sidecar": "bun run ./scripts/prepare-worker-sidecar.ts",
-    "bump-version": "bun run ./scripts/bump-version.ts"
+    "bump-version": "bun run ./scripts/bump-version.ts",
+    "test": "vitest run && cd src-tauri && cargo test && cd ../src-tauri/worker-go && go test ./...",
+    "test:frontend": "vitest run",
+    "test:rust": "cd src-tauri && cargo test",
+    "test:go": "cd src-tauri/worker-go && go test ./..."
   },
   "dependencies": {
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-dialog": "^2.6.0",
     "@tauri-apps/plugin-notification": "^2",
-    "@tauri-apps/plugin-shell": "^2",
     "@tauri-apps/plugin-updater": "^2",
     "i18next": "^25.8.13",
     "immer": "^10",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-i18next": "^16.5.4",
+    "zod": "^4.3.6",
     "zustand": "^5"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
     "@types/react": "^18.3.1",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.1",
     "autoprefixer": "^10.4.20",
+    "jsdom": "^29.0.0",
     "postcss": "^8.4.47",
     "tailwindcss": "^3.4.14",
     "typescript": "^5.6.2",
-    "vite": "^6.0.3"
+    "vite": "^6.0.3",
+    "vitest": "^4.1.0"
   }
 }

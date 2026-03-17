@@ -119,7 +119,7 @@ export function SendMessageModal() {
       await invoke("send_message", {
         args: {
           entityName: entityName.trim(),
-          env: { SERVICE_BUS_CONNECTION_STRING: conn.connectionString, ...conn.env },
+          connectionId: conn.id,
           message,
         },
       });

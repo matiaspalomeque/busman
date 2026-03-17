@@ -1,4 +1,6 @@
+use crate::error::BusmanError;
 use crate::models::ConnectionsConfig;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use tauri::Manager;
 
@@ -40,4 +42,26 @@ pub fn save(app: &tauri::AppHandle, config: &ConnectionsConfig) -> Result<(), St
     }
 
     Ok(())
+}
+
+/// Resolves the environment variables for a saved connection.
+/// Builds a HashMap with `SERVICE_BUS_CONNECTION_STRING` set to the connection's
+/// stored credential, merged with any user-defined custom env vars.
+/// This keeps connection strings on the Rust side — the frontend only sends an ID.
+pub fn resolve_connection_env(
+    app: &tauri::AppHandle,
+    connection_id: &str,
+) -> Result<HashMap<String, String>, String> {
+    let config = load(app)?;
+    let conn = config
+        .connections
+        .iter()
+        .find(|c| c.id == connection_id)
+        .ok_or_else(|| BusmanError::NotFound(format!("Connection not found: {connection_id}")))?;
+    let mut env = conn.env.clone();
+    env.insert(
+        "SERVICE_BUS_CONNECTION_STRING".to_string(),
+        conn.connection_string.clone(),
+    );
+    Ok(env)
 }

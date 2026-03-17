@@ -80,9 +80,9 @@ export function DeleteEntityDialog() {
 
     try {
       if (type === "queue") {
-        await invoke("delete_queue", { args: { env: { SERVICE_BUS_CONNECTION_STRING: conn.connectionString, ...conn.env }, name } });
+        await invoke("delete_queue", { args: { connectionId: conn.id, name } });
       } else if (type === "topic") {
-        await invoke("delete_topic", { args: { env: { SERVICE_BUS_CONNECTION_STRING: conn.connectionString, ...conn.env }, name } });
+        await invoke("delete_topic", { args: { connectionId: conn.id, name } });
       } else {
         if (!topicName) {
           setError(t("explorer.entityManagement.deleteError", { type: typeLabel, error: "Missing topic name" }));
@@ -90,7 +90,7 @@ export function DeleteEntityDialog() {
           return;
         }
         await invoke("delete_subscription", {
-          args: { env: { SERVICE_BUS_CONNECTION_STRING: conn.connectionString, ...conn.env }, topicName, subscriptionName: name },
+          args: { connectionId: conn.id, topicName, subscriptionName: name },
         });
       }
 

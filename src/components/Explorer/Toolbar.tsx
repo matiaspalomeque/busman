@@ -201,9 +201,8 @@ export function Toolbar() {
       const result = await invoke<PeekResult>("peek_messages", {
         args: {
           argv,
-          env: { SERVICE_BUS_CONNECTION_STRING: conn.connectionString, ...conn.env },
-          runId,
           connectionId: conn.id,
+          runId,
         },
       });
       setPeekResults(result.messages, result.filename);
@@ -253,9 +252,8 @@ export function Toolbar() {
 
     const invokeArgs = (argv: string[]) => ({
       argv,
-      env: { SERVICE_BUS_CONNECTION_STRING: conn.connectionString, ...conn.env },
-      runId,
       connectionId: conn.id,
+      runId,
     });
 
     try {
@@ -312,7 +310,7 @@ export function Toolbar() {
     const { exitCode, errorMessage } = await runOperation("empty_messages", {
       queueName: entityName,
       mode: peekMode,
-      env: { SERVICE_BUS_CONNECTION_STRING: conn.connectionString, ...conn.env },
+      connectionId: conn.id,
     });
     updateEventLogEntry(runId, exitCode === 0 ? "success" : exitCode === 130 ? "stopped" : "error", errorMessage);
   };
@@ -339,7 +337,7 @@ export function Toolbar() {
       sourceQueue: entityName,
       destQueue: entityName,
       mode: "dlq",
-      env: { SERVICE_BUS_CONNECTION_STRING: conn.connectionString, ...conn.env },
+      connectionId: conn.id,
     });
     updateEventLogEntry(runId, exitCode === 0 ? "success" : exitCode === 130 ? "stopped" : "error", errorMessage);
   };
