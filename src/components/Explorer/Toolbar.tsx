@@ -56,7 +56,7 @@ interface ConfirmBannerProps {
 function ConfirmBanner({ message, onConfirm, onCancel }: ConfirmBannerProps) {
   const { t } = useTranslation();
   return (
-    <div className="absolute top-full left-0 right-0 z-50 flex items-center gap-3 px-4 py-2.5 bg-amber-50 dark:bg-amber-900/30 border-b border-amber-200 dark:border-amber-700 text-xs">
+    <div className="absolute top-full left-0 right-0 z-50 flex items-center gap-3 px-4 py-2.5 bg-amber-50 dark:bg-amber-950 border-b border-amber-200 dark:border-amber-700 text-xs">
       <span className="text-amber-800 dark:text-amber-200 flex-1">{message}</span>
       <button
         onClick={onCancel}
