@@ -1,0 +1,31 @@
+{
+  "version": "0.1.11",
+  "notes": "See the assets to download and install this version.",
+  "pub_date": "2026-03-18T00:20:58.058Z",
+  "platforms": {
+    "darwin-aarch64": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTbVVPMUlUWVZQSDVqUHFTenhTc0N6MWo0OW1Rb2txeGd4MlhYYU50bW9FaFRVcjl2Z0FWRE00eEIwOUpOVWtPNXdiQ2J1Z3pTZDN2WEE2KzhWMUFWa3Z4ck5mVCt1SWdJPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzczNzkyOTc1CWZpbGU6QnVzbWFuLmFwcC50YXIuZ3oKVnk1dUZqQVJPNkdDYWRZMDI0V0MvbzlJdWJ2OGhIVFgwWGtiSWpVK0xnOTdsNU1XZEY5MFRjRUM1L3M3U0ZaS1FxS3grNDBRaVlOWlVNZG5wbVpQRFE9PQo=",
+      "url": "https://github.com/matiaspalomeque/busman/releases/download/v0.1.11/Busman_aarch64.app.tar.gz"
+    },
+    "darwin-aarch64-app": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTbVVPMUlUWVZQSDVqUHFTenhTc0N6MWo0OW1Rb2txeGd4MlhYYU50bW9FaFRVcjl2Z0FWRE00eEIwOUpOVWtPNXdiQ2J1Z3pTZDN2WEE2KzhWMUFWa3Z4ck5mVCt1SWdJPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzczNzkyOTc1CWZpbGU6QnVzbWFuLmFwcC50YXIuZ3oKVnk1dUZqQVJPNkdDYWRZMDI0V0MvbzlJdWJ2OGhIVFgwWGtiSWpVK0xnOTdsNU1XZEY5MFRjRUM1L3M3U0ZaS1FxS3grNDBRaVlOWlVNZG5wbVpQRFE9PQo=",
+      "url": "https://github.com/matiaspalomeque/busman/releases/download/v0.1.11/Busman_aarch64.app.tar.gz"
+    },
+    "windows-x86_64": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTbVVPMUlUWVZQSDQ0VFZxYU44UEVMOW40eFRnNER2Z3dKSG96blNWS3U4K1FhVFBZWmFDYVNOYUJxc2U5clp3bGkvVUlCd3VxMmMxd0RYZ1JTSVdObUZ2MGdrRzhwblFZPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzczNzkzMjU0CWZpbGU6QnVzbWFuXzAuMS4xMV94NjQtc2V0dXAuZXhlCjFGeWNNeUg4bE8zVUFOVnpPd244WmdxR211ZHovdFppU0hLYzNBbUFXWmFVSGZaa2RubkYydGVrbE9kOWUxY3ZNODFvUHIrSG9lR1g2NUFsNXZXYkRBPT0K",
+      "url": "https://github.com/matiaspalomeque/busman/releases/download/v0.1.11/Busman_0.1.11_x64-setup.exe"
+    },
+    "windows-x86_64-nsis": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTbVVPMUlUWVZQSDQ0VFZxYU44UEVMOW40eFRnNER2Z3dKSG96blNWS3U4K1FhVFBZWmFDYVNOYUJxc2U5clp3bGkvVUlCd3VxMmMxd0RYZ1JTSVdObUZ2MGdrRzhwblFZPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzczNzkzMjU0CWZpbGU6QnVzbWFuXzAuMS4xMV94NjQtc2V0dXAuZXhlCjFGeWNNeUg4bE8zVUFOVnpPd244WmdxR211ZHovdFppU0hLYzNBbUFXWmFVSGZaa2RubkYydGVrbE9kOWUxY3ZNODFvUHIrSG9lR1g2NUFsNXZXYkRBPT0K",
+      "url": "https://github.com/matiaspalomeque/busman/releases/download/v0.1.11/Busman_0.1.11_x64-setup.exe"
+    },
+    "windows-x86_64-msi": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTbVVPMUlUWVZQSDhnQUhQSC9lUG5MQlVDc1VTVy94VFNyeFpvL0FIZkZ0ZTNscTJFOTlsczd3QjZZcG4rdnlvVkVpV2ZXazdsVExwSW44MWx4RUFVSmoyZUlRM084eVFBPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzczNzkzMjU0CWZpbGU6QnVzbWFuXzAuMS4xMV94NjRfZW4tVVMubXNpCmtSOTczMlU5R1VQalhKRjI5RkhnV0hXNzVJQ2dIZXBvWDg0eWVpMUxjY0tOKzc0OUFBMnNkekZRRVEwcnpWZXFRT3ZGa0JlN2FLLzRmYUNaMVRrSkNBPT0K",
+      "url": "https://github.com/matiaspalomeque/busman/releases/download/v0.1.11/Busman_0.1.11_x64_en-US.msi"
+    },
+    "windows-x86_64-portable": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTbVVPMUlUWVZQSDRib3hZZVQ1RmZKelBudm1rMHBVaGJZeWZWT0ZkbG5TTHI1NkV4UFBDVjZFTzk2RlJUa3pyOUVTdW1rT3k2aTNyNDk1SGlDWlFwbG9kaStWMkRvZ3d3PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzczNzkzMzE2CWZpbGU6YnVzbWFuLXBvcnRhYmxlLXdpbjY0LmV4ZQpUb2FPVnRGNFBqTmNwdXdCU3pFSVllN1RaTFVpd1daakQzVGJRQ1hCaGxHUnRHS1dhczNxM1B3Z1Y4Nmg1N2NxU0xTMWtUSGphMzRWQjJsZTBDd3hEQT09Cg==",
+      "url": "https://github.com/matiaspalomeque/busman/releases/download/v0.1.11/busman-portable-win64.exe"
+    }
+  }
+}
