@@ -266,11 +266,7 @@
       "mode": "Mode",
       "warning": "This operation consumes and removes all messages from the source queue. It cannot be undone.",
       "move": "Move",
-      "moving": "Moving...",
       "close": "Close",
-      "success": "Messages moved successfully.",
-      "stopped": "Operation stopped.",
-      "errorGeneric": "Move failed. Check the Event Log for details.",
       "errorSameQueue": "Source and destination must be different."
     },
     "connectionsModal": {

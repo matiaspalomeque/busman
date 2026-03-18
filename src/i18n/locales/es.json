@@ -266,11 +266,7 @@
       "mode": "Modo",
       "warning": "Esta operación consume y elimina todos los mensajes de la cola de origen. No se puede deshacer.",
       "move": "Mover",
-      "moving": "Moviendo...",
       "close": "Cerrar",
-      "success": "Mensajes movidos correctamente.",
-      "stopped": "Operación detenida.",
-      "errorGeneric": "El movimiento falló. Revisá el Registro de Eventos para más detalles.",
       "errorSameQueue": "Origen y destino deben ser diferentes."
     },
     "connectionsModal": {

@@ -4,6 +4,7 @@ import { useAppStore, selectActiveConnection } from "../../store/appStore";
 import { useScript } from "../../hooks/useScript";
 import { Icon } from "../Common/Icon";
 import { extractNamespace } from "../../utils/connection";
+import { exitCodeToStatus } from "../../utils/exitCode";
 import type { QueueMode } from "../../types";
 
 const MODES: QueueMode[] = ["normal", "dlq", "both"];
@@ -36,8 +37,6 @@ export function MoveMessagesModal() {
   const [sourceQueue, setSourceQueue] = useState(initialSource);
   const [destQueue, setDestQueue] = useState(() => suggestDestQueue(initialSource));
   const [mode, setMode] = useState<QueueMode>("normal");
-  const [moving, setMoving] = useState(false);
-  const [status, setStatus] = useState<{ ok: boolean; text: string } | null>(null);
 
   const overlayRef = useRef<HTMLDivElement>(null);
 
@@ -68,10 +67,9 @@ export function MoveMessagesModal() {
     sourceQueue.trim() !== "" &&
     destQueue.trim() !== "" &&
     !sameQueueError &&
-    !moving &&
     !isRunning;
 
-  const handleMove = async () => {
+  const handleMove = () => {
     if (!conn || !canSubmit) return;
 
     const runId = crypto.randomUUID();
@@ -87,28 +85,21 @@ export function MoveMessagesModal() {
       status: "running",
     });
 
-    setMoving(true);
-    setStatus(null);
+    // Close immediately so the toolbar (and its stop button) becomes accessible.
+    close();
 
-    const { exitCode, errorMessage } = await runOperation("move_messages", {
+    void runOperation("move_messages", {
       sourceQueue: sourceQueue.trim(),
       destQueue: destQueue.trim(),
       mode,
       connectionId: conn.id,
-    });
-
-    const ok = exitCode === 0;
-    const stopped = exitCode === 130;
-    updateEventLogEntry(runId, ok ? "success" : stopped ? "stopped" : "error", errorMessage);
-    setStatus({
-      ok,
-      text: ok
-        ? t("explorer.moveModal.success")
-        : stopped
-          ? t("explorer.moveModal.stopped")
-          : t("explorer.moveModal.errorGeneric"),
-    });
-    setMoving(false);
+    })
+      .then(({ exitCode, errorMessage }) => {
+        updateEventLogEntry(runId, exitCodeToStatus(exitCode), errorMessage);
+      })
+      .catch(() => {
+        updateEventLogEntry(runId, "error");
+      });
   };
 
   const queues = entities?.queues ?? [];
@@ -216,20 +207,6 @@ export function MoveMessagesModal() {
               {t("explorer.moveModal.warning")}
             </p>
           </div>
-
-          {/* Status */}
-          {status && (
-            <div
-              className={[
-                "text-xs px-3 py-2 rounded",
-                status.ok
-                  ? "bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-400"
-                  : "bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400",
-              ].join(" ")}
-            >
-              {status.text}
-            </div>
-          )}
         </div>
 
         {/* Footer */}
@@ -241,14 +218,11 @@ export function MoveMessagesModal() {
             {t("explorer.moveModal.close")}
           </button>
           <button
-            onClick={() => void handleMove()}
+            onClick={handleMove}
             disabled={!canSubmit}
-            className="flex items-center gap-1.5 text-xs px-4 py-1.5 rounded bg-azure-primary text-white hover:bg-azure-primary/90 disabled:opacity-40 disabled:cursor-not-allowed"
+            className="text-xs px-4 py-1.5 rounded bg-azure-primary text-white hover:bg-azure-primary/90 disabled:opacity-40 disabled:cursor-not-allowed"
           >
-            {moving && (
-              <span className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
-            )}
-            {moving ? t("explorer.moveModal.moving") : t("explorer.moveModal.move")}
+            {t("explorer.moveModal.move")}
           </button>
         </div>
       </div>

@@ -6,6 +6,7 @@ import { useConnections } from "../../hooks/useConnections";
 import { useScript } from "../../hooks/useScript";
 import { Icon } from "../Common/Icon";
 import { extractNamespace } from "../../utils/connection";
+import { exitCodeToStatus } from "../../utils/exitCode";
 import type { PeekResult, QueueMode } from "../../types";
 
 // ─── Toolbar button ───────────────────────────────────────────────────────────
@@ -312,7 +313,7 @@ export function Toolbar() {
       mode: peekMode,
       connectionId: conn.id,
     });
-    updateEventLogEntry(runId, exitCode === 0 ? "success" : exitCode === 130 ? "stopped" : "error", errorMessage);
+    updateEventLogEntry(runId, exitCodeToStatus(exitCode), errorMessage);
   };
 
   // ── Replay (DLQ → main) ────────────────────────────────────────────────────
@@ -339,7 +340,7 @@ export function Toolbar() {
       mode: "dlq",
       connectionId: conn.id,
     });
-    updateEventLogEntry(runId, exitCode === 0 ? "success" : exitCode === 130 ? "stopped" : "error", errorMessage);
+    updateEventLogEntry(runId, exitCodeToStatus(exitCode), errorMessage);
   };
 
   const loadMoreDisabled =
