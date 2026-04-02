@@ -14,6 +14,9 @@ import type {
 /** Internal key separator for subscription store entries: "topic\0subscription". */
 export const SUBSCRIPTION_KEY_SEP = "\0";
 
+/** Timer handle for the changedEntities auto-clear. Module-scoped since the store is a singleton. */
+let changedEntitiesTimer: ReturnType<typeof setTimeout> | null = null;
+
 interface AppState {
   // Connections
   connections: Connection[];
@@ -92,6 +95,12 @@ interface AppState {
   // Whether desktop notifications for DLQ alerts are enabled (global, persisted)
   dlqNotificationsEnabled: boolean;
 
+  // Auto-refresh (persisted)
+  autoRefreshEnabled: boolean;
+  autoRefreshInterval: 15 | 30 | 60;
+  // Transient: entity keys whose counts changed on last auto-refresh (for flash animation)
+  changedEntities: string[];
+
   // Actions
   setConnections: (connections: Connection[]) => void;
   setActiveConnectionId: (id: string | null) => void;
@@ -146,6 +155,9 @@ interface AppState {
   setLanguage: (lang: "en" | "es") => void;
   setDlqThreshold: (entityKey: string, threshold: number | null) => void;
   setDlqNotificationsEnabled: (enabled: boolean) => void;
+  setAutoRefreshEnabled: (enabled: boolean) => void;
+  setAutoRefreshInterval: (interval: 15 | 30 | 60) => void;
+  setChangedEntities: (keys: string[]) => void;
 }
 
 /** Resets all entity-specific grid/peek state. Used when switching connection, queue, or subscription. */
@@ -254,6 +266,21 @@ export const useAppStore = create<AppState>()(
         return false;
       }
     })(),
+    autoRefreshEnabled: (() => {
+      try {
+        return localStorage.getItem("autoRefreshEnabled") === "true";
+      } catch {
+        return false;
+      }
+    })(),
+    autoRefreshInterval: (() => {
+      try {
+        const stored = Number(localStorage.getItem("autoRefreshInterval"));
+        if (stored === 15 || stored === 30 || stored === 60) return stored;
+      } catch {}
+      return 30 as const;
+    })(),
+    changedEntities: [],
 
     setConnections: (connections) =>
       set((state) => {
@@ -444,10 +471,17 @@ export const useAppStore = create<AppState>()(
     batchSetCounts: (queues, subscriptions) =>
       set((state) => {
         for (const q of queues) {
-          state.queueCounts[q.name] = { active: q.active, dlq: q.dlq };
+          const existing = state.queueCounts[q.name];
+          if (!existing || existing.active !== q.active || existing.dlq !== q.dlq) {
+            state.queueCounts[q.name] = { active: q.active, dlq: q.dlq };
+          }
         }
         for (const s of subscriptions) {
-          state.subscriptionCounts[`${s.topic}${SUBSCRIPTION_KEY_SEP}${s.subscription}`] = { active: s.active, dlq: s.dlq };
+          const key = `${s.topic}${SUBSCRIPTION_KEY_SEP}${s.subscription}`;
+          const existing = state.subscriptionCounts[key];
+          if (!existing || existing.active !== s.active || existing.dlq !== s.dlq) {
+            state.subscriptionCounts[key] = { active: s.active, dlq: s.dlq };
+          }
         }
       }),
 
@@ -669,6 +703,44 @@ export const useAppStore = create<AppState>()(
       set((state) => {
         state.dlqNotificationsEnabled = enabled;
       });
+    },
+
+    setAutoRefreshEnabled: (enabled) => {
+      try {
+        localStorage.setItem("autoRefreshEnabled", String(enabled));
+      } catch {}
+      set((state) => {
+        state.autoRefreshEnabled = enabled;
+      });
+    },
+
+    setAutoRefreshInterval: (interval) => {
+      try {
+        localStorage.setItem("autoRefreshInterval", String(interval));
+      } catch {}
+      set((state) => {
+        state.autoRefreshInterval = interval;
+      });
+    },
+
+    setChangedEntities: (keys) => {
+      if (changedEntitiesTimer !== null) {
+        clearTimeout(changedEntitiesTimer);
+        changedEntitiesTimer = null;
+      }
+      set((state) => {
+        state.changedEntities = keys;
+      });
+      if (keys.length > 0) {
+        changedEntitiesTimer = setTimeout(() => {
+          changedEntitiesTimer = null;
+          if (get().changedEntities.length > 0) {
+            set((state) => {
+              state.changedEntities = [];
+            });
+          }
+        }, 2000);
+      }
     },
   }))
 );

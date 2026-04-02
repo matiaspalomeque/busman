@@ -207,6 +207,15 @@ function BellFilledPaths() {
   );
 }
 
+function TimerPaths() {
+  return (
+    <>
+      <circle cx="12" cy="12" r="10" />
+      <polyline points="12 6 12 12 16 14" />
+    </>
+  );
+}
+
 function AlertTrianglePaths() {
   return (
     <>
@@ -243,6 +252,7 @@ export type IconName =
   | "plus"
   | "bell"
   | "bellFilled"
+  | "timer"
   | "alertTriangle";
 
 const PATHS: Record<IconName, () => JSX.Element> = {
@@ -269,6 +279,7 @@ const PATHS: Record<IconName, () => JSX.Element> = {
   plus: PlusPaths,
   bell: BellPaths,
   bellFilled: BellFilledPaths,
+  timer: TimerPaths,
   alertTriangle: AlertTrianglePaths,
 };
 

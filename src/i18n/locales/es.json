@@ -156,7 +156,19 @@
       "dlqThresholdPlaceholder": "ej. 5",
       "dlqThresholdBreached": "DLQ ({{count}}) supera el umbral ({{threshold}})",
       "dlqNotificationsEnabled": "Notificaciones DLQ de escritorio habilitadas",
-      "dlqNotificationsDisabled": "Notificaciones DLQ de escritorio deshabilitadas"
+      "dlqNotificationsDisabled": "Notificaciones DLQ de escritorio deshabilitadas",
+      "autoRefreshEnabled": "Auto-actualización habilitada",
+      "autoRefreshDisabled": "Auto-actualización deshabilitada",
+      "autoRefreshInterval": "Intervalo de actualización",
+      "settings": "Configuración",
+      "appearance": "Apariencia",
+      "theme": "Tema",
+      "language": "Idioma",
+      "autoRefresh": "Auto-actualización",
+      "enabled": "Habilitado",
+      "interval": "Intervalo",
+      "notifications": "Notificaciones",
+      "dlqAlerts": "Alertas DLQ"
     },
     "entityManagement": {
       "createEntity": "Crear Entidad",

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useAppStore } from "../../store/appStore";
 import { Icon } from "../Common/Icon";
@@ -162,9 +162,31 @@ export interface TreeItemProps {
   threshold?: number | null;
   onSetThreshold?: (value: number | null) => void;
   onRefreshCount?: () => Promise<void>;
+  flash?: boolean;
 }
 
-export function TreeItem({ label, itemTitle, icon, isSelected, onClick, indent = false, counts, pinKey, isPinned = false, onTogglePin, onDelete, threshold, onSetThreshold, onRefreshCount }: TreeItemProps) {
+/**
+ * Custom comparator for React.memo — compares data props only.
+ * Callback props (onClick, onTogglePin, etc.) are recreated each Sidebar render
+ * but are behaviourally stable (same store action + same entity), so we skip them
+ * to avoid defeating the memo.
+ */
+function treeItemAreEqual(prev: TreeItemProps, next: TreeItemProps): boolean {
+  return (
+    prev.label === next.label &&
+    prev.itemTitle === next.itemTitle &&
+    prev.icon === next.icon &&
+    prev.isSelected === next.isSelected &&
+    prev.indent === next.indent &&
+    prev.counts === next.counts && // Immer structural sharing: same ref if unchanged
+    prev.pinKey === next.pinKey &&
+    prev.isPinned === next.isPinned &&
+    prev.threshold === next.threshold &&
+    prev.flash === next.flash
+  );
+}
+
+export const TreeItem = memo(function TreeItem({ label, itemTitle, icon, isSelected, onClick, indent = false, counts, pinKey, isPinned = false, onTogglePin, onDelete, threshold, onSetThreshold, onRefreshCount, flash = false }: TreeItemProps) {
   const { t } = useTranslation();
   const [showPopover, setShowPopover] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -187,6 +209,7 @@ export function TreeItem({ label, itemTitle, icon, isSelected, onClick, indent =
         isSelected
           ? "bg-azure-primary/10"
           : "hover:bg-zinc-100 dark:hover:bg-zinc-800",
+        flash && !isSelected ? "animate-count-flash" : "",
       ].join(" ")}
     >
       <button
@@ -265,7 +288,7 @@ export function TreeItem({ label, itemTitle, icon, isSelected, onClick, indent =
       )}
     </div>
   );
-}
+}, treeItemAreEqual);
 
 // ─── Topic node ─────────────────────────────────────────────────────────────
 
@@ -276,9 +299,10 @@ interface TopicNodeProps {
   dlqThresholds: Record<string, number>;
   onSetThreshold: (entityKey: string, value: number | null) => void;
   onRefreshSubscriptionCount?: (topicName: string, subscriptionName: string) => Promise<void>;
+  changedSet?: Set<string>;
 }
 
-export function TopicNode({ topic, subscriptions, subCounts, dlqThresholds, onSetThreshold, onRefreshSubscriptionCount }: TopicNodeProps) {
+export function TopicNode({ topic, subscriptions, subCounts, dlqThresholds, onSetThreshold, onRefreshSubscriptionCount, changedSet }: TopicNodeProps) {
   const { t } = useTranslation();
   const { explorerSelection, setExplorerSubscription, pinnedEntities, togglePin, setDeleteEntityTarget } = useAppStore();
   const pinnedSet = useMemo(() => new Set(pinnedEntities), [pinnedEntities]);
@@ -340,6 +364,7 @@ export function TopicNode({ topic, subscriptions, subCounts, dlqThresholds, onSe
               threshold={dlqThresholds[thresholdKey] ?? null}
               onSetThreshold={(v) => onSetThreshold(thresholdKey, v)}
               onRefreshCount={onRefreshSubscriptionCount ? () => onRefreshSubscriptionCount(topic, sub) : undefined}
+              flash={changedSet?.has(`sub:${topic}/${sub}`) ?? false}
             />
           );
         })}

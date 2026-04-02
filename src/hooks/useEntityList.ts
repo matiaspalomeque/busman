@@ -30,7 +30,7 @@ export function useEntityList() {
   const fetchingConnRef = useRef<string | null>(null);
 
   const fetchCounts = useCallback(
-    (result: ListEntitiesResult, connId: string) => {
+    (result: ListEntitiesResult, connId: string, opts?: { singleFlush?: boolean }) => {
       const isStale = () => selectActiveConnection(useAppStore.getState())?.id !== connId;
 
       // Local buffers — flushed to store in one batched update every FLUSH_MS
@@ -46,7 +46,10 @@ export function useEntityList() {
         result.queues.length +
         Object.values(result.topics).reduce((n, subs) => n + subs.length, 0);
       let completed = 0;
-      const intervalId = totalEntities > 0
+
+      // Progressive flushing for initial load (shows counts as they arrive).
+      // Single-flush mode for auto-refresh (one store update when all counts are in).
+      const intervalId = !opts?.singleFlush && totalEntities > 0
         ? setInterval(() => { if (isStale()) cleanup(); else flush(); }, FLUSH_MS)
         : null;
 
@@ -55,14 +58,17 @@ export function useEntityList() {
       };
 
       const onDone = () => {
-        if (!isStale()) decrementCountsLoading();
+        if (!opts?.singleFlush && !isStale()) decrementCountsLoading();
         if (++completed >= totalEntities) {
           cleanup();
           flush(); // final flush for any results not yet emitted
+          if (opts?.singleFlush && !isStale()) decrementCountsLoading();
         }
       };
 
-      if (totalEntities > 0) incrementCountsLoading(totalEntities);
+      // In singleFlush mode, only increment by 1 (and decrement once at the end)
+      // to avoid N individual store writes for the loading counter.
+      if (totalEntities > 0) incrementCountsLoading(opts?.singleFlush ? 1 : totalEntities);
 
       for (const queueName of result.queues) {
         safeInvoke("get_queue_count", QueueCountResultSchema, {
@@ -121,6 +127,13 @@ export function useEntityList() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conn?.id]);
 
+  const refreshAllCounts = useCallback(() => {
+    const state = useAppStore.getState();
+    const connId = selectActiveConnection(state)?.id;
+    if (!connId || !state.entities) return;
+    fetchCounts(state.entities, connId, { singleFlush: true });
+  }, [fetchCounts]);
+
   type RefreshTarget =
     | { type: "queue"; name: string }
     | { type: "subscription"; topicName: string; subscriptionName: string };
@@ -146,5 +159,5 @@ export function useEntityList() {
     }
   }, [conn?.id, batchSetCounts]);
 
-  return { entities, entitiesLoading, entitiesError, refreshEntities: fetchEntities, refreshEntityCount };
+  return { entities, entitiesLoading, entitiesError, refreshEntities: fetchEntities, refreshEntityCount, refreshAllCounts };
 }

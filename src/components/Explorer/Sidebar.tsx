@@ -2,12 +2,14 @@ import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { useAppStore, selectActiveConnection, SUBSCRIPTION_KEY_SEP } from "../../store/appStore";
 import { useEntityList } from "../../hooks/useEntityList";
+import { useAutoRefresh } from "../../hooks/useAutoRefresh";
 import { useDlqAlerts } from "../../hooks/useDlqAlerts";
 import { useResizable } from "../../hooks/useResizable";
 import { Icon } from "../Common/Icon";
 import { extractNamespace } from "../../utils/connection";
 import { safeColor } from "../../utils/color";
 import { TreeSection, TreeItem, TopicNode } from "./SidebarTree";
+import { SettingsPopover } from "./SettingsPopover";
 import type { Connection } from "../../types";
 
 // ─── Pinned item types ────────────────────────────────────────────────────────
@@ -40,7 +42,8 @@ function SidebarEnvironmentBadge({ connection }: { connection: Connection | null
 export function Sidebar() {
   const { t } = useTranslation();
   const conn = useAppStore(selectActiveConnection);
-  const { entities, entitiesLoading, entitiesError, refreshEntities, refreshEntityCount } = useEntityList();
+  const { entities, entitiesLoading, entitiesError, refreshEntities, refreshEntityCount, refreshAllCounts } = useEntityList();
+  useAutoRefresh(refreshAllCounts);
   useDlqAlerts();
   const {
     explorerSelection,
@@ -67,6 +70,11 @@ export function Sidebar() {
     setDlqThreshold,
     dlqNotificationsEnabled,
     setDlqNotificationsEnabled,
+    autoRefreshEnabled,
+    setAutoRefreshEnabled,
+    autoRefreshInterval,
+    setAutoRefreshInterval,
+    changedEntities,
   } = useAppStore();
 
   const { widthRef, onPointerDown } = useResizable({
@@ -88,6 +96,7 @@ export function Sidebar() {
   );
 
   const pinnedSet = useMemo(() => new Set(pinnedEntities), [pinnedEntities]);
+  const changedSet = useMemo(() => new Set(changedEntities), [changedEntities]);
 
   const validPinKeys = useMemo(() => {
     if (!entities) return new Set<string>();
@@ -243,6 +252,7 @@ export function Sidebar() {
                     threshold={dlqThresholds[thresholdKey] ?? null}
                     onSetThreshold={(v) => setDlqThreshold(thresholdKey, v)}
                     onRefreshCount={() => refreshEntityCount({ type: "queue", name: item.name })}
+                    flash={changedSet.has(`queue:${item.name}`)}
                   />
                 );
               }
@@ -266,6 +276,7 @@ export function Sidebar() {
                   threshold={dlqThresholds[thresholdKey] ?? null}
                   onSetThreshold={(v) => setDlqThreshold(thresholdKey, v)}
                   onRefreshCount={() => refreshEntityCount({ type: "subscription", topicName: item.topicName, subscriptionName: item.subName })}
+                  flash={changedSet.has(`sub:${item.topicName}/${item.subName}`)}
                 />
               );
             })}
@@ -296,6 +307,7 @@ export function Sidebar() {
                   threshold={dlqThresholds[thresholdKey] ?? null}
                   onSetThreshold={(v) => setDlqThreshold(thresholdKey, v)}
                   onRefreshCount={() => refreshEntityCount({ type: "queue", name: queue })}
+                  flash={changedSet.has(`queue:${queue}`)}
                 />
               );
             })}
@@ -309,7 +321,7 @@ export function Sidebar() {
             onToggle={() => toggleSidebarSection("topics")}
           >
             {Object.entries(filteredTopics).map(([topic, subs]) => (
-              <TopicNode key={topic} topic={topic} subscriptions={subs} subCounts={subCountMap} dlqThresholds={dlqThresholds} onSetThreshold={setDlqThreshold} onRefreshSubscriptionCount={(t, s) => refreshEntityCount({ type: "subscription", topicName: t, subscriptionName: s })} />
+              <TopicNode key={topic} topic={topic} subscriptions={subs} subCounts={subCountMap} dlqThresholds={dlqThresholds} onSetThreshold={setDlqThreshold} onRefreshSubscriptionCount={(t, s) => refreshEntityCount({ type: "subscription", topicName: t, subscriptionName: s })} changedSet={changedSet} />
             ))}
           </TreeSection>
         )}
@@ -322,69 +334,35 @@ export function Sidebar() {
       </div>
 
       {/* Footer */}
-      <div className="px-2 py-2 border-t border-zinc-200 dark:border-zinc-700 space-y-1.5">
+      <div className="px-2 py-2 border-t border-zinc-200 dark:border-zinc-700">
         <div className="flex items-center justify-between">
           <span className="text-[10px] text-zinc-400">
             {entitiesLoading ? t("explorer.sidebar.refreshing") : t("explorer.sidebar.entityTree")}
           </span>
-          <button
-            onClick={() => void refreshEntities()}
-            disabled={entitiesLoading}
-            className="p-1 rounded text-zinc-400 hover:text-azure-primary hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-40 transition-colors"
-            title={t("explorer.sidebar.refreshTitle")}
-          >
-            <Icon name="refresh" size={13} className={entitiesLoading ? "animate-spin" : undefined} />
-          </button>
-        </div>
-
-        <div className="flex items-center justify-between">
-          {/* Theme toggle */}
-          <button
-            onClick={toggleDark}
-            className="p-1.5 rounded border border-zinc-300 dark:border-zinc-600 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-700 transition-colors"
-            title={isDark ? t("sidebar.lightMode") : t("sidebar.darkMode")}
-            aria-label={isDark ? t("sidebar.lightMode") : t("sidebar.darkMode")}
-          >
-            <Icon name={isDark ? "sun" : "moon"} size={14} />
-          </button>
-
-          {/* Language toggle */}
-          <div className="flex items-center border border-zinc-300 dark:border-zinc-600 rounded overflow-hidden">
-            {(["en", "es"] as const).map((lang) => (
-              <button
-                key={lang}
-                onClick={() => setLanguage(lang)}
-                className={[
-                  "px-2.5 py-1.5 text-xs transition-colors uppercase font-medium",
-                  language === lang
-                    ? "bg-azure-primary text-white"
-                    : "text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-700",
-                ].join(" ")}
-              >
-                {lang}
-              </button>
-            ))}
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => void refreshEntities()}
+              disabled={entitiesLoading}
+              className="p-1 rounded text-zinc-400 hover:text-azure-primary hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-40 transition-colors"
+              title={t("explorer.sidebar.refreshTitle")}
+            >
+              <Icon name="refresh" size={13} className={entitiesLoading ? "animate-spin" : undefined} />
+            </button>
+            <SettingsPopover
+              isDark={isDark}
+              toggleDark={toggleDark}
+              language={language}
+              setLanguage={setLanguage}
+              autoRefreshEnabled={autoRefreshEnabled}
+              setAutoRefreshEnabled={setAutoRefreshEnabled}
+              autoRefreshInterval={autoRefreshInterval}
+              setAutoRefreshInterval={setAutoRefreshInterval}
+              dlqNotificationsEnabled={dlqNotificationsEnabled}
+              setDlqNotificationsEnabled={setDlqNotificationsEnabled}
+              setIsAboutModalOpen={setIsAboutModalOpen}
+              hasEntities={!!entities}
+            />
           </div>
-
-          {/* DLQ notification toggle */}
-          <button
-            onClick={() => setDlqNotificationsEnabled(!dlqNotificationsEnabled)}
-            className="p-1.5 rounded border border-zinc-300 dark:border-zinc-600 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-700 transition-colors"
-            title={dlqNotificationsEnabled ? t("explorer.sidebar.dlqNotificationsEnabled") : t("explorer.sidebar.dlqNotificationsDisabled")}
-            aria-label={dlqNotificationsEnabled ? t("explorer.sidebar.dlqNotificationsEnabled") : t("explorer.sidebar.dlqNotificationsDisabled")}
-          >
-            <Icon name={dlqNotificationsEnabled ? "bellFilled" : "bell"} size={14} />
-          </button>
-
-          {/* About button */}
-          <button
-            onClick={() => setIsAboutModalOpen(true)}
-            className="p-1.5 rounded border border-zinc-300 dark:border-zinc-600 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-700 transition-colors"
-            title={t("sidebar.about")}
-            aria-label={t("sidebar.about")}
-          >
-            <Icon name="info" size={14} />
-          </button>
         </div>
       </div>
 

@@ -18,6 +18,15 @@ export default {
           700: "#005fa3",
         },
       },
+      animation: {
+        'count-flash': 'count-flash 2s ease-out',
+      },
+      keyframes: {
+        'count-flash': {
+          '0%': { backgroundColor: 'rgba(0, 120, 212, 0.15)' },
+          '100%': { backgroundColor: 'transparent' },
+        },
+      },
       fontFamily: {
         mono: [
           "JetBrains Mono",

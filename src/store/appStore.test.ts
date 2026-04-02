@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { useAppStore, selectActiveConnection, SUBSCRIPTION_KEY_SEP } from "./appStore";
 
 // Reset store to initial state before each test.
@@ -250,6 +250,63 @@ describe("appStore", () => {
       expect(state.entities?.topics.t1).toEqual(["s2"]);
       expect(state.subscriptionCounts).not.toHaveProperty(`t1${SUBSCRIPTION_KEY_SEP}s1`);
       expect(state.subscriptionCounts).toHaveProperty(`t1${SUBSCRIPTION_KEY_SEP}s2`);
+    });
+  });
+
+  // ─── Auto-refresh ───────────────────────────────────────────────────
+
+  describe("auto-refresh", () => {
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it("setAutoRefreshEnabled updates state and persists to localStorage", () => {
+      useAppStore.getState().setAutoRefreshEnabled(true);
+      expect(useAppStore.getState().autoRefreshEnabled).toBe(true);
+      expect(localStorage.getItem("autoRefreshEnabled")).toBe("true");
+
+      useAppStore.getState().setAutoRefreshEnabled(false);
+      expect(useAppStore.getState().autoRefreshEnabled).toBe(false);
+      expect(localStorage.getItem("autoRefreshEnabled")).toBe("false");
+    });
+
+    it("setAutoRefreshInterval updates state and persists to localStorage", () => {
+      useAppStore.getState().setAutoRefreshInterval(15);
+      expect(useAppStore.getState().autoRefreshInterval).toBe(15);
+      expect(localStorage.getItem("autoRefreshInterval")).toBe("15");
+
+      useAppStore.getState().setAutoRefreshInterval(60);
+      expect(useAppStore.getState().autoRefreshInterval).toBe(60);
+      expect(localStorage.getItem("autoRefreshInterval")).toBe("60");
+    });
+
+    it("setChangedEntities stores keys and auto-clears after 2s", () => {
+      vi.useFakeTimers();
+
+      useAppStore.getState().setChangedEntities(["queue:q1", "sub:t1/s1"]);
+      expect(useAppStore.getState().changedEntities).toEqual(["queue:q1", "sub:t1/s1"]);
+
+      vi.advanceTimersByTime(2000);
+      expect(useAppStore.getState().changedEntities).toEqual([]);
+    });
+
+    it("setChangedEntities with empty array does not schedule timeout", () => {
+      vi.useFakeTimers();
+
+      useAppStore.getState().setChangedEntities([]);
+      expect(useAppStore.getState().changedEntities).toEqual([]);
+
+      // Should remain empty (no timer to clear)
+      vi.advanceTimersByTime(3000);
+      expect(useAppStore.getState().changedEntities).toEqual([]);
+    });
+
+    it("defaults to interval 30 and disabled", () => {
+      // getInitialState reads from localStorage, which is empty in test
+      const state = useAppStore.getState();
+      expect(state.autoRefreshEnabled).toBe(false);
+      expect(state.autoRefreshInterval).toBe(30);
+      expect(state.changedEntities).toEqual([]);
     });
   });
 

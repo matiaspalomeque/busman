@@ -156,7 +156,19 @@
       "dlqThresholdPlaceholder": "e.g. 5",
       "dlqThresholdBreached": "DLQ count ({{count}}) exceeds threshold ({{threshold}})",
       "dlqNotificationsEnabled": "DLQ desktop notifications enabled",
-      "dlqNotificationsDisabled": "DLQ desktop notifications disabled"
+      "dlqNotificationsDisabled": "DLQ desktop notifications disabled",
+      "autoRefreshEnabled": "Auto-refresh enabled",
+      "autoRefreshDisabled": "Auto-refresh disabled",
+      "autoRefreshInterval": "Refresh interval",
+      "settings": "Settings",
+      "appearance": "Appearance",
+      "theme": "Theme",
+      "language": "Language",
+      "autoRefresh": "Auto-refresh",
+      "enabled": "Enabled",
+      "interval": "Interval",
+      "notifications": "Notifications",
+      "dlqAlerts": "DLQ alerts"
     },
     "entityManagement": {
       "createEntity": "Create Entity",
