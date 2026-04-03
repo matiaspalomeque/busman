@@ -17,16 +17,14 @@ pub fn load(app: &tauri::AppHandle) -> Result<ConnectionsConfig, String> {
     if !path.exists() {
         return Ok(ConnectionsConfig::default());
     }
-    let raw = std::fs::read_to_string(&path)
-        .map_err(|e| format!("Failed to read config: {e}"))?;
+    let raw = std::fs::read_to_string(&path).map_err(|e| format!("Failed to read config: {e}"))?;
     serde_json::from_str(&raw).map_err(|e| format!("Failed to parse config: {e}"))
 }
 
 pub fn save(app: &tauri::AppHandle, config: &ConnectionsConfig) -> Result<(), String> {
     let path = config_path(app)?;
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|e| format!("Failed to create config dir: {e}"))?;
+        std::fs::create_dir_all(parent).map_err(|e| format!("Failed to create config dir: {e}"))?;
     }
     let json = serde_json::to_string_pretty(config)
         .map_err(|e| format!("Failed to serialize config: {e}"))?;

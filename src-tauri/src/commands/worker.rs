@@ -25,8 +25,9 @@ static WORKER_STATE: OnceLock<Mutex<Option<ActiveWorker>>> = OnceLock::new();
 
 /// Pending response channels keyed by request ID.
 /// Uses `std::sync::Mutex` (not tokio) since we only do quick insert/remove, never hold across await.
-type PendingMap =
-    std::sync::Arc<std::sync::Mutex<HashMap<String, oneshot::Sender<Result<Value, WorkerCallError>>>>>;
+type PendingMap = std::sync::Arc<
+    std::sync::Mutex<HashMap<String, oneshot::Sender<Result<Value, WorkerCallError>>>>,
+>;
 
 /// A running worker process with a background reader task.
 pub(crate) struct ActiveWorker {
@@ -155,9 +156,7 @@ fn ensure_sidecar_extracted(app: &AppHandle) -> Result<PathBuf, String> {
 
     // Check if existing extraction is valid (correct size).
     if dest.exists() {
-        let actual_len = std::fs::metadata(&dest)
-            .map(|m| m.len())
-            .unwrap_or(0);
+        let actual_len = std::fs::metadata(&dest).map(|m| m.len()).unwrap_or(0);
         if actual_len == expected_len {
             return Ok(dest);
         }
@@ -168,15 +167,13 @@ fn ensure_sidecar_extracted(app: &AppHandle) -> Result<PathBuf, String> {
     let parent = dest
         .parent()
         .ok_or_else(|| "Invalid sidecar destination path".to_string())?;
-    std::fs::create_dir_all(parent)
-        .map_err(|e| format!("Cannot create sidecar bin dir: {e}"))?;
+    std::fs::create_dir_all(parent).map_err(|e| format!("Cannot create sidecar bin dir: {e}"))?;
 
     // Write to a temp file then atomically rename to prevent partial binaries.
     let tmp = dest.with_extension("exe.tmp");
     std::fs::write(&tmp, WORKER_SIDECAR_BYTES)
         .map_err(|e| format!("Cannot write embedded sidecar: {e}"))?;
-    std::fs::rename(&tmp, &dest)
-        .map_err(|e| format!("Cannot finalize sidecar extraction: {e}"))?;
+    std::fs::rename(&tmp, &dest).map_err(|e| format!("Cannot finalize sidecar extraction: {e}"))?;
 
     Ok(dest)
 }
@@ -309,7 +306,11 @@ async fn spawn_worker(app: &AppHandle) -> Result<ActiveWorker, String> {
     let pending: PendingMap = std::sync::Arc::new(std::sync::Mutex::new(HashMap::new()));
     let reader_pending = pending.clone();
     let reader_app = app.clone();
-    let reader_handle = tokio::spawn(reader_loop(reader_app, BufReader::new(stdout), reader_pending));
+    let reader_handle = tokio::spawn(reader_loop(
+        reader_app,
+        BufReader::new(stdout),
+        reader_pending,
+    ));
 
     Ok(ActiveWorker {
         child,
@@ -353,10 +354,7 @@ async fn reader_loop(app: AppHandle, mut stdout: BufReader<ChildStdout>, pending
             Ok(n) => n,
             Err(e) => {
                 log::warn!("Worker stdout read error: {e}");
-                drain_pending(
-                    &pending,
-                    &format!("Worker read error: {e}"),
-                );
+                drain_pending(&pending, &format!("Worker read error: {e}"));
                 break;
             }
         };
@@ -562,12 +560,13 @@ pub(crate) async fn call_worker(
                 return Err("Worker response channel closed unexpectedly".to_string());
             }
             Err(_) => {
-                // Timeout — clean up pending entry and kill worker.
-                let mut state = worker_state().lock().await;
+                // Timeout — clean up pending entry but keep worker alive.
+                // The Go goroutine will finish on its own; killing the worker
+                // would cascade-fail every other in-flight request.
+                let state = worker_state().lock().await;
                 if let Some(worker) = state.as_ref() {
                     worker.pending.lock().unwrap().remove(&request_id);
                 }
-                stop_worker(&mut state).await;
                 return Err(crate::error::BusmanError::Timeout(
                     "Service Bus worker request timed out".to_string(),
                 )

@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { useAppStore, selectActiveConnection } from "../../store/appStore";
 import { useScript } from "../../hooks/useScript";
 import { Icon } from "../Common/Icon";
+import { getDisplayEntity } from "./toolbarActions";
 import { extractNamespace } from "../../utils/connection";
 import { exitCodeToStatus } from "../../utils/exitCode";
 import type { QueueMode } from "../../types";
@@ -31,11 +32,13 @@ export function MoveMessagesModal() {
 
   const { runOperation } = useScript();
 
-  const initialSource =
-    explorerSelection.kind === "queue" ? explorerSelection.queueName : "";
+  const isSubscriptionSource = explorerSelection.kind === "subscription";
+  const initialSource = getDisplayEntity(explorerSelection) ?? "";
 
   const [sourceQueue, setSourceQueue] = useState(initialSource);
-  const [destQueue, setDestQueue] = useState(() => suggestDestQueue(initialSource));
+  const [destQueue, setDestQueue] = useState(() =>
+    isSubscriptionSource ? "" : suggestDestQueue(initialSource),
+  );
   const [mode, setMode] = useState<QueueMode>("normal");
 
   const overlayRef = useRef<HTMLDivElement>(null);
@@ -59,6 +62,7 @@ export function MoveMessagesModal() {
   };
 
   const sameQueueError =
+    !isSubscriptionSource &&
     sourceQueue.trim() === destQueue.trim() &&
     (mode === "normal" || mode === "both");
 
@@ -80,7 +84,7 @@ export function MoveMessagesModal() {
       time: new Date().toISOString(),
       namespace,
       entity: `${sourceQueue.trim()} → ${destQueue.trim()}`,
-      entityType: "Queue",
+      entityType: isSubscriptionSource ? "Subscription" : "Queue",
       operation: "Move",
       status: "running",
     });
@@ -88,12 +92,20 @@ export function MoveMessagesModal() {
     // Close immediately so the toolbar (and its stop button) becomes accessible.
     close();
 
-    void runOperation("move_messages", {
-      sourceQueue: sourceQueue.trim(),
+    const params: Record<string, unknown> = {
       destQueue: destQueue.trim(),
       mode,
       connectionId: conn.id,
-    })
+    };
+
+    if (isSubscriptionSource && explorerSelection.kind === "subscription") {
+      params.topicName = explorerSelection.topicName;
+      params.subscriptionName = explorerSelection.subscriptionName;
+    } else {
+      params.sourceQueue = sourceQueue.trim();
+    }
+
+    void runOperation("move_messages", params)
       .then(({ exitCode, errorMessage }) => {
         updateEventLogEntry(runId, exitCodeToStatus(exitCode), errorMessage);
       })
@@ -130,20 +142,24 @@ export function MoveMessagesModal() {
 
         {/* Body */}
         <div className="px-5 py-4 space-y-4">
-          {/* Source Queue */}
+          {/* Source */}
           <div className="flex flex-col gap-1">
             <label className="text-xs font-medium text-zinc-600 dark:text-zinc-300">
-              {t("explorer.moveModal.sourceQueue")} <span className="text-red-500">*</span>
+              {t(isSubscriptionSource ? "explorer.moveModal.sourceEntity" : "explorer.moveModal.sourceQueue")} <span className="text-red-500">*</span>
             </label>
             <input
-              list="move-source-queues"
+              list={isSubscriptionSource ? undefined : "move-source-queues"}
               type="text"
               value={sourceQueue}
               onChange={(e) => setSourceQueue(e.target.value)}
+              readOnly={isSubscriptionSource}
               placeholder={t("explorer.moveModal.sourcePlaceholder")}
-              className="text-xs px-2.5 py-1.5 rounded border border-zinc-300 dark:border-zinc-600 bg-transparent focus:outline-none focus:ring-1 focus:ring-azure-primary dark:text-zinc-200"
+              className={[
+                "text-xs px-2.5 py-1.5 rounded border border-zinc-300 dark:border-zinc-600 bg-transparent focus:outline-none focus:ring-1 focus:ring-azure-primary dark:text-zinc-200",
+                isSubscriptionSource ? "opacity-70 cursor-not-allowed" : "",
+              ].join(" ")}
             />
-            {queues.length > 0 && (
+            {!isSubscriptionSource && queues.length > 0 && (
               <datalist id="move-source-queues">
                 {queues.map((q) => (
                   <option key={q} value={q} />

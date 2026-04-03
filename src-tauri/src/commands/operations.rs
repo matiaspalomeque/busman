@@ -6,7 +6,10 @@ use crate::models::ScriptOutputLine;
 use crate::store;
 use serde::Deserialize;
 use serde_json::{json, Value};
-use std::{sync::atomic::Ordering, time::{Duration, Instant}};
+use std::{
+    sync::atomic::Ordering,
+    time::{Duration, Instant},
+};
 use tauri::{AppHandle, Emitter};
 
 // ─── Worker lifecycle commands ──────────────────────────────────────────────
@@ -106,8 +109,12 @@ async fn run_worker_operation(
 
 #[derive(serde::Deserialize)]
 pub struct EmptyMessagesArgs {
-    #[serde(rename = "queueName")]
-    pub queue_name: String,
+    #[serde(rename = "queueName", default)]
+    pub queue_name: Option<String>,
+    #[serde(rename = "topicName", default)]
+    pub topic_name: Option<String>,
+    #[serde(rename = "subscriptionName", default)]
+    pub subscription_name: Option<String>,
     pub mode: String,
     #[serde(rename = "connectionId")]
     pub connection_id: String,
@@ -122,7 +129,9 @@ pub async fn empty_messages(app: AppHandle, args: EmptyMessagesArgs) -> Result<(
         &app,
         "emptyMessages",
         json!({
-            "queueName": args.queue_name,
+            "queueName": args.queue_name.unwrap_or_default(),
+            "topicName": args.topic_name.unwrap_or_default(),
+            "subscriptionName": args.subscription_name.unwrap_or_default(),
             "mode": args.mode,
             "env": env,
             "runId": args.run_id,
@@ -134,10 +143,14 @@ pub async fn empty_messages(app: AppHandle, args: EmptyMessagesArgs) -> Result<(
 
 #[derive(serde::Deserialize)]
 pub struct MoveMessagesArgs {
-    #[serde(rename = "sourceQueue")]
-    pub source_queue: String,
+    #[serde(rename = "sourceQueue", default)]
+    pub source_queue: Option<String>,
     #[serde(rename = "destQueue")]
     pub dest_queue: String,
+    #[serde(rename = "topicName", default)]
+    pub topic_name: Option<String>,
+    #[serde(rename = "subscriptionName", default)]
+    pub subscription_name: Option<String>,
     pub mode: String,
     #[serde(rename = "connectionId")]
     pub connection_id: String,
@@ -152,9 +165,43 @@ pub async fn move_messages(app: AppHandle, args: MoveMessagesArgs) -> Result<(),
         &app,
         "moveMessages",
         json!({
-            "sourceQueue": args.source_queue,
+            "sourceQueue": args.source_queue.unwrap_or_default(),
             "destQueue": args.dest_queue,
+            "topicName": args.topic_name.unwrap_or_default(),
+            "subscriptionName": args.subscription_name.unwrap_or_default(),
             "mode": args.mode,
+            "env": env,
+            "runId": args.run_id,
+        }),
+        &args.run_id,
+    )
+    .await
+}
+
+#[derive(serde::Deserialize)]
+pub struct RepublishSubscriptionDlqArgs {
+    #[serde(rename = "topicName")]
+    pub topic_name: String,
+    #[serde(rename = "subscriptionName")]
+    pub subscription_name: String,
+    #[serde(rename = "connectionId")]
+    pub connection_id: String,
+    #[serde(rename = "runId")]
+    pub run_id: String,
+}
+
+#[tauri::command]
+pub async fn republish_subscription_dlq(
+    app: AppHandle,
+    args: RepublishSubscriptionDlqArgs,
+) -> Result<(), String> {
+    let env = store::resolve_connection_env(&app, &args.connection_id)?;
+    run_worker_operation(
+        &app,
+        "republishSubscriptionDlq",
+        json!({
+            "topicName": args.topic_name,
+            "subscriptionName": args.subscription_name,
             "env": env,
             "runId": args.run_id,
         }),

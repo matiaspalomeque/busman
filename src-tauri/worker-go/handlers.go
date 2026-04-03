@@ -18,6 +18,24 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/messaging/azservicebus/admin"
 )
 
+// ─── Admin client cache ─────────────────────────────────────────────────────
+// Reuses admin.Client instances per connection string to avoid repeated
+// HTTP client + auth token setup on every request.
+
+var adminClientCache sync.Map // map[string]*admin.Client
+
+func getAdminClient(connectionString string) (*admin.Client, error) {
+	if v, ok := adminClientCache.Load(connectionString); ok {
+		return v.(*admin.Client), nil
+	}
+	client, err := admin.NewClientFromConnectionString(connectionString, nil)
+	if err != nil {
+		return nil, fmt.Errorf("admin client error: %w", err)
+	}
+	actual, _ := adminClientCache.LoadOrStore(connectionString, client)
+	return actual.(*admin.Client), nil
+}
+
 // ─── Shared validation / parsing helpers ─────────────────────────────────────
 
 const entityNameMaxLen = 260
@@ -149,9 +167,9 @@ func handleListEntities(raw json.RawMessage) (any, error) {
 		return nil, err
 	}
 
-	adminClient, err := admin.NewClientFromConnectionString(cs, nil)
+	adminClient, err := getAdminClient(cs)
 	if err != nil {
-		return nil, fmt.Errorf("admin client error: %w", err)
+		return nil, err
 	}
 
 	ctx := context.Background()
@@ -227,13 +245,20 @@ func handleGetQueueCount(raw json.RawMessage) (any, error) {
 		return nil, err
 	}
 
-	adminClient, err := admin.NewClientFromConnectionString(cs, nil)
+	adminClient, err := getAdminClient(cs)
 	if err != nil {
-		return nil, fmt.Errorf("admin client error: %w", err)
+		return nil, err
 	}
 
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
 	var active, dlq int64
-	if resp, err := adminClient.GetQueueRuntimeProperties(context.Background(), p.QueueName, nil); err == nil && resp != nil {
+	resp, err := adminClient.GetQueueRuntimeProperties(ctx, p.QueueName, nil)
+	if err != nil {
+		return nil, fmt.Errorf("get queue runtime properties: %w", err)
+	}
+	if resp != nil {
 		active = int64(resp.ActiveMessageCount)
 		dlq = int64(resp.DeadLetterMessageCount)
 	}
@@ -262,17 +287,98 @@ func handleGetSubscriptionCount(raw json.RawMessage) (any, error) {
 		return nil, err
 	}
 
-	adminClient, err := admin.NewClientFromConnectionString(cs, nil)
+	adminClient, err := getAdminClient(cs)
 	if err != nil {
-		return nil, fmt.Errorf("admin client error: %w", err)
+		return nil, err
 	}
 
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
 	var active, dlq int64
-	if resp, err := adminClient.GetSubscriptionRuntimeProperties(context.Background(), p.TopicName, p.SubscriptionName, nil); err == nil && resp != nil {
+	resp, err := adminClient.GetSubscriptionRuntimeProperties(ctx, p.TopicName, p.SubscriptionName, nil)
+	if err != nil {
+		return nil, fmt.Errorf("get subscription runtime properties: %w", err)
+	}
+	if resp != nil {
 		active = int64(resp.ActiveMessageCount)
 		dlq = int64(resp.DeadLetterMessageCount)
 	}
 	return subscriptionCountResult{Topic: p.TopicName, Subscription: p.SubscriptionName, Active: active, DLQ: dlq}, nil
+}
+
+// ─── 2c. getTopicSubscriptionCounts (batch) ─────────────────────────────────
+
+type topicSubscriptionCountsParams struct {
+	Env       map[string]string `json:"env"`
+	TopicName string            `json:"topicName"`
+}
+
+type topicSubscriptionCountsResult struct {
+	Topic         string                    `json:"topic"`
+	Subscriptions []subscriptionCountResult `json:"subscriptions"`
+}
+
+func handleGetTopicSubscriptionCounts(raw json.RawMessage) (any, error) {
+	var p topicSubscriptionCountsParams
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return nil, fmt.Errorf("invalid params: %w", err)
+	}
+	cs, err := requireConnectionString(p.Env)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateEntityName(p.TopicName, "Topic"); err != nil {
+		return nil, err
+	}
+
+	adminClient, err := getAdminClient(cs)
+	if err != nil {
+		return nil, err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+	defer cancel()
+
+	var subs []subscriptionCountResult
+	pager := adminClient.NewListSubscriptionsRuntimePropertiesPager(p.TopicName, nil)
+	for pager.More() {
+		page, err := pager.NextPage(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("list subscription runtime properties: %w", err)
+		}
+		for _, s := range page.SubscriptionRuntimeProperties {
+			subs = append(subs, subscriptionCountResult{
+				Topic:        p.TopicName,
+				Subscription: s.SubscriptionName,
+				Active:       int64(s.ActiveMessageCount),
+				DLQ:          int64(s.DeadLetterMessageCount),
+			})
+		}
+	}
+
+	if subs == nil {
+		subs = []subscriptionCountResult{}
+	}
+	return topicSubscriptionCountsResult{Topic: p.TopicName, Subscriptions: subs}, nil
+}
+
+// ─── Shared subscription source helpers ──────────────────────────────────────
+
+type subscriptionSource struct {
+	TopicName        string `json:"topicName"`
+	SubscriptionName string `json:"subscriptionName"`
+}
+
+func (s *subscriptionSource) isSubscription() bool {
+	return s.TopicName != "" && s.SubscriptionName != ""
+}
+
+func (s *subscriptionSource) label(queueFallback string) string {
+	if s.isSubscription() {
+		return s.TopicName + "/" + s.SubscriptionName
+	}
+	return queueFallback
 }
 
 // ─── 3. emptyMessages ────────────────────────────────────────────────────────
@@ -282,6 +388,7 @@ type emptyMessagesParams struct {
 	Mode      string            `json:"mode"`
 	Env       map[string]string `json:"env"`
 	RunID     string            `json:"runId"`
+	subscriptionSource
 }
 
 func handleEmptyMessages(raw json.RawMessage) (any, error) {
@@ -297,8 +404,17 @@ func handleEmptyMessages(raw json.RawMessage) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := validateEntityName(p.QueueName, "Queue"); err != nil {
-		return nil, err
+	if p.isSubscription() {
+		if err := validateEntityName(p.TopicName, "Topic"); err != nil {
+			return nil, err
+		}
+		if err := validateEntityName(p.SubscriptionName, "Subscription"); err != nil {
+			return nil, err
+		}
+	} else {
+		if err := validateEntityName(p.QueueName, "Queue"); err != nil {
+			return nil, err
+		}
 	}
 
 	batchSize := parseIntOrDefault(p.Env["RECEIVE_MESSAGES_COUNT"], 50)
@@ -399,18 +515,30 @@ func handleEmptyMessages(raw json.RawMessage) (any, error) {
 		err     error
 	}
 
+	newReceiver := func(opts *azservicebus.ReceiverOptions) (*azservicebus.Receiver, error) {
+		if p.isSubscription() {
+			return client.NewReceiverForSubscription(p.TopicName, p.SubscriptionName, opts)
+		}
+		return client.NewReceiverForQueue(p.QueueName, opts)
+	}
+
+	entityKind := "queue"
+	if p.isSubscription() {
+		entityKind = "subscription"
+	}
+
 	if mode != "both" {
-		queueType := "normal queue"
+		label := "normal " + entityKind + ": " + p.label(p.QueueName)
 		var opts *azservicebus.ReceiverOptions
 		if mode == "dlq" {
-			queueType = "dead letter queue"
+			label = "dead letter " + entityKind + ": " + p.label(p.QueueName)
 			opts = &azservicebus.ReceiverOptions{SubQueue: azservicebus.SubQueueDeadLetter}
 		}
-		receiver, err := client.NewReceiverForQueue(p.QueueName, opts)
+		receiver, err := newReceiver(opts)
 		if err != nil {
 			return nil, err
 		}
-		deleted, err := runOne(receiver, queueType)
+		deleted, err := runOne(receiver, label)
 		if err != nil {
 			return nil, err
 		}
@@ -422,25 +550,24 @@ func handleEmptyMessages(raw json.RawMessage) (any, error) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			receiver, err := client.NewReceiverForQueue(p.QueueName, nil)
+			receiver, err := newReceiver(nil)
 			if err != nil {
 				results <- emptyResult{err: err}
 				return
 			}
-			deleted, err := runOne(receiver, "normal queue")
+			deleted, err := runOne(receiver, "normal "+entityKind+": "+p.label(p.QueueName))
 			results <- emptyResult{deleted: deleted, err: err}
 		}()
 
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			receiver, err := client.NewReceiverForQueue(p.QueueName,
-				&azservicebus.ReceiverOptions{SubQueue: azservicebus.SubQueueDeadLetter})
+			receiver, err := newReceiver(&azservicebus.ReceiverOptions{SubQueue: azservicebus.SubQueueDeadLetter})
 			if err != nil {
 				results <- emptyResult{err: err}
 				return
 			}
-			deleted, err := runOne(receiver, "dead letter queue")
+			deleted, err := runOne(receiver, "dead letter "+entityKind+": "+p.label(p.QueueName))
 			results <- emptyResult{deleted: deleted, err: err}
 		}()
 
@@ -469,9 +596,14 @@ type moveMessagesParams struct {
 	Mode        string            `json:"mode"`
 	Env         map[string]string `json:"env"`
 	RunID       string            `json:"runId"`
+	subscriptionSource
 }
 
-func validateMoveSourceDest(sourceQueue, destQueue, mode string) error {
+func validateMoveSourceDest(sourceQueue, destQueue, mode string, isSubscription bool) error {
+	// When source is a subscription, source and dest are always different entity types.
+	if isSubscription {
+		return nil
+	}
 	// DLQ re-drive back into the same queue is valid because source (DLQ) and destination (main) are different subqueues.
 	if sourceQueue == destQueue && mode != "dlq" {
 		return fmt.Errorf("source and destination queues must be different when mode is normal or both")
@@ -500,13 +632,22 @@ func handleMoveMessages(raw json.RawMessage) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := validateEntityName(p.SourceQueue, "Source queue"); err != nil {
-		return nil, err
+	if p.isSubscription() {
+		if err := validateEntityName(p.TopicName, "Topic"); err != nil {
+			return nil, err
+		}
+		if err := validateEntityName(p.SubscriptionName, "Subscription"); err != nil {
+			return nil, err
+		}
+	} else {
+		if err := validateEntityName(p.SourceQueue, "Source queue"); err != nil {
+			return nil, err
+		}
 	}
 	if err := validateEntityName(p.DestQueue, "Destination queue"); err != nil {
 		return nil, err
 	}
-	if err := validateMoveSourceDest(p.SourceQueue, p.DestQueue, mode); err != nil {
+	if err := validateMoveSourceDest(p.SourceQueue, p.DestQueue, mode, p.isSubscription()); err != nil {
 		return nil, err
 	}
 
@@ -678,18 +819,30 @@ func handleMoveMessages(raw json.RawMessage) (any, error) {
 		err   error
 	}
 
+	newSourceReceiver := func(opts *azservicebus.ReceiverOptions) (*azservicebus.Receiver, error) {
+		if p.isSubscription() {
+			return client.NewReceiverForSubscription(p.TopicName, p.SubscriptionName, opts)
+		}
+		return client.NewReceiverForQueue(p.SourceQueue, opts)
+	}
+
+	entityKind := "queue"
+	if p.isSubscription() {
+		entityKind = "subscription"
+	}
+
 	if mode != "both" {
-		queueType := "normal queue"
+		label := "normal " + entityKind + ": " + p.label(p.SourceQueue)
 		var opts *azservicebus.ReceiverOptions
 		if mode == "dlq" {
-			queueType = "dead letter queue"
+			label = "dead letter " + entityKind + ": " + p.label(p.SourceQueue)
 			opts = &azservicebus.ReceiverOptions{SubQueue: azservicebus.SubQueueDeadLetter}
 		}
-		receiver, err := client.NewReceiverForQueue(p.SourceQueue, opts)
+		receiver, err := newSourceReceiver(opts)
 		if err != nil {
 			return nil, err
 		}
-		moved, err := runOne(receiver, queueType)
+		moved, err := runOne(receiver, label)
 		if err != nil {
 			return nil, err
 		}
@@ -701,25 +854,24 @@ func handleMoveMessages(raw json.RawMessage) (any, error) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			receiver, err := client.NewReceiverForQueue(p.SourceQueue, nil)
+			receiver, err := newSourceReceiver(nil)
 			if err != nil {
 				results <- moveResult{err: err}
 				return
 			}
-			moved, err := runOne(receiver, "normal queue")
+			moved, err := runOne(receiver, "normal "+entityKind+": "+p.label(p.SourceQueue))
 			results <- moveResult{moved: moved, err: err}
 		}()
 
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			receiver, err := client.NewReceiverForQueue(p.SourceQueue,
-				&azservicebus.ReceiverOptions{SubQueue: azservicebus.SubQueueDeadLetter})
+			receiver, err := newSourceReceiver(&azservicebus.ReceiverOptions{SubQueue: azservicebus.SubQueueDeadLetter})
 			if err != nil {
 				results <- moveResult{err: err}
 				return
 			}
-			moved, err := runOne(receiver, "dead letter queue")
+			moved, err := runOne(receiver, "dead letter "+entityKind+": "+p.label(p.SourceQueue))
 			results <- moveResult{moved: moved, err: err}
 		}()
 
@@ -738,6 +890,41 @@ func handleMoveMessages(raw json.RawMessage) (any, error) {
 	}
 
 	return map[string]int{"totalMoved": grandTotal}, nil
+}
+
+type republishSubscriptionDlqParams struct {
+	TopicName        string            `json:"topicName"`
+	SubscriptionName string            `json:"subscriptionName"`
+	Env              map[string]string `json:"env"`
+	RunID            string            `json:"runId"`
+}
+
+func handleRepublishSubscriptionDlq(raw json.RawMessage) (any, error) {
+	var p republishSubscriptionDlqParams
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return nil, fmt.Errorf("invalid params: %w", err)
+	}
+	if err := validateEntityName(p.TopicName, "Topic"); err != nil {
+		return nil, err
+	}
+	if err := validateEntityName(p.SubscriptionName, "Subscription"); err != nil {
+		return nil, err
+	}
+
+	moveRaw, err := json.Marshal(moveMessagesParams{
+		DestQueue: p.TopicName,
+		Mode:      "dlq",
+		Env:       p.Env,
+		RunID:     p.RunID,
+		subscriptionSource: subscriptionSource{
+			TopicName:        p.TopicName,
+			SubscriptionName: p.SubscriptionName,
+		},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("marshal republish params: %w", err)
+	}
+	return handleMoveMessages(moveRaw)
 }
 
 // ─── 5. searchMessages ───────────────────────────────────────────────────────

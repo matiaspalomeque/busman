@@ -8,6 +8,14 @@ import { Icon } from "../Common/Icon";
 import { extractNamespace } from "../../utils/connection";
 import { exitCodeToStatus } from "../../utils/exitCode";
 import type { PeekResult, QueueMode } from "../../types";
+import {
+  buildEmptyMessagesParams,
+  buildReplayParams,
+  buildRepublishSubscriptionDlqParams,
+  canReplaySelection,
+  canRepublishSelection,
+  getDisplayEntity,
+} from "./toolbarActions";
 
 // ─── Toolbar button ───────────────────────────────────────────────────────────
 
@@ -139,10 +147,9 @@ export function Toolbar() {
   const [peekCount, setPeekCount] = useState(100);
   const [browsing, setBrowsing] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
-  const [confirm, setConfirm] = useState<"receive" | "replay" | null>(null);
+  const [confirm, setConfirm] = useState<"receive" | "replay" | "republish" | null>(null);
 
   const hasSelection = explorerSelection.kind !== "none";
-  const isQueue = explorerSelection.kind === "queue";
   const entityName =
     explorerSelection.kind === "queue"
       ? explorerSelection.queueName
@@ -155,6 +162,10 @@ export function Toolbar() {
       : explorerSelection.kind === "subscription"
         ? ("Subscription" as const)
         : ("Queue" as const);
+
+  const displayEntity = getDisplayEntity(explorerSelection);
+  const canReplay = canReplaySelection(explorerSelection);
+  const canRepublish = canRepublishSelection(explorerSelection);
 
   const busy = browsing || loadingMore || isRunning;
 
@@ -292,7 +303,7 @@ export function Toolbar() {
 
   // ── Receive (destructive empty) ────────────────────────────────────────────
   const handleReceiveConfirm = async () => {
-    if (!conn || !isQueue || !entityName) return;
+    if (!conn || explorerSelection.kind === "none" || !entityName) return;
     setConfirm(null);
 
     const runId = crypto.randomUUID();
@@ -302,23 +313,21 @@ export function Toolbar() {
       id: runId,
       time: new Date().toISOString(),
       namespace,
-      entity: entityName,
+      entity: displayEntity ?? entityName,
       entityType,
       operation: "Receive",
       status: "running",
     });
 
-    const { exitCode, errorMessage } = await runOperation("empty_messages", {
-      queueName: entityName,
-      mode: peekMode,
-      connectionId: conn.id,
-    });
+    const params = buildEmptyMessagesParams(explorerSelection, peekMode, conn.id);
+    if (!params) return;
+    const { exitCode, errorMessage } = await runOperation("empty_messages", params);
     updateEventLogEntry(runId, exitCodeToStatus(exitCode), errorMessage);
   };
 
   // ── Replay (DLQ → main) ────────────────────────────────────────────────────
   const handleReplayConfirm = async () => {
-    if (!conn || !isQueue || !entityName) return;
+    if (!conn || explorerSelection.kind !== "queue") return;
     setConfirm(null);
 
     const runId = crypto.randomUUID();
@@ -328,18 +337,39 @@ export function Toolbar() {
       id: runId,
       time: new Date().toISOString(),
       namespace,
-      entity: entityName,
+      entity: displayEntity ?? explorerSelection.queueName,
       entityType,
       operation: "Replay",
       status: "running",
     });
 
-    const { exitCode, errorMessage } = await runOperation("move_messages", {
-      sourceQueue: entityName,
-      destQueue: entityName,
-      mode: "dlq",
-      connectionId: conn.id,
+    const params = buildReplayParams(explorerSelection, conn.id);
+    if (!params) return;
+    const { exitCode, errorMessage } = await runOperation("move_messages", params);
+    updateEventLogEntry(runId, exitCodeToStatus(exitCode), errorMessage);
+  };
+
+  // ── Republish subscription DLQ → topic ────────────────────────────────────
+  const handleRepublishConfirm = async () => {
+    if (!conn || explorerSelection.kind !== "subscription") return;
+    setConfirm(null);
+
+    const runId = crypto.randomUUID();
+    const namespace = extractNamespace(conn.connectionString);
+
+    addEventLogEntry({
+      id: runId,
+      time: new Date().toISOString(),
+      namespace,
+      entity: `${displayEntity ?? `${explorerSelection.topicName}/${explorerSelection.subscriptionName}`} → ${explorerSelection.topicName}`,
+      entityType,
+      operation: "Republish",
+      status: "running",
     });
+
+    const params = buildRepublishSubscriptionDlqParams(explorerSelection, conn.id);
+    if (!params) return;
+    const { exitCode, errorMessage } = await runOperation("republish_subscription_dlq", params);
     updateEventLogEntry(runId, exitCodeToStatus(exitCode), errorMessage);
   };
 
@@ -437,13 +467,11 @@ export function Toolbar() {
           label={t("explorer.toolbar.move")}
           icon={<Icon name="move" size={13} />}
           onClick={() => setIsMoveModalOpen(true)}
-          disabled={!hasSelection || !isQueue || busy}
+          disabled={!hasSelection || busy}
           title={
             !hasSelection
               ? t("explorer.toolbar.moveSelectFirst")
-              : !isQueue
-                ? t("explorer.toolbar.moveQueuesOnly")
-                : t("explorer.toolbar.moveTitle")
+              : t("explorer.toolbar.moveTitle")
           }
         />
 
@@ -451,13 +479,11 @@ export function Toolbar() {
           label={t("explorer.toolbar.receive")}
           icon={<Icon name="box" size={13} />}
           onClick={() => setConfirm("receive")}
-          disabled={!hasSelection || !isQueue || busy}
+          disabled={!hasSelection || busy}
           title={
             !hasSelection
               ? t("explorer.toolbar.receiveSelectFirst")
-              : !isQueue
-                ? t("explorer.toolbar.receiveQueuesOnly")
-                : t("explorer.toolbar.receiveTitle")
+              : t("explorer.toolbar.receiveTitle")
           }
           danger
         />
@@ -466,16 +492,31 @@ export function Toolbar() {
           label={t("explorer.toolbar.replay")}
           icon={<Icon name="move" size={13} />}
           onClick={() => setConfirm("replay")}
-          disabled={!hasSelection || !isQueue || busy}
+          disabled={!hasSelection || !canReplay || busy}
           title={
             !hasSelection
               ? t("explorer.toolbar.replaySelectFirst")
-              : !isQueue
+              : !canReplay
                 ? t("explorer.toolbar.replayQueuesOnly")
                 : t("explorer.toolbar.replayTitle")
           }
           warn
         />
+
+        {canRepublish && (
+          <ToolbarButton
+            label={t("explorer.toolbar.republish")}
+            icon={<Icon name="send" size={13} />}
+            onClick={() => setConfirm("republish")}
+            disabled={!hasSelection || !canRepublish || busy}
+            title={
+              !hasSelection
+                ? t("explorer.toolbar.republishSelectFirst")
+                : t("explorer.toolbar.republishTitle")
+            }
+            warn
+          />
+        )}
 
         {isRunning && (
           <button
@@ -523,15 +564,25 @@ export function Toolbar() {
       {/* Confirm banners (rendered below toolbar) */}
       {confirm === "receive" && (
         <ConfirmBanner
-          message={t("explorer.toolbar.confirmReceive", { entity: entityName, mode: peekMode })}
+          message={t("explorer.toolbar.confirmReceive", { entity: displayEntity, mode: peekMode })}
           onConfirm={() => void handleReceiveConfirm()}
           onCancel={() => setConfirm(null)}
         />
       )}
       {confirm === "replay" && (
         <ConfirmBanner
-          message={t("explorer.toolbar.confirmReplay", { entity: entityName })}
+          message={t("explorer.toolbar.confirmReplay", { entity: displayEntity })}
           onConfirm={() => void handleReplayConfirm()}
+          onCancel={() => setConfirm(null)}
+        />
+      )}
+      {confirm === "republish" && canRepublish && (
+        <ConfirmBanner
+          message={t("explorer.toolbar.confirmRepublish", {
+            entity: displayEntity,
+            topic: explorerSelection.topicName,
+          })}
+          onConfirm={() => void handleRepublishConfirm()}
           onCancel={() => setConfirm(null)}
         />
       )}

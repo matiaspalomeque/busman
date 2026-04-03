@@ -32,9 +32,9 @@ func handleCreateQueue(raw json.RawMessage) (any, error) {
 		return nil, err
 	}
 
-	adminClient, err := admin.NewClientFromConnectionString(cs, nil)
+	adminClient, err := getAdminClient(cs)
 	if err != nil {
-		return nil, fmt.Errorf("admin client error: %w", err)
+		return nil, err
 	}
 
 	opts := &admin.CreateQueueOptions{}
@@ -97,9 +97,9 @@ func handleCreateTopic(raw json.RawMessage) (any, error) {
 		return nil, err
 	}
 
-	adminClient, err := admin.NewClientFromConnectionString(cs, nil)
+	adminClient, err := getAdminClient(cs)
 	if err != nil {
-		return nil, fmt.Errorf("admin client error: %w", err)
+		return nil, err
 	}
 
 	opts := &admin.CreateTopicOptions{}
@@ -153,9 +153,9 @@ func handleCreateSubscription(raw json.RawMessage) (any, error) {
 		return nil, err
 	}
 
-	adminClient, err := admin.NewClientFromConnectionString(cs, nil)
+	adminClient, err := getAdminClient(cs)
 	if err != nil {
-		return nil, fmt.Errorf("admin client error: %w", err)
+		return nil, err
 	}
 
 	opts := &admin.CreateSubscriptionOptions{}
@@ -210,9 +210,9 @@ func handleDeleteQueue(raw json.RawMessage) (any, error) {
 		return nil, err
 	}
 
-	adminClient, err := admin.NewClientFromConnectionString(cs, nil)
+	adminClient, err := getAdminClient(cs)
 	if err != nil {
-		return nil, fmt.Errorf("admin client error: %w", err)
+		return nil, err
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), adminTimeout)
@@ -239,9 +239,9 @@ func handleDeleteTopic(raw json.RawMessage) (any, error) {
 		return nil, err
 	}
 
-	adminClient, err := admin.NewClientFromConnectionString(cs, nil)
+	adminClient, err := getAdminClient(cs)
 	if err != nil {
-		return nil, fmt.Errorf("admin client error: %w", err)
+		return nil, err
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), adminTimeout)
@@ -277,9 +277,9 @@ func handleDeleteSubscription(raw json.RawMessage) (any, error) {
 		return nil, err
 	}
 
-	adminClient, err := admin.NewClientFromConnectionString(cs, nil)
+	adminClient, err := getAdminClient(cs)
 	if err != nil {
-		return nil, fmt.Errorf("admin client error: %w", err)
+		return nil, err
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), adminTimeout)

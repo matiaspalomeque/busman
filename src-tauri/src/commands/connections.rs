@@ -33,9 +33,19 @@ pub fn save_connection(
         new_conn.id = Uuid::new_v4().to_string();
         config.connections.push(new_conn);
     } else {
-        match config.connections.iter_mut().find(|c| c.id == connection.id) {
+        match config
+            .connections
+            .iter_mut()
+            .find(|c| c.id == connection.id)
+        {
             Some(existing) => *existing = connection,
-            None => return Err(BusmanError::NotFound(format!("Connection not found: {}", connection.id)).into()),
+            None => {
+                return Err(BusmanError::NotFound(format!(
+                    "Connection not found: {}",
+                    connection.id
+                ))
+                .into())
+            }
         }
     }
 

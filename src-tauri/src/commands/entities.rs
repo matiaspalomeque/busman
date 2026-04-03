@@ -31,10 +31,16 @@ pub async fn test_connection(
 ) -> Result<TestConnectionResult, String> {
     let trimmed = connection_string.trim();
     if !trimmed.to_lowercase().starts_with("endpoint=sb://") {
-        return Err(BusmanError::Validation("Invalid Service Bus connection string format".to_string()).into());
+        return Err(BusmanError::Validation(
+            "Invalid Service Bus connection string format".to_string(),
+        )
+        .into());
     }
     let mut env = HashMap::new();
-    env.insert("SERVICE_BUS_CONNECTION_STRING".to_string(), trimmed.to_string());
+    env.insert(
+        "SERVICE_BUS_CONNECTION_STRING".to_string(),
+        trimmed.to_string(),
+    );
     let value = call_worker(
         &app,
         "listEntities",
@@ -64,9 +70,14 @@ pub async fn list_entities(
     args: ListEntitiesArgs,
 ) -> Result<ListEntitiesResult, String> {
     let env = store::resolve_connection_env(&app, &args.connection_id)?;
-    let value = call_worker(&app, "listEntities", json!({ "env": env }), Some(Duration::from_secs(60)))
-        .await
-        .map_err(|e| redact_secrets(&e))?;
+    let value = call_worker(
+        &app,
+        "listEntities",
+        json!({ "env": env }),
+        Some(Duration::from_secs(60)),
+    )
+    .await
+    .map_err(|e| redact_secrets(&e))?;
     serde_json::from_value(value).map_err(|e| format!("Failed to parse entity list: {e}"))
 }
 
@@ -143,6 +154,41 @@ pub async fn get_subscription_count(
     serde_json::from_value(value).map_err(|e| format!("Failed to parse subscription count: {e}"))
 }
 
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct TopicSubscriptionCountsResult {
+    pub topic: String,
+    pub subscriptions: Vec<SubscriptionCountResult>,
+}
+
+#[derive(serde::Deserialize)]
+pub struct GetTopicSubscriptionCountsArgs {
+    #[serde(rename = "connectionId")]
+    pub connection_id: String,
+    #[serde(rename = "topicName")]
+    pub topic_name: String,
+}
+
+#[tauri::command]
+pub async fn get_topic_subscription_counts(
+    app: AppHandle,
+    args: GetTopicSubscriptionCountsArgs,
+) -> Result<TopicSubscriptionCountsResult, String> {
+    let env = store::resolve_connection_env(&app, &args.connection_id)?;
+    let value = call_worker(
+        &app,
+        "getTopicSubscriptionCounts",
+        serde_json::json!({
+            "env": env,
+            "topicName": args.topic_name,
+        }),
+        Some(Duration::from_secs(30)),
+    )
+    .await
+    .map_err(|e| redact_secrets(&e))?;
+    serde_json::from_value(value)
+        .map_err(|e| format!("Failed to parse topic subscription counts: {e}"))
+}
+
 // ─── Entity CRUD ────────────────────────────────────────────────────────────
 
 #[derive(serde::Deserialize)]
@@ -204,7 +250,10 @@ pub struct CreateSubscriptionArgs {
 }
 
 #[tauri::command]
-pub async fn create_subscription(app: AppHandle, args: CreateSubscriptionArgs) -> Result<(), String> {
+pub async fn create_subscription(
+    app: AppHandle,
+    args: CreateSubscriptionArgs,
+) -> Result<(), String> {
     let env = store::resolve_connection_env(&app, &args.connection_id)?;
     call_worker(
         &app,
@@ -275,7 +324,10 @@ pub struct DeleteSubscriptionArgs {
 }
 
 #[tauri::command]
-pub async fn delete_subscription(app: AppHandle, args: DeleteSubscriptionArgs) -> Result<(), String> {
+pub async fn delete_subscription(
+    app: AppHandle,
+    args: DeleteSubscriptionArgs,
+) -> Result<(), String> {
     let env = store::resolve_connection_env(&app, &args.connection_id)?;
     call_worker(
         &app,

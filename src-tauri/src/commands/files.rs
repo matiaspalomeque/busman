@@ -99,12 +99,19 @@ pub async fn write_json_file(app: AppHandle, path: String, content: String) -> R
     let canonical_home = home.canonicalize().unwrap_or(home);
     let canonical_target = target
         .parent()
-        .ok_or_else(|| BusmanError::Validation("Invalid file path: no parent directory".to_string()))?
+        .ok_or_else(|| {
+            BusmanError::Validation("Invalid file path: no parent directory".to_string())
+        })?
         .canonicalize()
         .map_err(|e| BusmanError::Io(format!("Cannot resolve target directory: {e}")))?;
     if !canonical_target.starts_with(&canonical_home) {
-        return Err(BusmanError::Validation("Write path must be within the user's home directory".to_string()).into());
+        return Err(BusmanError::Validation(
+            "Write path must be within the user's home directory".to_string(),
+        )
+        .into());
     }
 
-    tokio::fs::write(&path, content).await.map_err(|e| e.to_string())
+    tokio::fs::write(&path, content)
+        .await
+        .map_err(|e| e.to_string())
 }

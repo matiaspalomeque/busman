@@ -44,6 +44,11 @@ export const SubscriptionCountResultSchema = z.object({
   dlq: z.number(),
 });
 
+export const TopicSubscriptionCountsResultSchema = z.object({
+  topic: z.string(),
+  subscriptions: z.array(SubscriptionCountResultSchema),
+});
+
 
 export const ConnectionsConfigSchema = z.object({
   connections: z.array(

@@ -4,6 +4,7 @@ import {
   ListEntitiesResultSchema,
   QueueCountResultSchema,
   SubscriptionCountResultSchema,
+  TopicSubscriptionCountsResultSchema,
   ConnectionsConfigSchema,
 } from "./ipc";
 
@@ -42,6 +43,41 @@ describe("IPC schemas", () => {
     it("rejects missing subscription field", () => {
       expect(() =>
         SubscriptionCountResultSchema.parse({ topic: "t1", active: 5, dlq: 0 })
+      ).toThrow();
+    });
+  });
+
+  describe("TopicSubscriptionCountsResultSchema", () => {
+    it("accepts valid batch result", () => {
+      const data = {
+        topic: "t1",
+        subscriptions: [
+          { topic: "t1", subscription: "s1", active: 5, dlq: 0 },
+          { topic: "t1", subscription: "s2", active: 10, dlq: 3 },
+        ],
+      };
+      const result = TopicSubscriptionCountsResultSchema.parse(data);
+      expect(result.subscriptions).toHaveLength(2);
+      expect(result.topic).toBe("t1");
+    });
+
+    it("accepts empty subscriptions array", () => {
+      const data = { topic: "t1", subscriptions: [] };
+      expect(TopicSubscriptionCountsResultSchema.parse(data).subscriptions).toEqual([]);
+    });
+
+    it("rejects missing topic field", () => {
+      expect(() =>
+        TopicSubscriptionCountsResultSchema.parse({ subscriptions: [] })
+      ).toThrow();
+    });
+
+    it("rejects invalid subscription entry", () => {
+      expect(() =>
+        TopicSubscriptionCountsResultSchema.parse({
+          topic: "t1",
+          subscriptions: [{ topic: "t1", active: 5, dlq: 0 }],
+        })
       ).toThrow();
     });
   });

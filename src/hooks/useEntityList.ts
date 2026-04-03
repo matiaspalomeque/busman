@@ -5,6 +5,7 @@ import {
   ListEntitiesResultSchema,
   QueueCountResultSchema,
   SubscriptionCountResultSchema,
+  TopicSubscriptionCountsResultSchema,
 } from "../schemas/ipc";
 import type { z } from "zod";
 
@@ -42,9 +43,8 @@ export function useEntityList() {
         batchSetCounts(queueBuf.splice(0), subBuf.splice(0));
       };
 
-      const totalEntities =
-        result.queues.length +
-        Object.values(result.topics).reduce((n, subs) => n + subs.length, 0);
+      const topicNames = Object.keys(result.topics);
+      const totalEntities = result.queues.length + topicNames.length;
       let completed = 0;
 
       // Progressive flushing for initial load (shows counts as they arrive).
@@ -79,15 +79,19 @@ export function useEntityList() {
           .finally(onDone);
       }
 
-      for (const [topicName, subs] of Object.entries(result.topics)) {
-        for (const subscriptionName of subs) {
-          safeInvoke("get_subscription_count", SubscriptionCountResultSchema, {
-            args: { connectionId: connId, topicName, subscriptionName },
+      for (const topicName of topicNames) {
+        safeInvoke("get_topic_subscription_counts", TopicSubscriptionCountsResultSchema, {
+          args: { connectionId: connId, topicName },
+        })
+          .then((r) => {
+            if (!isStale()) {
+              for (const s of r.subscriptions) {
+                subBuf.push({ topic: s.topic, subscription: s.subscription, active: s.active, dlq: s.dlq });
+              }
+            }
           })
-            .then((r) => { if (!isStale()) subBuf.push({ topic: r.topic, subscription: r.subscription, active: r.active, dlq: r.dlq }); })
-            .catch((err) => { console.warn(`[fetchCounts] get_subscription_count(${topicName}/${subscriptionName}) failed:`, err); })
-            .finally(onDone);
-        }
+          .catch((err) => { console.warn(`[fetchCounts] get_topic_subscription_counts(${topicName}) failed:`, err); })
+          .finally(onDone);
       }
     },
     [batchSetCounts, incrementCountsLoading, decrementCountsLoading]
