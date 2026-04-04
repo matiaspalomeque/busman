@@ -50,6 +50,82 @@ export const TopicSubscriptionCountsResultSchema = z.object({
 });
 
 
+// ─── Entity properties schemas ─────────────────────────────────────────────
+
+export const QueuePropertiesSchema = z.object({
+  name: z.string(),
+  lockDuration: z.string().nullable(),
+  maxSizeInMegabytes: z.number().nullable(),
+  requiresDuplicateDetection: z.boolean().nullable(),
+  requiresSession: z.boolean().nullable(),
+  defaultMessageTimeToLive: z.string().nullable(),
+  deadLetteringOnMessageExpiration: z.boolean().nullable(),
+  maxDeliveryCount: z.number().nullable(),
+  enablePartitioning: z.boolean().nullable(),
+  enableBatchedOperations: z.boolean().nullable(),
+  status: z.string().nullable(),
+  autoDeleteOnIdle: z.string().nullable(),
+  forwardTo: z.string().nullable(),
+  forwardDeadLetteredMessagesTo: z.string().nullable(),
+  maxMessageSizeInKilobytes: z.number().nullable(),
+  // Runtime
+  sizeInBytes: z.number(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+  accessedAt: z.string(),
+  totalMessageCount: z.number(),
+  activeMessageCount: z.number(),
+  deadLetterMessageCount: z.number(),
+  scheduledMessageCount: z.number(),
+  transferMessageCount: z.number(),
+  transferDeadLetterMessageCount: z.number(),
+});
+
+export const TopicPropertiesSchema = z.object({
+  name: z.string(),
+  maxSizeInMegabytes: z.number().nullable(),
+  requiresDuplicateDetection: z.boolean().nullable(),
+  defaultMessageTimeToLive: z.string().nullable(),
+  enablePartitioning: z.boolean().nullable(),
+  enableBatchedOperations: z.boolean().nullable(),
+  status: z.string().nullable(),
+  autoDeleteOnIdle: z.string().nullable(),
+  supportOrdering: z.boolean().nullable(),
+  maxMessageSizeInKilobytes: z.number().nullable(),
+  // Runtime
+  sizeInBytes: z.number(),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+  accessedAt: z.string(),
+  subscriptionCount: z.number(),
+  scheduledMessageCount: z.number(),
+});
+
+export const SubscriptionPropertiesSchema = z.object({
+  name: z.string(),
+  topicName: z.string(),
+  lockDuration: z.string().nullable(),
+  requiresSession: z.boolean().nullable(),
+  defaultMessageTimeToLive: z.string().nullable(),
+  deadLetteringOnMessageExpiration: z.boolean().nullable(),
+  enableDeadLetteringOnFilterEvaluationExceptions: z.boolean().nullable(),
+  maxDeliveryCount: z.number().nullable(),
+  status: z.string().nullable(),
+  autoDeleteOnIdle: z.string().nullable(),
+  forwardTo: z.string().nullable(),
+  forwardDeadLetteredMessagesTo: z.string().nullable(),
+  enableBatchedOperations: z.boolean().nullable(),
+  // Runtime
+  createdAt: z.string(),
+  updatedAt: z.string(),
+  accessedAt: z.string(),
+  totalMessageCount: z.number(),
+  activeMessageCount: z.number(),
+  deadLetterMessageCount: z.number(),
+  transferMessageCount: z.number(),
+  transferDeadLetterMessageCount: z.number(),
+});
+
 export const ConnectionsConfigSchema = z.object({
   connections: z.array(
     z.object({

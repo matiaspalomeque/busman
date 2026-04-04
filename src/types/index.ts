@@ -89,6 +89,23 @@ export interface PeekResult {
 }
 
 
+// Entity properties (inferred from Zod schemas in ipc.ts)
+import type { z } from "zod";
+import type {
+  QueuePropertiesSchema,
+  TopicPropertiesSchema,
+  SubscriptionPropertiesSchema,
+} from "../schemas/ipc";
+
+export type QueueProperties = z.infer<typeof QueuePropertiesSchema>;
+export type TopicProperties = z.infer<typeof TopicPropertiesSchema>;
+export type SubscriptionProperties = z.infer<typeof SubscriptionPropertiesSchema>;
+
+export type EntityProperties =
+  | { kind: "queue"; data: QueueProperties }
+  | { kind: "topic"; data: TopicProperties }
+  | { kind: "subscription"; data: SubscriptionProperties };
+
 export type ExplorerSelection =
   | {
       kind: "none";

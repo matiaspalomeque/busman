@@ -1,4 +1,5 @@
 import { useAppStore } from "../../store/appStore";
+import { useEntityProperties } from "../../hooks/useEntityProperties";
 import { Sidebar } from "./Sidebar";
 import { Toolbar } from "./Toolbar";
 import { MessageGrid } from "./MessageGrid";
@@ -12,6 +13,8 @@ import { DeleteEntityDialog } from "./DeleteEntityDialog";
 import { AboutModal } from "../Common/AboutModal";
 
 export function Explorer() {
+  useEntityProperties();
+
   const {
     isSendModalOpen,
     isMoveModalOpen,

@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
 import type {
   Connection,
+  EntityProperties,
   EventLogEntry,
   ExplorerSelection,
   NavPage,
@@ -50,6 +51,12 @@ interface AppState {
   queueCounts: Record<string, { active: number; dlq: number }>;
   subscriptionCounts: Record<string, { active: number; dlq: number }>;
   entityCountsLoading: number; // number of in-flight per-entity count requests
+
+  // Entity properties (configuration + runtime details for selected entity)
+  entityProperties: EntityProperties | null;
+  entityPropertiesLoading: boolean;
+  entityPropertiesError: string | null;
+  entityPropertiesRequestNonce: number;
 
   // Send message draft (for Resend from Peek)
   sendDraft: SendMessageDraft | null;
@@ -126,6 +133,8 @@ interface AppState {
   clearEntityCounts: () => void;
   incrementCountsLoading: (n?: number) => void;
   decrementCountsLoading: () => void;
+  setEntityPropertiesState: (props: EntityProperties | null, loading: boolean, error: string | null) => void;
+  refreshEntityProperties: () => void;
   removeEntity: (type: "queue" | "topic" | "subscription", name: string, topicName?: string) => void;
   setSendDraft: (draft: SendMessageDraft | null) => void;
   setTreeFilter: (filter: string) => void;
@@ -170,6 +179,9 @@ function resetGridState(state: AppState): void {
   state.gridFilters = { messageId: "", deadLetterReason: "", deadLetterErrorDescription: "", body: "" };
   state.gridPage = 1;
   state.lastBrowseError = null;
+  state.entityProperties = null;
+  state.entityPropertiesLoading = false;
+  state.entityPropertiesError = null;
 }
 
 function computeMaxSeqNums(messages: PeekedMessage[]): { normal: number | null; dlq: number | null } {
@@ -214,6 +226,10 @@ export const useAppStore = create<AppState>()(
     queueCounts: {},
     subscriptionCounts: {},
     entityCountsLoading: 0,
+    entityProperties: null,
+    entityPropertiesLoading: false,
+    entityPropertiesError: null,
+    entityPropertiesRequestNonce: 0,
     sendDraft: null,
     lastBrowseError: null,
     treeFilter: "",
@@ -500,6 +516,18 @@ export const useAppStore = create<AppState>()(
     decrementCountsLoading: () =>
       set((state) => {
         state.entityCountsLoading = Math.max(0, state.entityCountsLoading - 1);
+      }),
+
+    setEntityPropertiesState: (props, loading, error) =>
+      set((state) => {
+        state.entityProperties = props;
+        state.entityPropertiesLoading = loading;
+        state.entityPropertiesError = error;
+      }),
+
+    refreshEntityProperties: () =>
+      set((state) => {
+        state.entityPropertiesRequestNonce += 1;
       }),
 
     removeEntity: (type, name, topicName) =>

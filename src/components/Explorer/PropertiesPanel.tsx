@@ -3,6 +3,7 @@ import { useAppStore, selectActiveConnection } from "../../store/appStore";
 import { useResizable } from "../../hooks/useResizable";
 import { bodyString } from "./MessageGrid";
 import { extractNamespace } from "../../utils/connection";
+import { formatTimestamp as formatTime } from "./entityDetailsFormat";
 
 function formatBodyJson(body: unknown): string {
   const raw = bodyString(body);
@@ -10,15 +11,6 @@ function formatBodyJson(body: unknown): string {
     return JSON.stringify(JSON.parse(raw), null, 2);
   } catch {
     return raw;
-  }
-}
-
-function formatTime(iso: string | null | undefined): string {
-  if (!iso) return "—";
-  try {
-    return new Date(iso).toLocaleString();
-  } catch {
-    return iso;
   }
 }
 

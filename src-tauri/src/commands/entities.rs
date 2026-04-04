@@ -189,6 +189,86 @@ pub async fn get_topic_subscription_counts(
         .map_err(|e| format!("Failed to parse topic subscription counts: {e}"))
 }
 
+// ─── Entity properties ─────────────────────────────────────────────────────
+
+#[derive(serde::Deserialize)]
+pub struct GetQueuePropertiesArgs {
+    #[serde(rename = "connectionId")]
+    pub connection_id: String,
+    #[serde(rename = "queueName")]
+    pub queue_name: String,
+}
+
+#[tauri::command]
+pub async fn get_queue_properties(
+    app: AppHandle,
+    args: GetQueuePropertiesArgs,
+) -> Result<serde_json::Value, String> {
+    let env = store::resolve_connection_env(&app, &args.connection_id)?;
+    call_worker(
+        &app,
+        "getQueueProperties",
+        json!({ "env": env, "queueName": args.queue_name }),
+        Some(Duration::from_secs(30)),
+    )
+    .await
+    .map_err(|e| redact_secrets(&e))
+}
+
+#[derive(serde::Deserialize)]
+pub struct GetTopicPropertiesArgs {
+    #[serde(rename = "connectionId")]
+    pub connection_id: String,
+    #[serde(rename = "topicName")]
+    pub topic_name: String,
+}
+
+#[tauri::command]
+pub async fn get_topic_properties(
+    app: AppHandle,
+    args: GetTopicPropertiesArgs,
+) -> Result<serde_json::Value, String> {
+    let env = store::resolve_connection_env(&app, &args.connection_id)?;
+    call_worker(
+        &app,
+        "getTopicProperties",
+        json!({ "env": env, "topicName": args.topic_name }),
+        Some(Duration::from_secs(30)),
+    )
+    .await
+    .map_err(|e| redact_secrets(&e))
+}
+
+#[derive(serde::Deserialize)]
+pub struct GetSubscriptionPropertiesArgs {
+    #[serde(rename = "connectionId")]
+    pub connection_id: String,
+    #[serde(rename = "topicName")]
+    pub topic_name: String,
+    #[serde(rename = "subscriptionName")]
+    pub subscription_name: String,
+}
+
+#[tauri::command]
+pub async fn get_subscription_properties(
+    app: AppHandle,
+    args: GetSubscriptionPropertiesArgs,
+) -> Result<serde_json::Value, String> {
+    let env = store::resolve_connection_env(&app, &args.connection_id)?;
+    call_worker(
+        &app,
+        "getSubscriptionProperties",
+        json!({
+            "env": env,
+            "topicName": args.topic_name,
+            "subscriptionName": args.subscription_name,
+        }),
+        Some(Duration::from_secs(30)),
+    )
+    .await
+    .map_err(|e| redact_secrets(&e))
+}
+
 // ─── Entity CRUD ────────────────────────────────────────────────────────────
 
 #[derive(serde::Deserialize)]

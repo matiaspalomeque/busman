@@ -4,6 +4,7 @@ import { save } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
 import { useAppStore } from "../../store/appStore";
 import type { PeekedMessage } from "../../types";
+import { EntityDetailsPanel } from "./EntityDetailsPanel";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -266,6 +267,9 @@ export function MessageGrid() {
   const hasSelection = explorerSelection.kind !== "none";
   const browsing = isRunning;
 
+  // Show entity details panel when entity selected but no browse performed yet
+  const showEntityDetails = hasSelection && peekFilename === null && !browsing;
+
   return (
     <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
       {/* Error banner */}
@@ -276,6 +280,10 @@ export function MessageGrid() {
         </div>
       )}
 
+      {showEntityDetails ? (
+        <EntityDetailsPanel />
+      ) : (
+      <>
       {/* Body filter bar */}
       <BodyFilterBar
         value={gridFilters.body}
@@ -432,6 +440,8 @@ export function MessageGrid() {
           </div>
         </div>
       </div>
+      </>
+      )}
     </div>
   );
 }
