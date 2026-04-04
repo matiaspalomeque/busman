@@ -23,6 +23,7 @@ export function Explorer() {
     setIsAboutModalOpen,
     isCreateEntityModalOpen,
     deleteEntityTarget,
+    selectedMessage,
   } = useAppStore();
 
   return (
@@ -32,7 +33,7 @@ export function Explorer() {
       <div className="flex flex-1 min-h-0">
         <Sidebar />
         <MessageGrid />
-        <PropertiesPanel />
+        {selectedMessage ? <PropertiesPanel /> : null}
       </div>
 
       <EventLog />

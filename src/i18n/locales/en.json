@@ -209,6 +209,7 @@
       "noEntitySelected": "No entity selected",
       "messageDetail": "Message Detail",
       "clickToInspect": "Click a row to inspect the message.",
+      "close": "Close",
       "messageId": "Message Id",
       "sequenceNumber": "Sequence Number",
       "enqueuedTime": "Enqueued Time",

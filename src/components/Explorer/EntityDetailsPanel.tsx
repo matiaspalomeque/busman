@@ -1,7 +1,9 @@
+import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import { useAppStore } from "../../store/appStore";
+import { useAppStore, selectActiveConnection } from "../../store/appStore";
 import type { EntityProperties, QueueProperties, SubscriptionProperties, TopicProperties } from "../../types";
 import { formatBytes, formatDuration, formatTimestamp } from "./entityDetailsFormat";
+import { extractNamespace } from "../../utils/connection";
 
 // ─── Reusable section / row components ──────────────────────────────────────
 
@@ -177,21 +179,21 @@ function entityTypeLabel(props: EntityProperties, t: (key: string) => string): s
 
 export function EntityDetailsPanel() {
   const { t } = useTranslation();
-  const {
-    entityProperties,
-    entityPropertiesLoading,
-    entityPropertiesError,
-    explorerSelection,
-    refreshEntityProperties,
-  } = useAppStore();
+  const conn = useAppStore(selectActiveConnection);
+  const entityProperties = useAppStore((s) => s.entityProperties);
+  const entityPropertiesLoading = useAppStore((s) => s.entityPropertiesLoading);
+  const entityPropertiesError = useAppStore((s) => s.entityPropertiesError);
+  const explorerSelection = useAppStore((s) => s.explorerSelection);
+  const refreshEntityProperties = useAppStore((s) => s.refreshEntityProperties);
 
   // Determine the display name for the header
   const entityName =
     explorerSelection.kind === "queue"
       ? explorerSelection.queueName
-      : explorerSelection.kind === "subscription"
-        ? `${explorerSelection.topicName} / ${explorerSelection.subscriptionName}`
-        : null;
+        : explorerSelection.kind === "subscription"
+          ? `${explorerSelection.topicName} / ${explorerSelection.subscriptionName}`
+          : null;
+  const namespace = useMemo(() => conn ? extractNamespace(conn.connectionString) : null, [conn]);
 
   return (
     <div className="flex-1 flex flex-col min-h-0 overflow-y-auto">
@@ -208,6 +210,11 @@ export function EntityDetailsPanel() {
               </span>
             )}
           </div>
+          {namespace && (
+            <div className="mt-1 text-xs text-zinc-500 dark:text-zinc-400 selectable">
+              <span className="font-medium">{t("explorer.properties.namespace")}:</span> {namespace}
+            </div>
+          )}
         </div>
       )}
 

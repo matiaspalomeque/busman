@@ -306,6 +306,17 @@ export function MessageGrid() {
         }
       />
 
+      {peekMessages.length > 0 && !selectedMessage && (
+        <div className="shrink-0 flex items-center gap-2 px-3 py-2 border-b border-azure-primary/15 bg-azure-primary/5 dark:border-azure-primary/20 dark:bg-azure-primary/10">
+          <span className="text-[10px] font-semibold uppercase tracking-wider text-azure-primary">
+            {t("explorer.properties.messageDetail")}
+          </span>
+          <span className="text-xs text-zinc-500 dark:text-zinc-400">
+            {t("explorer.properties.clickToInspect")}
+          </span>
+        </div>
+      )}
+
       {/* Table */}
       <div className="flex-1 overflow-auto">
         <table className="w-full text-xs border-collapse">

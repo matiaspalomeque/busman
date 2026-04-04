@@ -209,6 +209,7 @@
       "noEntitySelected": "Sin entidad seleccionada",
       "messageDetail": "Detalle del Mensaje",
       "clickToInspect": "Hacé clic en una fila para inspeccionar el mensaje.",
+      "close": "Cerrar",
       "messageId": "Id de Mensaje",
       "sequenceNumber": "Número de Secuencia",
       "enqueuedTime": "Hora en Cola",
