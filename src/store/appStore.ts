@@ -79,6 +79,7 @@ interface AppState {
   isConnectionsModalOpen: boolean;
   isAboutModalOpen: boolean;
   isCreateEntityModalOpen: boolean;
+  isSubscriptionRulesModalOpen: boolean;
   deleteEntityTarget: { type: "queue" | "topic" | "subscription"; name: string; topicName?: string } | null;
   sidebarCollapsed: { queues: boolean; topics: boolean; system: boolean };
 
@@ -154,6 +155,7 @@ interface AppState {
   setIsConnectionsModalOpen: (open: boolean) => void;
   setIsAboutModalOpen: (open: boolean) => void;
   setIsCreateEntityModalOpen: (open: boolean) => void;
+  setIsSubscriptionRulesModalOpen: (open: boolean) => void;
   setDeleteEntityTarget: (target: { type: "queue" | "topic" | "subscription"; name: string; topicName?: string } | null) => void;
   toggleSidebarSection: (section: "queues" | "topics" | "system") => void;
   setSidebarWidth: (width: number) => void;
@@ -243,6 +245,7 @@ export const useAppStore = create<AppState>()(
     isConnectionsModalOpen: false,
     isAboutModalOpen: false,
     isCreateEntityModalOpen: false,
+    isSubscriptionRulesModalOpen: false,
     deleteEntityTarget: null,
     sidebarCollapsed: { queues: false, topics: false, system: false },
     sidebarWidth: (() => {
@@ -314,6 +317,7 @@ export const useAppStore = create<AppState>()(
         state.queueCounts = {};
         state.subscriptionCounts = {};
         state.entityCountsLoading = 0;
+        state.isSubscriptionRulesModalOpen = false;
         state.explorerSelection = {
           kind: "none",
           queueName: null,
@@ -373,6 +377,7 @@ export const useAppStore = create<AppState>()(
           topicName: null,
           subscriptionName: null,
         };
+        state.isSubscriptionRulesModalOpen = false;
         resetGridState(state);
       }),
 
@@ -391,6 +396,7 @@ export const useAppStore = create<AppState>()(
           topicName,
           subscriptionName,
         };
+        state.isSubscriptionRulesModalOpen = false;
         resetGridState(state);
       }),
 
@@ -402,6 +408,7 @@ export const useAppStore = create<AppState>()(
           topicName: null,
           subscriptionName: null,
         };
+        state.isSubscriptionRulesModalOpen = false;
       }),
 
     setRunning: (running, runId) =>
@@ -645,6 +652,11 @@ export const useAppStore = create<AppState>()(
     setIsCreateEntityModalOpen: (open) =>
       set((state) => {
         state.isCreateEntityModalOpen = open;
+      }),
+
+    setIsSubscriptionRulesModalOpen: (open) =>
+      set((state) => {
+        state.isSubscriptionRulesModalOpen = open;
       }),
 
     setDeleteEntityTarget: (target) =>

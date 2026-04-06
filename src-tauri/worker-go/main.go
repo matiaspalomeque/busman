@@ -124,12 +124,16 @@ var handlers = map[string]handlerFn{
 	"createQueue":                handleCreateQueue,
 	"createTopic":                handleCreateTopic,
 	"createSubscription":         handleCreateSubscription,
-	"deleteQueue":                 handleDeleteQueue,
-	"deleteTopic":                 handleDeleteTopic,
-	"deleteSubscription":          handleDeleteSubscription,
-	"getQueueProperties":          handleGetQueueProperties,
-	"getTopicProperties":          handleGetTopicProperties,
-	"getSubscriptionProperties":   handleGetSubscriptionProperties,
+	"deleteQueue":                handleDeleteQueue,
+	"deleteTopic":                handleDeleteTopic,
+	"deleteSubscription":         handleDeleteSubscription,
+	"getQueueProperties":         handleGetQueueProperties,
+	"getTopicProperties":         handleGetTopicProperties,
+	"getSubscriptionProperties":  handleGetSubscriptionProperties,
+	"listSubscriptionRules":      handleListSubscriptionRules,
+	"createSubscriptionRule":     handleCreateSubscriptionRule,
+	"updateSubscriptionRule":     handleUpdateSubscriptionRule,
+	"deleteSubscriptionRule":     handleDeleteSubscriptionRule,
 }
 
 func handleHealth(_ json.RawMessage) (any, error) {

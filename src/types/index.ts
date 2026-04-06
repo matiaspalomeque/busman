@@ -92,11 +92,23 @@ export interface PeekResult {
 // Entity properties (inferred from Zod schemas in ipc.ts)
 import type { z } from "zod";
 import type {
+  JsonPrimitiveMapSchema,
+  ListSubscriptionRulesResultSchema,
+  ManageSubscriptionRuleSchema,
   QueuePropertiesSchema,
+  SubscriptionRuleActionSchema,
+  SubscriptionRuleFilterSchema,
+  SubscriptionRuleSchema,
   TopicPropertiesSchema,
   SubscriptionPropertiesSchema,
 } from "../schemas/ipc";
 
+export type JsonPrimitiveMap = z.infer<typeof JsonPrimitiveMapSchema>;
+export type SubscriptionRuleAction = z.infer<typeof SubscriptionRuleActionSchema>;
+export type SubscriptionRuleFilter = z.infer<typeof SubscriptionRuleFilterSchema>;
+export type SubscriptionRule = z.infer<typeof SubscriptionRuleSchema>;
+export type ListSubscriptionRulesResult = z.infer<typeof ListSubscriptionRulesResultSchema>;
+export type ManageSubscriptionRule = z.infer<typeof ManageSubscriptionRuleSchema>;
 export type QueueProperties = z.infer<typeof QueuePropertiesSchema>;
 export type TopicProperties = z.infer<typeof TopicPropertiesSchema>;
 export type SubscriptionProperties = z.infer<typeof SubscriptionPropertiesSchema>;

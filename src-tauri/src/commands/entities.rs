@@ -161,6 +161,39 @@ pub struct TopicSubscriptionCountsResult {
 }
 
 #[derive(serde::Deserialize)]
+pub struct ManageSubscriptionRuleArgs {
+    #[serde(rename = "connectionId")]
+    pub connection_id: String,
+    #[serde(rename = "topicName")]
+    pub topic_name: String,
+    #[serde(rename = "subscriptionName")]
+    pub subscription_name: String,
+    pub rule: serde_json::Value,
+}
+
+#[derive(serde::Deserialize)]
+pub struct ListSubscriptionRulesArgs {
+    #[serde(rename = "connectionId")]
+    pub connection_id: String,
+    #[serde(rename = "topicName")]
+    pub topic_name: String,
+    #[serde(rename = "subscriptionName")]
+    pub subscription_name: String,
+}
+
+#[derive(serde::Deserialize)]
+pub struct DeleteSubscriptionRuleArgs {
+    #[serde(rename = "connectionId")]
+    pub connection_id: String,
+    #[serde(rename = "topicName")]
+    pub topic_name: String,
+    #[serde(rename = "subscriptionName")]
+    pub subscription_name: String,
+    #[serde(rename = "ruleName")]
+    pub rule_name: String,
+}
+
+#[derive(serde::Deserialize)]
 pub struct GetTopicSubscriptionCountsArgs {
     #[serde(rename = "connectionId")]
     pub connection_id: String,
@@ -187,6 +220,92 @@ pub async fn get_topic_subscription_counts(
     .map_err(|e| redact_secrets(&e))?;
     serde_json::from_value(value)
         .map_err(|e| format!("Failed to parse topic subscription counts: {e}"))
+}
+
+#[tauri::command]
+pub async fn list_subscription_rules(
+    app: AppHandle,
+    args: ListSubscriptionRulesArgs,
+) -> Result<serde_json::Value, String> {
+    let env = store::resolve_connection_env(&app, &args.connection_id)?;
+    call_worker(
+        &app,
+        "listSubscriptionRules",
+        serde_json::json!({
+            "env": env,
+            "topicName": args.topic_name,
+            "subscriptionName": args.subscription_name,
+        }),
+        Some(Duration::from_secs(30)),
+    )
+    .await
+    .map_err(|e| redact_secrets(&e))
+}
+
+#[tauri::command]
+pub async fn create_subscription_rule(
+    app: AppHandle,
+    args: ManageSubscriptionRuleArgs,
+) -> Result<(), String> {
+    let env = store::resolve_connection_env(&app, &args.connection_id)?;
+    call_worker(
+        &app,
+        "createSubscriptionRule",
+        serde_json::json!({
+            "env": env,
+            "topicName": args.topic_name,
+            "subscriptionName": args.subscription_name,
+            "rule": args.rule,
+        }),
+        Some(Duration::from_secs(30)),
+    )
+    .await
+    .map_err(|e| redact_secrets(&e))
+    .map(|_| ())
+}
+
+#[tauri::command]
+pub async fn update_subscription_rule(
+    app: AppHandle,
+    args: ManageSubscriptionRuleArgs,
+) -> Result<(), String> {
+    let env = store::resolve_connection_env(&app, &args.connection_id)?;
+    call_worker(
+        &app,
+        "updateSubscriptionRule",
+        serde_json::json!({
+            "env": env,
+            "topicName": args.topic_name,
+            "subscriptionName": args.subscription_name,
+            "rule": args.rule,
+        }),
+        Some(Duration::from_secs(30)),
+    )
+    .await
+    .map_err(|e| redact_secrets(&e))
+    .map(|_| ())
+}
+
+#[tauri::command]
+pub async fn delete_subscription_rule(
+    app: AppHandle,
+    args: DeleteSubscriptionRuleArgs,
+) -> Result<(), String> {
+    let env = store::resolve_connection_env(&app, &args.connection_id)?;
+    call_worker(
+        &app,
+        "deleteSubscriptionRule",
+        serde_json::json!({
+            "env": env,
+            "topicName": args.topic_name,
+            "subscriptionName": args.subscription_name,
+            "ruleName": args.rule_name,
+        }),
+        Some(Duration::from_secs(30)),
+    )
+    .await
+    .map_err(|e| redact_secrets(&e))
+    .map(|_| ())
 }
 
 // ─── Entity properties ─────────────────────────────────────────────────────

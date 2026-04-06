@@ -3,6 +3,8 @@ package main
 import (
 	"encoding/json"
 	"testing"
+
+	"github.com/Azure/azure-sdk-for-go/sdk/messaging/azservicebus/admin"
 )
 
 func TestValidateMoveSourceDest(t *testing.T) {
@@ -278,4 +280,154 @@ func TestHandleRepublishSubscriptionDlqValidation(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestValidateRuleName(t *testing.T) {
+	tests := []struct {
+		name    string
+		value   string
+		wantErr bool
+	}{
+		{name: "allows default rule", value: "$Default", wantErr: false},
+		{name: "allows separators", value: "invoice.high-priority", wantErr: false},
+		{name: "rejects empty", value: "", wantErr: true},
+		{name: "rejects spaces", value: "bad rule", wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateRuleName(tt.value)
+			if tt.wantErr && err == nil {
+				t.Fatal("expected error, got nil")
+			}
+			if !tt.wantErr && err != nil {
+				t.Fatalf("expected no error, got %v", err)
+			}
+		})
+	}
+}
+
+func TestMapRuleProperties(t *testing.T) {
+	subject := "invoice.created"
+	tests := []struct {
+		name     string
+		rule     admin.RuleProperties
+		wantKind string
+	}{
+		{
+			name: "maps sql filter and action",
+			rule: admin.RuleProperties{
+				Name: "sql-rule",
+				Filter: &admin.SQLFilter{
+					Expression: "sys.Label = @label",
+					Parameters: map[string]any{"label": "blue", "retries": 2},
+				},
+				Action: &admin.SQLAction{
+					Expression: "SET priority = 'high'",
+					Parameters: map[string]any{"enabled": true},
+				},
+			},
+			wantKind: "sql",
+		},
+		{
+			name: "maps correlation filter",
+			rule: admin.RuleProperties{
+				Name: "corr-rule",
+				Filter: &admin.CorrelationFilter{
+					Subject:               &subject,
+					ApplicationProperties: map[string]any{"tenant": "blue"},
+				},
+			},
+			wantKind: "correlation",
+		},
+		{
+			name: "maps true filter",
+			rule: admin.RuleProperties{
+				Name:   "$Default",
+				Filter: &admin.TrueFilter{},
+			},
+			wantKind: "true",
+		},
+		{
+			name: "maps false filter",
+			rule: admin.RuleProperties{
+				Name:   "reject-all",
+				Filter: &admin.FalseFilter{},
+			},
+			wantKind: "false",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mapped, err := mapRuleProperties(tt.rule)
+			if err != nil {
+				t.Fatalf("expected no error, got %v", err)
+			}
+			filter, ok := mapped["filter"].(map[string]any)
+			if !ok {
+				t.Fatalf("expected filter map, got %#v", mapped["filter"])
+			}
+			if filter["kind"] != tt.wantKind {
+				t.Fatalf("expected filter kind %q, got %#v", tt.wantKind, filter["kind"])
+			}
+		})
+	}
+}
+
+func TestBuildRuleProperties(t *testing.T) {
+	rule, err := buildRuleProperties(subscriptionRulePayload{
+		Name: "tenant-filter",
+		Filter: subscriptionRuleFilterPayload{
+			Kind:          "correlation",
+			CorrelationID: strPtr("tenant-a"),
+			Subject:       strPtr("invoice.updated"),
+			ApplicationProperties: map[string]any{
+				"tenant":  "blue",
+				"attempt": 2,
+			},
+		},
+		Action: &subscriptionRuleActionPayload{
+			Expression: "SET priority = 'high'",
+			Parameters: map[string]any{"enabled": true},
+		},
+	})
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+
+	filter, ok := rule.Filter.(*admin.CorrelationFilter)
+	if !ok {
+		t.Fatalf("expected correlation filter, got %T", rule.Filter)
+	}
+	if filter.Subject == nil || *filter.Subject != "invoice.updated" {
+		t.Fatalf("expected subject to be invoice.updated, got %#v", filter.Subject)
+	}
+	action, ok := rule.Action.(*admin.SQLAction)
+	if !ok {
+		t.Fatalf("expected SQL action, got %T", rule.Action)
+	}
+	if action.Parameters["enabled"] != true {
+		t.Fatalf("expected action parameter to round-trip, got %#v", action.Parameters["enabled"])
+	}
+}
+
+func TestBuildRulePropertiesRejectsNestedJSON(t *testing.T) {
+	_, err := buildRuleProperties(subscriptionRulePayload{
+		Name: "bad-rule",
+		Filter: subscriptionRuleFilterPayload{
+			Kind:       "sql",
+			Expression: "1 = 1",
+			Parameters: map[string]any{
+				"nested": map[string]any{"no": "thanks"},
+			},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+}
+
+func strPtr(value string) *string {
+	return &value
 }

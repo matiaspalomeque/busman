@@ -3,6 +3,7 @@ import {
   buildEmptyMessagesParams,
   buildReplayParams,
   buildRepublishSubscriptionDlqParams,
+  canManageRulesSelection,
   canReplaySelection,
   canRepublishSelection,
   getDisplayEntity,
@@ -74,5 +75,7 @@ describe("toolbarActions", () => {
     expect(canReplaySelection(subscriptionSelection)).toBe(false);
     expect(canRepublishSelection(subscriptionSelection)).toBe(true);
     expect(canRepublishSelection(queueSelection)).toBe(false);
+    expect(canManageRulesSelection(subscriptionSelection)).toBe(true);
+    expect(canManageRulesSelection(queueSelection)).toBe(false);
   });
 });

@@ -49,6 +49,85 @@ export const TopicSubscriptionCountsResultSchema = z.object({
   subscriptions: z.array(SubscriptionCountResultSchema),
 });
 
+const JsonPrimitiveSchema = z.union([z.string(), z.number(), z.boolean()]);
+
+export const JsonPrimitiveMapSchema = z.record(z.string(), JsonPrimitiveSchema);
+
+export const SubscriptionRuleActionSchema = z.object({
+  expression: z.string(),
+  parameters: JsonPrimitiveMapSchema.default({}),
+});
+
+export const SubscriptionRuleFilterSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("sql"),
+    expression: z.string(),
+    parameters: JsonPrimitiveMapSchema.default({}),
+  }),
+  z.object({
+    kind: z.literal("correlation"),
+    contentType: z.string().nullable(),
+    correlationId: z.string().nullable(),
+    messageId: z.string().nullable(),
+    replyTo: z.string().nullable(),
+    replyToSessionId: z.string().nullable(),
+    sessionId: z.string().nullable(),
+    subject: z.string().nullable(),
+    to: z.string().nullable(),
+    applicationProperties: JsonPrimitiveMapSchema.default({}),
+  }),
+  z.object({
+    kind: z.literal("true"),
+  }),
+  z.object({
+    kind: z.literal("false"),
+  }),
+]);
+
+export const SubscriptionRuleSchema = z.object({
+  name: z.string(),
+  filter: SubscriptionRuleFilterSchema,
+  action: SubscriptionRuleActionSchema.nullable(),
+});
+
+export const ListSubscriptionRulesResultSchema = z.object({
+  topicName: z.string(),
+  subscriptionName: z.string(),
+  rules: z.array(SubscriptionRuleSchema),
+});
+
+export const ManageSubscriptionRuleSchema = z.object({
+  name: z.string().trim().min(1),
+  filter: z.discriminatedUnion("kind", [
+    z.object({
+      kind: z.literal("sql"),
+      expression: z.string().trim().min(1),
+      parameters: JsonPrimitiveMapSchema.default({}),
+    }),
+    z.object({
+      kind: z.literal("correlation"),
+      contentType: z.string().nullable(),
+      correlationId: z.string().nullable(),
+      messageId: z.string().nullable(),
+      replyTo: z.string().nullable(),
+      replyToSessionId: z.string().nullable(),
+      sessionId: z.string().nullable(),
+      subject: z.string().nullable(),
+      to: z.string().nullable(),
+      applicationProperties: JsonPrimitiveMapSchema.default({}),
+    }),
+    z.object({
+      kind: z.literal("true"),
+    }),
+    z.object({
+      kind: z.literal("false"),
+    }),
+  ]),
+  action: z.object({
+    expression: z.string().trim().min(1),
+    parameters: JsonPrimitiveMapSchema.default({}),
+  }).nullable(),
+});
 
 // ─── Entity properties schemas ─────────────────────────────────────────────
 

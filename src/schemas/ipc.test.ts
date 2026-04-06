@@ -6,6 +6,8 @@ import {
   SubscriptionCountResultSchema,
   TopicSubscriptionCountsResultSchema,
   ConnectionsConfigSchema,
+  ListSubscriptionRulesResultSchema,
+  ManageSubscriptionRuleSchema,
 } from "./ipc";
 
 describe("IPC schemas", () => {
@@ -139,6 +141,76 @@ describe("IPC schemas", () => {
       };
       const result = ConnectionsConfigSchema.parse(data);
       expect(result.connections[0].env).toEqual({});
+    });
+  });
+
+  describe("subscription rule schemas", () => {
+    it("accepts valid list results with sql and true filters", () => {
+      const result = ListSubscriptionRulesResultSchema.parse({
+        topicName: "billing",
+        subscriptionName: "processor",
+        rules: [
+          {
+            name: "$Default",
+            filter: { kind: "true" },
+            action: null,
+          },
+          {
+            name: "only-blue",
+            filter: {
+              kind: "sql",
+              expression: "sys.Label = @label",
+              parameters: { label: "blue", retries: 2, enabled: true },
+            },
+            action: {
+              expression: "SET priority = 'high'",
+              parameters: {},
+            },
+          },
+        ],
+      });
+
+      expect(result.rules).toHaveLength(2);
+      expect(result.rules[1].filter.kind).toBe("sql");
+    });
+
+    it("accepts valid manage payloads for correlation filters", () => {
+      const result = ManageSubscriptionRuleSchema.parse({
+        name: "corr-rule",
+        filter: {
+          kind: "correlation",
+          contentType: "application/json",
+          correlationId: "corr-1",
+          messageId: null,
+          replyTo: null,
+          replyToSessionId: null,
+          sessionId: "session-a",
+          subject: "invoice.created",
+          to: null,
+          applicationProperties: { tenant: "blue", attempt: 3, enabled: true },
+        },
+        action: null,
+      });
+
+      expect(result.filter.kind).toBe("correlation");
+      if (result.filter.kind !== "correlation") {
+        throw new Error("expected correlation filter");
+      }
+      expect(result.filter.applicationProperties.attempt).toBe(3);
+    });
+
+    it("rejects non-primitive parameter maps", () => {
+      expect(() =>
+        ManageSubscriptionRuleSchema.parse({
+          name: "bad-rule",
+          filter: {
+            kind: "sql",
+            expression: "1 = 1",
+            parameters: { nested: { no: "thanks" } },
+          },
+          action: null,
+        })
+      ).toThrow();
     });
   });
 });

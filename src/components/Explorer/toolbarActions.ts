@@ -18,6 +18,10 @@ export function canRepublishSelection(selection: ExplorerSelection): boolean {
   return selection.kind === "subscription";
 }
 
+export function canManageRulesSelection(selection: ExplorerSelection): boolean {
+  return selection.kind === "subscription";
+}
+
 export function buildEmptyMessagesParams(
   selection: ExplorerSelection,
   mode: QueueMode,

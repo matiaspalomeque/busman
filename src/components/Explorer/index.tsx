@@ -10,6 +10,7 @@ import { MoveMessagesModal } from "./MoveMessagesModal";
 import { ConnectionsModal } from "./ConnectionsModal";
 import { CreateEntityModal } from "./CreateEntityModal";
 import { DeleteEntityDialog } from "./DeleteEntityDialog";
+import { SubscriptionRulesModal } from "./SubscriptionRulesModal";
 import { AboutModal } from "../Common/AboutModal";
 
 export function Explorer() {
@@ -22,6 +23,7 @@ export function Explorer() {
     isAboutModalOpen,
     setIsAboutModalOpen,
     isCreateEntityModalOpen,
+    isSubscriptionRulesModalOpen,
     deleteEntityTarget,
     selectedMessage,
   } = useAppStore();
@@ -43,6 +45,7 @@ export function Explorer() {
       {isConnectionsModalOpen && <ConnectionsModal />}
       {isAboutModalOpen && <AboutModal onClose={() => setIsAboutModalOpen(false)} />}
       {isCreateEntityModalOpen && <CreateEntityModal />}
+      {isSubscriptionRulesModalOpen && <SubscriptionRulesModal />}
       {deleteEntityTarget != null && <DeleteEntityDialog />}
     </div>
   );

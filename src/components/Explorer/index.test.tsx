@@ -48,6 +48,10 @@ vi.mock("./DeleteEntityDialog", () => ({
   DeleteEntityDialog: () => <div>DeleteEntityDialog</div>,
 }));
 
+vi.mock("./SubscriptionRulesModal", () => ({
+  SubscriptionRulesModal: () => <div>SubscriptionRulesModal</div>,
+}));
+
 vi.mock("../Common/AboutModal", () => ({
   AboutModal: () => <div>AboutModal</div>,
 }));
@@ -88,5 +92,13 @@ describe("Explorer", () => {
     render(<Explorer />);
 
     expect(screen.getByText("PropertiesPanel")).toBeTruthy();
+  });
+
+  it("renders the subscription rules modal when open", () => {
+    useAppStore.setState({ isSubscriptionRulesModalOpen: true });
+
+    render(<Explorer />);
+
+    expect(screen.getByText("SubscriptionRulesModal")).toBeTruthy();
   });
 });

@@ -12,6 +12,7 @@ import {
   buildEmptyMessagesParams,
   buildReplayParams,
   buildRepublishSubscriptionDlqParams,
+  canManageRulesSelection,
   canReplaySelection,
   canRepublishSelection,
   getDisplayEntity,
@@ -130,6 +131,7 @@ export function Toolbar() {
     setIsSendModalOpen,
     setIsMoveModalOpen,
     setIsConnectionsModalOpen,
+    setIsSubscriptionRulesModalOpen,
     clearPeekResults,
     setPeekResults,
     appendPeekResults,
@@ -166,6 +168,7 @@ export function Toolbar() {
   const displayEntity = getDisplayEntity(explorerSelection);
   const canReplay = canReplaySelection(explorerSelection);
   const canRepublish = canRepublishSelection(explorerSelection);
+  const canManageRules = canManageRulesSelection(explorerSelection);
 
   const busy = browsing || loadingMore || isRunning;
 
@@ -517,6 +520,18 @@ export function Toolbar() {
             warn
           />
         )}
+
+        <ToolbarButton
+          label={t("explorer.toolbar.manageRules")}
+          icon={<Icon name="settings" size={13} />}
+          onClick={() => setIsSubscriptionRulesModalOpen(true)}
+          disabled={!canManageRules || busy}
+          title={
+            !canManageRules
+              ? t("explorer.toolbar.manageRulesSelectSubscription")
+              : t("explorer.toolbar.manageRulesTitle")
+          }
+        />
 
         {isRunning && (
           <button
