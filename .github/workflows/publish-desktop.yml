@@ -6,7 +6,40 @@ on:
       - "v*.*.*"
 
 jobs:
+  changelog:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      body: ${{ steps.generate.outputs.body }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate changelog
+        id: generate
+        run: |
+          PREV_TAG=$(git describe --tags --abbrev=0 "HEAD^" 2>/dev/null || echo "")
+          FOOTER="See the assets below to download and install this version."
+          if [ -z "$PREV_TAG" ]; then
+            COMMITS=$(git log --pretty=format:"- %s (%h)" HEAD)
+          else
+            COMMITS=$(git log --pretty=format:"- %s (%h)" "${PREV_TAG}..HEAD")
+          fi
+          FILTERED=$(echo "$COMMITS" | grep -iv "bump version" || true)
+          if [ -z "$FILTERED" ]; then
+            BODY="$FOOTER"
+          else
+            BODY="$(printf '%s\n\n%s' "$FILTERED" "$FOOTER")"
+          fi
+          echo "body<<EOF_CHANGELOG" >> "$GITHUB_OUTPUT"
+          echo "$BODY" >> "$GITHUB_OUTPUT"
+          echo "EOF_CHANGELOG" >> "$GITHUB_OUTPUT"
+
   publish-tauri:
+    needs: changelog
     strategy:
       fail-fast: false
       matrix:
@@ -24,22 +57,6 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Generate release notes
-        id: release_notes
-        shell: bash
-        run: |
-          PREVIOUS_TAG=$(git tag --sort=-version:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sed -n '2p')
-          if [ -z "$PREVIOUS_TAG" ]; then
-            NOTES=$(git log --pretty=format:'- %s (%h)' ${{ github.ref_name }})
-          else
-            NOTES=$(git log --pretty=format:'- %s (%h)' "${PREVIOUS_TAG}..${{ github.ref_name }}")
-          fi
-          echo "notes<<EOF" >> $GITHUB_OUTPUT
-          echo "$NOTES" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
 
       - uses: oven-sh/setup-bun@v2
         with:
@@ -76,7 +93,7 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: Busman ${{ github.ref_name }}
-          releaseBody: ${{ steps.release_notes.outputs.notes }}
+          releaseBody: "${{ needs.changelog.outputs.body }}"
           releaseDraft: false
           prerelease: false
           args: ${{ matrix.args }}
