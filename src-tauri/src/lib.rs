@@ -1,4 +1,5 @@
 mod commands;
+mod crypto;
 pub mod error;
 mod models;
 mod store;
@@ -56,6 +57,8 @@ pub fn run() {
             save_connection,
             delete_connection,
             set_active_connection,
+            export_connections,
+            import_connections,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

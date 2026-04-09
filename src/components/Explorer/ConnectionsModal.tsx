@@ -5,6 +5,8 @@ import { useAppStore } from "../../store/appStore";
 import { useConnections } from "../../hooks/useConnections";
 import { Icon } from "../Common/Icon";
 import { safeColor } from "../../utils/color";
+import { ExportConnectionsModal } from "../Connections/ExportConnectionsModal";
+import { ImportConnectionsModal } from "../Connections/ImportConnectionsModal";
 import type { Connection } from "../../types";
 
 type FormMode = { kind: "add" } | { kind: "edit"; connection: Connection };
@@ -237,6 +239,8 @@ export function ConnectionsModal() {
   const overlayRef = useRef<HTMLDivElement>(null);
   const [formMode, setFormMode] = useState<FormMode | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
+  const [showExport, setShowExport] = useState(false);
+  const [showImport, setShowImport] = useState(false);
 
   const close = () => setIsConnectionsModalOpen(false);
 
@@ -387,14 +391,40 @@ export function ConnectionsModal() {
           ) : (
             <div />
           )}
-          <button
-            onClick={close}
-            className="text-xs px-3 py-1.5 rounded border border-zinc-300 dark:border-zinc-600 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-300"
-          >
-            {t("explorer.connectionsModal.done")}
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setShowImport(true)}
+              className="text-xs px-3 py-1.5 rounded border border-zinc-300 dark:border-zinc-600 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-300"
+            >
+              {t("connections.importButton")}
+            </button>
+            <button
+              onClick={() => setShowExport(true)}
+              disabled={connections.length === 0}
+              className="text-xs px-3 py-1.5 rounded border border-zinc-300 dark:border-zinc-600 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-300 disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              {t("connections.exportButton")}
+            </button>
+            <button
+              onClick={close}
+              className="text-xs px-3 py-1.5 rounded border border-zinc-300 dark:border-zinc-600 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-300"
+            >
+              {t("explorer.connectionsModal.done")}
+            </button>
+          </div>
         </div>
       </div>
+
+      {showExport && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40">
+          <ExportConnectionsModal onClose={() => setShowExport(false)} />
+        </div>
+      )}
+      {showImport && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40">
+          <ImportConnectionsModal onClose={() => setShowImport(false)} />
+        </div>
+      )}
     </div>
   );
 }

@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { open, save } from "@tauri-apps/plugin-dialog";
 import { useCallback } from "react";
 import { useAppStore } from "../store/appStore";
 import type { Connection, ConnectionsConfig } from "../types";
@@ -57,5 +58,34 @@ export function useConnections() {
     [applyConfig]
   );
 
-  return { loadConnections, saveConnection, deleteConnection, setActive };
+  const exportConnections = useCallback(async (password: string): Promise<void> => {
+    const path = await save({
+      filters: [{ name: "Busman Export", extensions: ["busman"] }],
+      defaultPath: "connections.busman",
+    });
+    if (!path) return;
+    await invoke("export_connections", { path, password });
+  }, []);
+
+  const importConnections = useCallback(
+    async (password: string, merge: boolean): Promise<number> => {
+      const path = await open({
+        filters: [{ name: "Busman Export", extensions: ["busman"] }],
+        multiple: false,
+      });
+      if (!path) return 0;
+      const before = useAppStore.getState().connections.length;
+      const config = await invoke<ConnectionsConfig>("import_connections", {
+        path,
+        password,
+        merge,
+      });
+      setConnections(config.connections);
+      setActiveConnectionId(config.activeConnectionId);
+      return config.connections.length - (merge ? before : 0);
+    },
+    [setConnections, setActiveConnectionId]
+  );
+
+  return { loadConnections, saveConnection, deleteConnection, setActive, exportConnections, importConnections };
 }

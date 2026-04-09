@@ -34,8 +34,34 @@
     "delete": "Eliminar",
     "confirmDelete": "Confirmar",
     "cancel": "Cancelar",
+    "close": "Cerrar",
     "envOverride_one": "{{count}} variable de entorno: {{keys}}",
-    "envOverride_other": "{{count}} variables de entorno: {{keys}}"
+    "envOverride_other": "{{count}} variables de entorno: {{keys}}",
+    "exportButton": "Exportar",
+    "importButton": "Importar",
+    "exportModal": {
+      "title": "Exportar Conexiones",
+      "description": "Todas las conexiones se guardarán en un archivo cifrado. Cualquier persona con el archivo y la contraseña podrá importarlas.",
+      "password": "Contraseña de Cifrado",
+      "confirmPassword": "Confirmar Contraseña",
+      "passwordMismatch": "Las contraseñas no coinciden",
+      "passwordEmpty": "La contraseña es obligatoria",
+      "export": "Exportar",
+      "exporting": "Exportando...",
+      "success": "Conexiones exportadas correctamente"
+    },
+    "importModal": {
+      "title": "Importar Conexiones",
+      "description": "Seleccioná un archivo .busman e ingresá la contraseña usada al exportarlo.",
+      "password": "Contraseña de Descifrado",
+      "mergeLabel": "Agregar a las conexiones existentes",
+      "replaceLabel": "Reemplazar todas las conexiones",
+      "import": "Importar",
+      "importing": "Importando...",
+      "success_one": "{{count}} conexión importada",
+      "success_other": "{{count}} conexiones importadas",
+      "wrongPassword": "Contraseña incorrecta o archivo corrupto"
+    }
   },
   "connectionForm": {
     "titleAdd": "Agregar Conexión",

@@ -34,8 +34,34 @@
     "delete": "Delete",
     "confirmDelete": "Confirm",
     "cancel": "Cancel",
+    "close": "Close",
     "envOverride_one": "{{count}} env override: {{keys}}",
-    "envOverride_other": "{{count}} env overrides: {{keys}}"
+    "envOverride_other": "{{count}} env overrides: {{keys}}",
+    "exportButton": "Export",
+    "importButton": "Import",
+    "exportModal": {
+      "title": "Export Connections",
+      "description": "All connections will be saved to an encrypted file. Anyone with the file and password can import them.",
+      "password": "Encryption Password",
+      "confirmPassword": "Confirm Password",
+      "passwordMismatch": "Passwords do not match",
+      "passwordEmpty": "Password is required",
+      "export": "Export",
+      "exporting": "Exporting...",
+      "success": "Connections exported successfully"
+    },
+    "importModal": {
+      "title": "Import Connections",
+      "description": "Select a .busman file and enter the password used when it was exported.",
+      "password": "Decryption Password",
+      "mergeLabel": "Add to existing connections",
+      "replaceLabel": "Replace all connections",
+      "import": "Import",
+      "importing": "Importing...",
+      "success_one": "{{count}} connection imported",
+      "success_other": "{{count}} connections imported",
+      "wrongPassword": "Invalid password or corrupted file"
+    }
   },
   "connectionForm": {
     "titleAdd": "Add Connection",

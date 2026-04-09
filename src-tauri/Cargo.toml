@@ -27,3 +27,7 @@ log = "0.4"
 uuid = { version = "1", features = ["v4"] }
 tokio = { version = "1", features = ["io-util", "macros", "process", "sync", "time", "rt", "rt-multi-thread"] }
 chrono = { version = "0.4", features = ["clock"] }
+aes-gcm = "0.10"
+argon2 = "0.5"
+base64 = "0.22"
+rand = "0.8"
