@@ -67,6 +67,8 @@
       "stop": "Stop",
       "selectConnection": "— select connection —",
       "noConnections": "No connections",
+      "searchConnections": "Search connections...",
+      "noSearchResults": "No connections match",
       "confirmReceive": "This will permanently remove all messages from \"{{entity}}\" (mode: {{mode}}). This cannot be undone.",
       "confirmReplay": "This will move all DLQ messages from \"{{entity}}\" back to the main queue. Continue?",
       "confirmRepublish": "This will republish all DLQ messages from subscription \"{{entity}}\" to topic \"{{topic}}\". Messages may fan out to multiple subscriptions. Continue?",
@@ -362,7 +364,10 @@
         "dev": "Development",
         "staging": "Staging",
         "prod": "Production"
-      }
+      },
+      "searchPlaceholder": "Search connections...",
+      "noSearchResults": "No connections match \"{{query}}\"",
+      "groupOther": "Other"
     },
     "settingsModal": {
       "title": "Settings",

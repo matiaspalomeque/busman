@@ -67,6 +67,8 @@
       "stop": "Detener",
       "selectConnection": "— seleccioná una conexión —",
       "noConnections": "Sin conexiones",
+      "searchConnections": "Buscar conexiones...",
+      "noSearchResults": "No hay conexiones que coincidan",
       "confirmReceive": "Esto eliminará permanentemente todos los mensajes de \"{{entity}}\" (modo: {{mode}}). Esta acción no se puede deshacer.",
       "confirmReplay": "Esto moverá todos los mensajes DLQ de \"{{entity}}\" de vuelta a la cola principal. ¿Continuar?",
       "confirmRepublish": "Esto republicará todos los mensajes DLQ de la suscripción \"{{entity}}\" al topic \"{{topic}}\". Los mensajes pueden distribuirse a múltiples suscripciones. ¿Continuar?",
@@ -362,7 +364,10 @@
         "dev": "Desarrollo",
         "staging": "Staging",
         "prod": "Producción"
-      }
+      },
+      "searchPlaceholder": "Buscar conexiones...",
+      "noSearchResults": "No hay conexiones que coincidan con \"{{query}}\"",
+      "groupOther": "Otras"
     },
     "settingsModal": {
       "title": "Configuración",

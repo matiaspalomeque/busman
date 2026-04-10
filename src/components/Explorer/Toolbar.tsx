@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { useAppStore, selectActiveConnection } from "../../store/appStore";
@@ -7,7 +7,8 @@ import { useScript } from "../../hooks/useScript";
 import { Icon } from "../Common/Icon";
 import { extractNamespace } from "../../utils/connection";
 import { exitCodeToStatus } from "../../utils/exitCode";
-import type { PeekResult, QueueMode } from "../../types";
+import { safeColor } from "../../utils/color";
+import type { PeekResult, QueueMode, Connection } from "../../types";
 import {
   buildEmptyMessagesParams,
   buildReplayParams,
@@ -115,13 +116,174 @@ function ModeSelector({ value, onChange }: ModeSelectorProps) {
   );
 }
 
+// ─── Connection selector ──────────────────────────────────────────────────────
+
+const ENV_ORDER = ["prod", "staging", "dev"];
+
+function buildGroups(items: Connection[]) {
+  const buckets: Record<string, Connection[]> = {};
+  for (const c of items) {
+    const key = c.environment ?? "";
+    if (!buckets[key]) buckets[key] = [];
+    buckets[key].push(c);
+  }
+  return [
+    ...ENV_ORDER.filter((e) => buckets[e]?.length).map((e) => ({ key: e, items: buckets[e]! })),
+    ...(buckets[""]?.length ? [{ key: "", items: buckets[""] }] : []),
+  ];
+}
+
+function ConnectionSelector() {
+  const { t } = useTranslation();
+  const { connections } = useAppStore();
+  const conn = useAppStore(selectActiveConnection);
+  const { setActive } = useConnections();
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState("");
+  const containerRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false);
+        setSearch("");
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [open]);
+
+  useEffect(() => {
+    if (open) inputRef.current?.focus();
+  }, [open]);
+
+  if (connections.length === 0) {
+    return <span className="text-xs text-zinc-400">{t("explorer.toolbar.noConnections")}</span>;
+  }
+
+  const filtered = search
+    ? connections.filter((c) => c.name.toLowerCase().includes(search.toLowerCase()))
+    : connections;
+
+  const groups = buildGroups(filtered);
+  const showHeaders = groups.length > 1;
+
+  const handleSelect = (id: string) => {
+    void setActive(id);
+    setOpen(false);
+    setSearch("");
+  };
+
+  const envLabel = (key: string) =>
+    key
+      ? t(`explorer.connectionsModal.env.${key}`, key)
+      : t("explorer.connectionsModal.groupOther", "Other");
+
+  return (
+    <div ref={containerRef} className="relative">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="flex items-center gap-1.5 text-xs px-2 py-1.5 rounded border border-zinc-300 dark:border-zinc-600 bg-transparent hover:bg-zinc-100 dark:hover:bg-zinc-700 focus:outline-none focus:ring-1 focus:ring-azure-primary dark:text-zinc-200 max-w-48 transition-colors"
+      >
+        {conn ? (
+          <>
+            {safeColor(conn.environmentColor) && (
+              <span
+                className="w-1.5 h-1.5 rounded-full shrink-0"
+                style={{ backgroundColor: safeColor(conn.environmentColor) }}
+              />
+            )}
+            <span className="truncate">{conn.name}</span>
+          </>
+        ) : (
+          <span className="text-zinc-400 truncate">{t("explorer.toolbar.selectConnection")}</span>
+        )}
+        <Icon name="chevronDown" size={10} className="shrink-0 opacity-50 ml-auto pl-0.5" />
+      </button>
+
+      {open && (
+        <div className="absolute right-0 top-full mt-1 w-64 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 shadow-lg z-50 overflow-hidden">
+          {/* Search */}
+          <div className="p-2 border-b border-zinc-100 dark:border-zinc-700">
+            <div className="relative">
+              <Icon
+                name="search"
+                size={12}
+                className="absolute left-2 top-1/2 -translate-y-1/2 text-zinc-400 pointer-events-none"
+              />
+              <input
+                ref={inputRef}
+                type="text"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") {
+                    if (search) setSearch("");
+                    else setOpen(false);
+                  }
+                }}
+                placeholder={t("explorer.toolbar.searchConnections")}
+                className="w-full text-xs pl-6 pr-2 py-1.5 rounded border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900 focus:outline-none focus:ring-1 focus:ring-azure-primary dark:text-zinc-200"
+              />
+            </div>
+          </div>
+
+          {/* List */}
+          <div className="max-h-64 overflow-y-auto py-1">
+            {filtered.length === 0 ? (
+              <p className="text-xs text-zinc-400 px-3 py-2">
+                {t("explorer.toolbar.noSearchResults")}
+              </p>
+            ) : (
+              groups.map(({ key, items }) => (
+                <div key={key || "__other"}>
+                  {showHeaders && (
+                    <p className="text-[10px] font-semibold uppercase tracking-wider text-zinc-400 dark:text-zinc-500 px-3 pt-2 pb-0.5">
+                      {envLabel(key)}
+                    </p>
+                  )}
+                  {items.map((c) => (
+                    <button
+                      key={c.id}
+                      onClick={() => handleSelect(c.id)}
+                      className={[
+                        "w-full flex items-center gap-2 px-3 py-2 text-left transition-colors",
+                        conn?.id === c.id
+                          ? "bg-azure-primary/5 text-azure-primary"
+                          : "text-zinc-700 dark:text-zinc-200 hover:bg-zinc-50 dark:hover:bg-zinc-700/60",
+                      ].join(" ")}
+                    >
+                      <span
+                        className="w-1.5 h-1.5 rounded-full shrink-0"
+                        style={{
+                          backgroundColor:
+                            safeColor(c.environmentColor) ?? "rgb(161 161 170)",
+                        }}
+                      />
+                      <span className="truncate flex-1 text-xs">{c.name}</span>
+                      {conn?.id === c.id && (
+                        <Icon name="chevronRight" size={10} className="shrink-0" />
+                      )}
+                    </button>
+                  ))}
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Toolbar ──────────────────────────────────────────────────────────────────
 
 export function Toolbar() {
   const { t } = useTranslation();
   const conn = useAppStore(selectActiveConnection);
   const {
-    connections,
     explorerSelection,
     peekMessages,
     lastPeekNormalMaxSeqNum,
@@ -142,7 +304,6 @@ export function Toolbar() {
     updateEventLogEntry,
     setLastBrowseError,
   } = useAppStore();
-  const { setActive } = useConnections();
   const { runOperation, stop } = useScript();
 
   const [peekMode, setPeekMode] = useState<QueueMode>("dlq");
@@ -549,22 +710,7 @@ export function Toolbar() {
 
       {/* Connection selector */}
       <div className="flex items-center gap-1.5">
-        {connections.length > 0 ? (
-          <select
-            value={conn?.id ?? ""}
-            onChange={(e) => void setActive(e.target.value || null)}
-            className="text-xs px-2 py-1.5 pr-6 rounded border border-zinc-300 dark:border-zinc-600 bg-transparent focus:outline-none focus:ring-1 focus:ring-azure-primary dark:text-zinc-200 appearance-none select-custom-arrow max-w-48 truncate"
-          >
-            <option value="">{t("explorer.toolbar.selectConnection")}</option>
-            {connections.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </select>
-        ) : (
-          <span className="text-xs text-zinc-400">{t("explorer.toolbar.noConnections")}</span>
-        )}
+        <ConnectionSelector />
 
         <button
           onClick={() => setIsSettingsModalOpen(true, "connections")}
