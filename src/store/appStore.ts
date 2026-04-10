@@ -15,6 +15,8 @@ import type {
 /** Internal key separator for subscription store entries: "topic\0subscription". */
 export const SUBSCRIPTION_KEY_SEP = "\0";
 
+export type SettingsTab = "connections" | "appearance" | "autoRefresh" | "notifications";
+
 /** Timer handle for the changedEntities auto-clear. Module-scoped since the store is a singleton. */
 let changedEntitiesTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -76,7 +78,8 @@ interface AppState {
   eventLog: EventLogEntry[];
   isSendModalOpen: boolean;
   isMoveModalOpen: boolean;
-  isConnectionsModalOpen: boolean;
+  isSettingsModalOpen: boolean;
+  settingsTab: SettingsTab;
   isAboutModalOpen: boolean;
   isCreateEntityModalOpen: boolean;
   isSubscriptionRulesModalOpen: boolean;
@@ -152,7 +155,8 @@ interface AppState {
   setLastBrowseError: (err: string | null) => void;
   setIsSendModalOpen: (open: boolean) => void;
   setIsMoveModalOpen: (open: boolean) => void;
-  setIsConnectionsModalOpen: (open: boolean) => void;
+  setIsSettingsModalOpen: (open: boolean, tab?: SettingsTab) => void;
+  setSettingsTab: (tab: SettingsTab) => void;
   setIsAboutModalOpen: (open: boolean) => void;
   setIsCreateEntityModalOpen: (open: boolean) => void;
   setIsSubscriptionRulesModalOpen: (open: boolean) => void;
@@ -242,7 +246,8 @@ export const useAppStore = create<AppState>()(
     eventLog: [],
     isSendModalOpen: false,
     isMoveModalOpen: false,
-    isConnectionsModalOpen: false,
+    isSettingsModalOpen: false,
+    settingsTab: "connections" as SettingsTab,
     isAboutModalOpen: false,
     isCreateEntityModalOpen: false,
     isSubscriptionRulesModalOpen: false,
@@ -639,9 +644,19 @@ export const useAppStore = create<AppState>()(
         state.isMoveModalOpen = open;
       }),
 
-    setIsConnectionsModalOpen: (open) =>
+    setIsSettingsModalOpen: (open, tab) =>
       set((state) => {
-        state.isConnectionsModalOpen = open;
+        state.isSettingsModalOpen = open;
+        if (open && tab) {
+          state.settingsTab = tab;
+        } else if (!open) {
+          state.settingsTab = "connections";
+        }
+      }),
+
+    setSettingsTab: (tab) =>
+      set((state) => {
+        state.settingsTab = tab;
       }),
 
     setIsAboutModalOpen: (open) =>

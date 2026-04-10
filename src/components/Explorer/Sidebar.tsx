@@ -9,7 +9,6 @@ import { Icon } from "../Common/Icon";
 import { extractNamespace } from "../../utils/connection";
 import { safeColor } from "../../utils/color";
 import { TreeSection, TreeItem, TopicNode } from "./SidebarTree";
-import { SettingsPopover } from "./SettingsPopover";
 import type { Connection } from "../../types";
 
 // ─── Pinned item types ────────────────────────────────────────────────────────
@@ -53,11 +52,6 @@ export function Sidebar() {
     setExplorerSubscription,
     sidebarCollapsed,
     toggleSidebarSection,
-    isDark,
-    toggleDark,
-    language,
-    setLanguage,
-    setIsAboutModalOpen,
     queueCounts,
     subscriptionCounts,
     sidebarWidth,
@@ -68,12 +62,6 @@ export function Sidebar() {
     setDeleteEntityTarget,
     dlqThresholds,
     setDlqThreshold,
-    dlqNotificationsEnabled,
-    setDlqNotificationsEnabled,
-    autoRefreshEnabled,
-    setAutoRefreshEnabled,
-    autoRefreshInterval,
-    setAutoRefreshInterval,
     changedEntities,
   } = useAppStore();
 
@@ -348,20 +336,6 @@ export function Sidebar() {
             >
               <Icon name="refresh" size={13} className={entitiesLoading ? "animate-spin" : undefined} />
             </button>
-            <SettingsPopover
-              isDark={isDark}
-              toggleDark={toggleDark}
-              language={language}
-              setLanguage={setLanguage}
-              autoRefreshEnabled={autoRefreshEnabled}
-              setAutoRefreshEnabled={setAutoRefreshEnabled}
-              autoRefreshInterval={autoRefreshInterval}
-              setAutoRefreshInterval={setAutoRefreshInterval}
-              dlqNotificationsEnabled={dlqNotificationsEnabled}
-              setDlqNotificationsEnabled={setDlqNotificationsEnabled}
-              setIsAboutModalOpen={setIsAboutModalOpen}
-              hasEntities={!!entities}
-            />
           </div>
         </div>
       </div>

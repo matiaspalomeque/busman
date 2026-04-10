@@ -130,7 +130,7 @@ export function Toolbar() {
     isSendModalOpen,
     setIsSendModalOpen,
     setIsMoveModalOpen,
-    setIsConnectionsModalOpen,
+    setIsSettingsModalOpen,
     setIsSubscriptionRulesModalOpen,
     clearPeekResults,
     setPeekResults,
@@ -567,9 +567,9 @@ export function Toolbar() {
         )}
 
         <button
-          onClick={() => setIsConnectionsModalOpen(true)}
+          onClick={() => setIsSettingsModalOpen(true, "connections")}
           className="p-1.5 rounded border border-zinc-300 dark:border-zinc-600 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-700 transition-colors"
-          title={t("explorer.toolbar.manageConnections")}
+          title={t("explorer.settingsModal.title")}
         >
           <Icon name="settings" size={14} />
         </button>

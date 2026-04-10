@@ -36,8 +36,8 @@ vi.mock("./MoveMessagesModal", () => ({
   MoveMessagesModal: () => <div>MoveMessagesModal</div>,
 }));
 
-vi.mock("./ConnectionsModal", () => ({
-  ConnectionsModal: () => <div>ConnectionsModal</div>,
+vi.mock("./SettingsModal", () => ({
+  SettingsModal: () => <div>SettingsModal</div>,
 }));
 
 vi.mock("./CreateEntityModal", () => ({
@@ -100,5 +100,13 @@ describe("Explorer", () => {
     render(<Explorer />);
 
     expect(screen.getByText("SubscriptionRulesModal")).toBeTruthy();
+  });
+
+  it("renders the settings modal when open", () => {
+    useAppStore.setState({ isSettingsModalOpen: true });
+
+    render(<Explorer />);
+
+    expect(screen.getByText("SettingsModal")).toBeTruthy();
   });
 });

@@ -1,42 +1,12 @@
 {
-  "sidebar": {
-    "explorer": "Explorador",
-    "noConnections": "Sin conexiones",
-    "selectConnection": "Seleccioná una conexión...",
-    "connections": "Conexiones",
-    "manageConnections": "Administrar Conexiones",
-    "refreshEntities": "Actualizar entidades",
-    "noConnectionHint": "Seleccioná una conexión para administrar colas y tópicos.",
-    "fetchError": "Error al obtener entidades.",
-    "queues": "Colas",
-    "topics": "Tópicos",
-    "noQueues": "No se encontraron colas.",
-    "noTopics": "No se encontraron tópicos.",
-    "noSubscriptions": "Sin suscripciones",
-    "darkMode": "Modo Oscuro",
-    "lightMode": "Modo Claro",
-    "about": "Acerca de"
-  },
   "modeSelector": {
     "normal": "Normal",
     "dlq": "DLQ",
     "both": "Ambas"
   },
   "connections": {
-    "title": "Conexiones",
-    "subtitle": "Administrá perfiles de conexión de Azure Service Bus. Establecé uno como activo para usarlo en las operaciones.",
-    "addButton": "+ Agregar Conexión",
-    "noConnectionsTitle": "Sin conexiones aún",
-    "noConnectionsSubtitle": "Agregá una conexión para comenzar con las operaciones de Service Bus.",
-    "active": "Activa",
-    "setActive": "Establecer Activa",
-    "edit": "Editar",
-    "delete": "Eliminar",
-    "confirmDelete": "Confirmar",
     "cancel": "Cancelar",
     "close": "Cerrar",
-    "envOverride_one": "{{count}} variable de entorno: {{keys}}",
-    "envOverride_other": "{{count}} variables de entorno: {{keys}}",
     "exportButton": "Exportar",
     "importButton": "Importar",
     "exportModal": {
@@ -62,27 +32,6 @@
       "success_other": "{{count}} conexiones importadas",
       "wrongPassword": "Contraseña incorrecta o archivo corrupto"
     }
-  },
-  "connectionForm": {
-    "titleAdd": "Agregar Conexión",
-    "titleEdit": "Editar Conexión",
-    "labelName": "Nombre",
-    "labelConnectionString": "Cadena de Conexión",
-    "advancedToggle": "Configuración Avanzada",
-    "advancedToggleHide": "Ocultar Configuración Avanzada",
-    "fieldMaxWaitMs": "Tiempo de Espera de Operación",
-    "fieldMaxWaitMsDesc": "Límite de tiempo para llamadas de recepción/exploración/envío. Predeterminado: 60.000 ms (mayoría), 5.000 ms (inicio de movimiento).",
-    "fieldReceiveCount": "Tamaño de Lote de Recepción",
-    "fieldReceiveCountDesc": "Mensajes obtenidos por lote en operaciones de Vaciar y Mover. Predeterminado: 50.",
-    "fieldDrainIdleMs": "Espera sin Mensajes al Mover",
-    "fieldDrainIdleMsDesc": "Cuánto espera Mover sin recibir mensajes antes de terminar. Predeterminado: 3.000 ms.",
-    "fieldProgressIntervalMs": "Intervalo de Progreso al Mover",
-    "fieldProgressIntervalMsDesc": "Intervalo de actualización de la barra de progreso durante Mover. Predeterminado: 500 ms (mín. 50).",
-    "fieldBatchSize": "Tamaño de Lote de Búsqueda",
-    "fieldBatchSizeDesc": "Mensajes explorados por lote durante Buscar. Predeterminado: 50.",
-    "cancel": "Cancelar",
-    "save": "Guardar",
-    "saving": "Guardando..."
   },
   "worker": {
     "unavailable": "⚠ Worker de Service Bus no disponible.",
@@ -118,7 +67,6 @@
       "stop": "Detener",
       "selectConnection": "— seleccioná una conexión —",
       "noConnections": "Sin conexiones",
-      "manageConnections": "Administrar conexiones",
       "confirmReceive": "Esto eliminará permanentemente todos los mensajes de \"{{entity}}\" (modo: {{mode}}). Esta acción no se puede deshacer.",
       "confirmReplay": "Esto moverá todos los mensajes DLQ de \"{{entity}}\" de vuelta a la cola principal. ¿Continuar?",
       "confirmRepublish": "Esto republicará todos los mensajes DLQ de la suscripción \"{{entity}}\" al topic \"{{topic}}\". Los mensajes pueden distribuirse a múltiples suscripciones. ¿Continuar?",
@@ -190,16 +138,7 @@
       "dlqNotificationsDisabled": "Notificaciones DLQ de escritorio deshabilitadas",
       "autoRefreshEnabled": "Auto-actualización habilitada",
       "autoRefreshDisabled": "Auto-actualización deshabilitada",
-      "autoRefreshInterval": "Intervalo de actualización",
-      "settings": "Configuración",
-      "appearance": "Apariencia",
-      "theme": "Tema",
-      "language": "Idioma",
-      "autoRefresh": "Auto-actualización",
-      "enabled": "Habilitado",
-      "interval": "Intervalo",
-      "notifications": "Notificaciones",
-      "dlqAlerts": "Alertas DLQ"
+      "autoRefreshInterval": "Intervalo de actualización"
     },
     "entityManagement": {
       "createEntity": "Crear Entidad",
@@ -424,6 +363,27 @@
         "staging": "Staging",
         "prod": "Producción"
       }
+    },
+    "settingsModal": {
+      "title": "Configuración",
+      "tabs": {
+        "connections": "Conexiones",
+        "appearance": "Apariencia",
+        "autoRefresh": "Auto-actualización",
+        "notifications": "Notificaciones"
+      },
+      "done": "Listo",
+      "theme": "Tema",
+      "language": "Idioma",
+      "enabled": "Habilitado",
+      "interval": "Intervalo",
+      "dlqAlerts": "Alertas DLQ",
+      "autoRefreshDescription": "Actualiza periódicamente los conteos de mensajes de todas las colas y suscripciones.",
+      "autoRefreshEnabledAria": "Auto-actualización habilitada",
+      "autoRefreshDisabledAria": "Auto-actualización deshabilitada",
+      "dlqAlertsDescription": "Muestra una notificación de escritorio cuando el conteo DLQ de una cola o suscripción supera su umbral. Configurá los umbrales por entidad usando el ícono de campana en cada fila del panel lateral.",
+      "dlqNotificationsEnabledAria": "Notificaciones DLQ de escritorio habilitadas",
+      "dlqNotificationsDisabledAria": "Notificaciones DLQ de escritorio deshabilitadas"
     }
   }
 }

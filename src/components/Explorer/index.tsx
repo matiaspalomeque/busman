@@ -7,7 +7,7 @@ import { PropertiesPanel } from "./PropertiesPanel";
 import { EventLog } from "./EventLog";
 import { SendMessageModal } from "./SendMessageModal";
 import { MoveMessagesModal } from "./MoveMessagesModal";
-import { ConnectionsModal } from "./ConnectionsModal";
+import { SettingsModal } from "./SettingsModal";
 import { CreateEntityModal } from "./CreateEntityModal";
 import { DeleteEntityDialog } from "./DeleteEntityDialog";
 import { SubscriptionRulesModal } from "./SubscriptionRulesModal";
@@ -19,7 +19,7 @@ export function Explorer() {
   const {
     isSendModalOpen,
     isMoveModalOpen,
-    isConnectionsModalOpen,
+    isSettingsModalOpen,
     isAboutModalOpen,
     setIsAboutModalOpen,
     isCreateEntityModalOpen,
@@ -42,7 +42,7 @@ export function Explorer() {
 
       {isSendModalOpen && <SendMessageModal />}
       {isMoveModalOpen && <MoveMessagesModal />}
-      {isConnectionsModalOpen && <ConnectionsModal />}
+      {isSettingsModalOpen && <SettingsModal />}
       {isAboutModalOpen && <AboutModal onClose={() => setIsAboutModalOpen(false)} />}
       {isCreateEntityModalOpen && <CreateEntityModal />}
       {isSubscriptionRulesModalOpen && <SubscriptionRulesModal />}
