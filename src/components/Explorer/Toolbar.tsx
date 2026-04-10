@@ -335,7 +335,7 @@ export function Toolbar() {
     updateEventLogEntry,
     setLastBrowseError,
   } = useAppStore();
-  const { runOperation, stop } = useScript();
+  const { runOperation } = useScript();
 
   const [peekMode, setPeekMode] = useState<QueueMode>("dlq");
   const [peekCount, setPeekCount] = useState(100);
@@ -724,16 +724,6 @@ export function Toolbar() {
               : t("explorer.toolbar.manageRulesTitle")
           }
         />
-
-        {isRunning && (
-          <button
-            onClick={() => void stop()}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs border border-red-300 dark:border-red-700 text-red-600 dark:text-red-400 rounded hover:bg-red-50 dark:hover:bg-red-900/20"
-          >
-            <Icon name="close" size={13} />
-            {t("explorer.toolbar.stop")}
-          </button>
-        )}
       </div>
 
       {/* Spacer */}
