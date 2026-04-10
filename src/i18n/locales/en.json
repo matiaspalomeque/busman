@@ -94,6 +94,12 @@
       "noSeqAvailable": "No sequence number available",
       "loadMoreFromSeq": "Append next {{count}} messages from sequence {{seq}}"
     },
+    "progress": {
+      "inProgress": "{{operation}} in progress",
+      "processed": "Processed",
+      "rate": "Rate",
+      "elapsed": "Elapsed"
+    },
     "eventLog": {
       "title": "Event Log",
       "rows": "Rows",

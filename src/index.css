@@ -67,3 +67,9 @@
     opacity: 1;
   }
 }
+
+/* Indeterminate progress bar — slides a 45%-wide bar from off-left to off-right */
+@keyframes indeterminate {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(300%); }
+}

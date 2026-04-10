@@ -44,7 +44,7 @@ function formatLogTime(iso: string): string {
 
 export function EventLog() {
   const { t } = useTranslation();
-  const { eventLog, progress, isRunning } = useAppStore();
+  const { eventLog, isRunning } = useAppStore();
 
   const [collapsed, setCollapsed] = useState(false);
   const [page, setPage] = useState(1);
@@ -88,14 +88,14 @@ export function EventLog() {
           )}
         </button>
 
-        {/* Progress display (visible when running) */}
-        {isRunning && progress && (
-          <span className="text-xs text-zinc-500 dark:text-zinc-400 truncate flex-1">
-            {progress.text}
+        {/* Running indicator */}
+        {isRunning && (
+          <span className="flex items-center gap-1.5 ml-1">
+            <span className="w-2.5 h-2.5 border-[1.5px] border-azure-primary border-t-transparent rounded-full animate-spin" />
+            <span className="text-[10px] font-semibold text-azure-primary">
+              {t("explorer.eventLog.statusRunning")}
+            </span>
           </span>
-        )}
-        {isRunning && !progress && (
-          <span className="ml-2 w-3 h-3 border-2 border-azure-primary border-t-transparent rounded-full animate-spin" />
         )}
 
         {!collapsed && (

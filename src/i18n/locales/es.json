@@ -94,6 +94,12 @@
       "noSeqAvailable": "Número de secuencia no disponible",
       "loadMoreFromSeq": "Agregar los próximos {{count}} mensajes desde la secuencia {{seq}}"
     },
+    "progress": {
+      "inProgress": "{{operation}} en progreso",
+      "processed": "Procesados",
+      "rate": "Tasa",
+      "elapsed": "Transcurrido"
+    },
     "eventLog": {
       "title": "Registro de Eventos",
       "rows": "Filas",

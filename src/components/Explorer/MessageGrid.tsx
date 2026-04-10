@@ -144,24 +144,150 @@ function ColHeader({ label, filterKey, filterActive, onFilterToggle }: ColHeader
   );
 }
 
-// ─── Skeleton ─────────────────────────────────────────────────────────────────
+// ─── Operation progress ───────────────────────────────────────────────────────
 
-function Skeleton() {
+function parseProgressText(text: string): { count: number; rate: number } | null {
+  const match = text.match(/(\d+)\s*\|\s*Avg Rate:\s*(\d+)/);
+  if (!match) return null;
+  return { count: parseInt(match[1], 10), rate: parseInt(match[2], 10) };
+}
+
+function formatElapsed(ms: number): string {
+  const totalSec = Math.floor(ms / 1000);
+  const min = Math.floor(totalSec / 60);
+  const sec = totalSec % 60;
+  return `${min}:${sec.toString().padStart(2, "0")}`;
+}
+
+// ─── Operation progress panel ─────────────────────────────────────────────────
+
+function OperationProgressPanel() {
+  const { t } = useTranslation();
+  const { progress, eventLog, runId } = useAppStore();
+
+  const runningEntry = eventLog.find((e) => e.status === "running");
+  const operation = runningEntry?.operation ?? "Operation";
+  const entity = runningEntry?.entity ?? "";
+
+  const parsed = progress ? parseProgressText(progress.text) : null;
+  const count = parsed?.count ?? 0;
+  const rate = parsed?.rate ?? 0;
+  const elapsed = progress ? formatElapsed(progress.elapsedMs) : "0:00";
+
+  const isReceive = operation === "Receive";
+  const isReplay = operation === "Replay";
+
+  const accentClass = isReceive
+    ? "text-red-500 dark:text-red-400"
+    : isReplay
+      ? "text-amber-500 dark:text-amber-400"
+      : "text-azure-primary";
+
+  const barClass = isReceive
+    ? "bg-red-500"
+    : isReplay
+      ? "bg-amber-500"
+      : "bg-azure-primary";
+
+  const handleCancel = async () => {
+    if (!runId) return;
+    try {
+      await invoke("stop_current_operation", { runId });
+    } catch {
+      // Non-fatal
+    }
+  };
+
+  const OperationIcon = () =>
+    isReceive ? (
+      <svg width={22} height={22} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round">
+        <polyline points="3 6 5 6 21 6" />
+        <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+        <path d="M10 11v6M14 11v6" />
+        <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
+      </svg>
+    ) : isReplay ? (
+      <svg width={22} height={22} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round">
+        <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" />
+        <path d="M3 3v5h5" />
+      </svg>
+    ) : (
+      <svg width={22} height={22} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round">
+        <path d="M5 12h14M12 5l7 7-7 7" />
+      </svg>
+    );
+
   return (
-    <>
-      {Array.from({ length: 8 }).map((_, i) => (
-        <tr key={i} className="animate-pulse">
-          {Array.from({ length: 5 }).map((_, j) => (
-            <td key={j} className="px-3 py-2 border-b border-zinc-100 dark:border-zinc-800">
-              <div
-                className="h-3 rounded bg-zinc-200 dark:bg-zinc-700"
-                style={{ width: `${40 + ((i + j) % 5) * 12}%` }}
-              />
-            </td>
-          ))}
-        </tr>
-      ))}
-    </>
+    <div className="flex-1 flex items-center justify-center py-8">
+      <div className="flex flex-col items-center gap-6 w-full max-w-[260px] px-4">
+
+        {/* Icon + title */}
+        <div className="flex flex-col items-center gap-2 text-center">
+          <div className={`p-3 rounded-full bg-zinc-100 dark:bg-zinc-800/80 ${accentClass}`}>
+            <OperationIcon />
+          </div>
+          <div className="text-sm font-semibold text-zinc-700 dark:text-zinc-200">
+            {t("explorer.progress.inProgress", { operation })}
+          </div>
+          {entity && (
+            <div className="text-[11px] text-zinc-400 dark:text-zinc-500 break-words text-center w-full">
+              {entity}
+            </div>
+          )}
+        </div>
+
+        {/* Indeterminate progress bar */}
+        <div className="w-full h-[3px] bg-zinc-200 dark:bg-zinc-700 rounded-full overflow-hidden">
+          <div
+            className={`h-full w-[45%] rounded-full ${barClass} opacity-90`}
+            style={{ animation: "indeterminate 1.4s linear infinite" }}
+          />
+        </div>
+
+        {/* Stats */}
+        <div className="flex items-start gap-4 justify-center w-full">
+          <div className="flex flex-col items-center gap-1 min-w-[68px]">
+            <span className="text-[15px] font-mono font-semibold text-zinc-800 dark:text-zinc-100 tabular-nums leading-none">
+              {count > 0 ? count.toLocaleString() : "—"}
+            </span>
+            <span className="text-[10px] uppercase tracking-wider text-zinc-400 dark:text-zinc-500">
+              {t("explorer.progress.processed")}
+            </span>
+          </div>
+          <div className="w-px h-8 bg-zinc-200 dark:bg-zinc-700 self-center" />
+          <div className="flex flex-col items-center gap-1 min-w-[68px]">
+            <span className="text-[15px] font-mono font-semibold text-zinc-800 dark:text-zinc-100 tabular-nums leading-none">
+              {rate > 0 ? `${rate.toLocaleString()}/s` : "—"}
+            </span>
+            <span className="text-[10px] uppercase tracking-wider text-zinc-400 dark:text-zinc-500">
+              {t("explorer.progress.rate")}
+            </span>
+          </div>
+          <div className="w-px h-8 bg-zinc-200 dark:bg-zinc-700 self-center" />
+          <div className="flex flex-col items-center gap-1 min-w-[52px]">
+            <span className="text-[15px] font-mono font-semibold text-zinc-800 dark:text-zinc-100 tabular-nums leading-none">
+              {elapsed}
+            </span>
+            <span className="text-[10px] uppercase tracking-wider text-zinc-400 dark:text-zinc-500">
+              {t("explorer.progress.elapsed")}
+            </span>
+          </div>
+        </div>
+
+        {/* Cancel button */}
+        <button
+          onClick={() => void handleCancel()}
+          className="flex items-center gap-1.5 px-4 py-1.5 text-[11px] font-medium border border-zinc-300 dark:border-zinc-600 text-zinc-600 dark:text-zinc-300 rounded-md hover:border-red-400 hover:text-red-600 dark:hover:border-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+        >
+          <svg width={10} height={10} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round">
+            <line x1="18" y1="6" x2="6" y2="18" />
+            <line x1="6" y1="6" x2="18" y2="18" />
+          </svg>
+          {t("explorer.toolbar.stop")}
+        </button>
+
+      </div>
+    </div>
   );
 }
 
@@ -282,6 +408,8 @@ export function MessageGrid() {
 
       {showEntityDetails ? (
         <EntityDetailsPanel />
+      ) : browsing ? (
+        <OperationProgressPanel />
       ) : (
       <>
       {/* Body filter bar */}
@@ -357,9 +485,7 @@ export function MessageGrid() {
           </thead>
 
           <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
-            {browsing && peekMessages.length === 0 ? (
-              <Skeleton />
-            ) : pageRows.length === 0 ? (
+            {pageRows.length === 0 ? (
               <EmptyState
                 message={
                   !hasSelection
