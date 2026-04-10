@@ -135,7 +135,26 @@ export function useEntityList() {
     const state = useAppStore.getState();
     const connId = selectActiveConnection(state)?.id;
     if (!connId || !state.entities) return;
-    fetchCounts(state.entities, connId, { singleFlush: true });
+
+    const filter = state.treeFilter.toLowerCase();
+    const entitiesToRefresh = !filter
+      ? state.entities
+      : {
+          queues: state.entities.queues.filter((q) => q.toLowerCase().includes(filter)),
+          topics: Object.entries(state.entities.topics).reduce<Record<string, string[]>>(
+            (acc, [topic, subs]) => {
+              const topicMatches = topic.toLowerCase().includes(filter);
+              const matchingSubs = subs.filter((s) => s.toLowerCase().includes(filter));
+              if (topicMatches || matchingSubs.length > 0) {
+                acc[topic] = topicMatches ? subs : matchingSubs;
+              }
+              return acc;
+            },
+            {}
+          ),
+        };
+
+    fetchCounts(entitiesToRefresh, connId, { singleFlush: true });
   }, [fetchCounts]);
 
   type RefreshTarget =
