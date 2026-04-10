@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { useAppStore, selectActiveConnection } from "../../store/appStore";
 import { useConnections } from "../../hooks/useConnections";
+import { useEscapeKey } from "../../hooks/useEscapeKey";
 import { useScript } from "../../hooks/useScript";
 import { Icon } from "../Common/Icon";
 import { extractNamespace } from "../../utils/connection";
@@ -56,31 +57,61 @@ function ToolbarButton({ label, icon, onClick, disabled, title, danger, primary,
   );
 }
 
-// ─── Confirm overlay ──────────────────────────────────────────────────────────
+// ─── Confirm modal ────────────────────────────────────────────────────────────
 
-interface ConfirmBannerProps {
+interface ConfirmModalProps {
+  title: string;
   message: string;
+  danger?: boolean;
   onConfirm: () => void;
   onCancel: () => void;
 }
 
-function ConfirmBanner({ message, onConfirm, onCancel }: ConfirmBannerProps) {
+function ConfirmModal({ title, message, danger, onConfirm, onCancel }: ConfirmModalProps) {
   const { t } = useTranslation();
+  useEscapeKey(onCancel);
+
   return (
-    <div className="absolute top-full left-0 right-0 z-50 flex items-center gap-3 px-4 py-2.5 bg-amber-50 dark:bg-amber-950 border-b border-amber-200 dark:border-amber-700 text-xs">
-      <span className="text-amber-800 dark:text-amber-200 flex-1">{message}</span>
-      <button
-        onClick={onCancel}
-        className="px-2.5 py-1 rounded border border-zinc-300 dark:border-zinc-600 hover:bg-zinc-100 dark:hover:bg-zinc-700"
-      >
-        {t("explorer.toolbar.cancel")}
-      </button>
-      <button
-        onClick={onConfirm}
-        className="px-2.5 py-1 rounded bg-red-600 text-white hover:bg-red-700"
-      >
-        {t("explorer.toolbar.confirm")}
-      </button>
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
+      onClick={(e) => e.target === e.currentTarget && onCancel()}
+    >
+      <div role="dialog" aria-modal="true" className="bg-white dark:bg-zinc-900 rounded-lg shadow-xl w-full max-w-sm mx-4 overflow-hidden border border-zinc-200 dark:border-zinc-700">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-200 dark:border-zinc-700">
+          <h2 className={[
+            "text-sm font-semibold flex items-center gap-2",
+            danger ? "text-red-600 dark:text-red-400" : "text-amber-600 dark:text-amber-400",
+          ].join(" ")}>
+            <Icon name={danger ? "trash" : "move"} size={15} />
+            {title}
+          </h2>
+          <button onClick={onCancel} className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200">
+            <Icon name="close" size={16} />
+          </button>
+        </div>
+
+        <div className="px-4 py-4">
+          <p className="text-xs text-zinc-600 dark:text-zinc-300">{message}</p>
+        </div>
+
+        <div className="flex justify-end gap-2 px-4 py-3 border-t border-zinc-200 dark:border-zinc-700">
+          <button
+            onClick={onCancel}
+            className="px-3 py-1.5 text-xs rounded border border-zinc-300 dark:border-zinc-600 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800"
+          >
+            {t("explorer.toolbar.cancel")}
+          </button>
+          <button
+            onClick={onConfirm}
+            className={[
+              "px-4 py-1.5 text-xs rounded text-white",
+              danger ? "bg-red-600 hover:bg-red-700" : "bg-amber-500 hover:bg-amber-600",
+            ].join(" ")}
+          >
+            {t("explorer.toolbar.confirm")}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -722,26 +753,30 @@ export function Toolbar() {
 
       </div>
 
-      {/* Confirm banners (rendered below toolbar) */}
+      {/* Confirm modals */}
       {confirm === "receive" && (
-        <ConfirmBanner
+        <ConfirmModal
+          title={t("explorer.toolbar.receive")}
           message={t("explorer.toolbar.confirmReceive", { entity: displayEntity, mode: peekMode })}
+          danger
           onConfirm={() => void handleReceiveConfirm()}
           onCancel={() => setConfirm(null)}
         />
       )}
       {confirm === "replay" && (
-        <ConfirmBanner
+        <ConfirmModal
+          title={t("explorer.toolbar.replay")}
           message={t("explorer.toolbar.confirmReplay", { entity: displayEntity })}
           onConfirm={() => void handleReplayConfirm()}
           onCancel={() => setConfirm(null)}
         />
       )}
-      {confirm === "republish" && canRepublish && (
-        <ConfirmBanner
+      {confirm === "republish" && (
+        <ConfirmModal
+          title={t("explorer.toolbar.republish")}
           message={t("explorer.toolbar.confirmRepublish", {
             entity: displayEntity,
-            topic: explorerSelection.topicName,
+            topic: explorerSelection.kind === "subscription" ? explorerSelection.topicName : undefined,
           })}
           onConfirm={() => void handleRepublishConfirm()}
           onCancel={() => setConfirm(null)}
