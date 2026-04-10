@@ -212,7 +212,7 @@ export function SettingsModal() {
           {/* Tab panel */}
           <div
             role="tabpanel"
-            className="flex-1 overflow-y-auto"
+            className="flex-1 flex flex-col min-h-0"
           >
             {settingsTab === "connections" && <ConnectionsPanel />}
             {settingsTab === "appearance" && <AppearancePanel />}
