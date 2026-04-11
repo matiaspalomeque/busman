@@ -12,6 +12,7 @@ export function useAutoRefresh(refreshAllCounts: () => void) {
     activeConnectionId,
     entities,
     setChangedEntities,
+    recordEntityCountHistory,
   } = useAppStore();
 
   const refreshInFlightRef = useRef(false);
@@ -54,7 +55,8 @@ export function useAutoRefresh(refreshAllCounts: () => void) {
     if (changed.length > 0) {
       setChangedEntities(changed);
     }
-  }, [entityCountsLoading, setChangedEntities]);
+    recordEntityCountHistory();
+  }, [entityCountsLoading, setChangedEntities, recordEntityCountHistory]);
 
   // Main polling interval
   useEffect(() => {

@@ -392,6 +392,9 @@
       "autoRefreshDescription": "Periodically refreshes message counts for all queues and subscriptions.",
       "autoRefreshEnabledAria": "Auto-refresh enabled",
       "autoRefreshDisabledAria": "Auto-refresh disabled",
+      "sparklineEnabled": "Trend lines",
+      "sparklineEnabledAria": "Trend lines enabled",
+      "sparklineDisabledAria": "Trend lines disabled",
       "dlqAlertsDescription": "Shows a desktop notification when a queue or subscription's DLQ count exceeds its threshold. Set thresholds per entity using the bell icon on each row in the sidebar.",
       "dlqNotificationsEnabledAria": "DLQ desktop notifications enabled",
       "dlqNotificationsDisabledAria": "DLQ desktop notifications disabled"

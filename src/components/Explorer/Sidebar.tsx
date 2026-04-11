@@ -63,6 +63,8 @@ export function Sidebar() {
     dlqThresholds,
     setDlqThreshold,
     changedEntities,
+    entityCountHistory,
+    sparklineEnabled,
   } = useAppStore();
 
   const { widthRef, onPointerDown } = useResizable({
@@ -81,6 +83,13 @@ export function Sidebar() {
   const subCountMap = useMemo(
     () => new Map(Object.entries(subscriptionCounts).map(([k, v]) => [k.replace(SUBSCRIPTION_KEY_SEP, "/"), v])),
     [subscriptionCounts]
+  );
+
+  // Sparkline maps — keyed the same way as entityCountHistory
+  // For subscriptions TopicNode expects Map<"sub:topic/sub", number[]>
+  const subSparklineMap = useMemo(
+    () => new Map(Object.entries(entityCountHistory).filter(([k]) => k.startsWith("sub:"))),
+    [entityCountHistory]
   );
 
   const pinnedSet = useMemo(() => new Set(pinnedEntities), [pinnedEntities]);
@@ -241,6 +250,7 @@ export function Sidebar() {
                     onSetThreshold={(v) => setDlqThreshold(thresholdKey, v)}
                     onRefreshCount={() => refreshEntityCount({ type: "queue", name: item.name })}
                     flash={changedSet.has(`queue:${item.name}`)}
+                    sparkline={sparklineEnabled ? (entityCountHistory[`queue:${item.name}`] ?? null) : undefined}
                   />
                 );
               }
@@ -265,6 +275,7 @@ export function Sidebar() {
                   onSetThreshold={(v) => setDlqThreshold(thresholdKey, v)}
                   onRefreshCount={() => refreshEntityCount({ type: "subscription", topicName: item.topicName, subscriptionName: item.subName })}
                   flash={changedSet.has(`sub:${item.topicName}/${item.subName}`)}
+                  sparkline={sparklineEnabled ? (entityCountHistory[`sub:${item.topicName}/${item.subName}`] ?? null) : undefined}
                 />
               );
             })}
@@ -296,6 +307,7 @@ export function Sidebar() {
                   onSetThreshold={(v) => setDlqThreshold(thresholdKey, v)}
                   onRefreshCount={() => refreshEntityCount({ type: "queue", name: queue })}
                   flash={changedSet.has(`queue:${queue}`)}
+                  sparkline={sparklineEnabled ? (entityCountHistory[`queue:${queue}`] ?? null) : undefined}
                 />
               );
             })}
@@ -309,7 +321,7 @@ export function Sidebar() {
             onToggle={() => toggleSidebarSection("topics")}
           >
             {Object.entries(filteredTopics).map(([topic, subs]) => (
-              <TopicNode key={topic} topic={topic} subscriptions={subs} subCounts={subCountMap} dlqThresholds={dlqThresholds} onSetThreshold={setDlqThreshold} onRefreshSubscriptionCount={(t, s) => refreshEntityCount({ type: "subscription", topicName: t, subscriptionName: s })} changedSet={changedSet} />
+              <TopicNode key={topic} topic={topic} subscriptions={subs} subCounts={subCountMap} dlqThresholds={dlqThresholds} onSetThreshold={setDlqThreshold} onRefreshSubscriptionCount={(t, s) => refreshEntityCount({ type: "subscription", topicName: t, subscriptionName: s })} changedSet={changedSet} subSparklines={sparklineEnabled ? subSparklineMap : undefined} />
             ))}
           </TreeSection>
         )}

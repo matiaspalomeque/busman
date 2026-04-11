@@ -2,39 +2,25 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useAppStore } from "../../store/appStore";
 import { Icon } from "../Common/Icon";
+import { Sparkline } from "../Common/Sparkline";
 
-// ─── Count badge ────────────────────────────────────────────────────────────
+// ─── Count columns ──────────────────────────────────────────────────────────
 
-interface CountBadgeProps {
-  active: number;
-  dlq: number;
-  threshold?: number | null;
-}
-
-function CountBadge({ active, dlq, threshold }: CountBadgeProps) {
-  const { t } = useTranslation();
-  const breached = threshold != null && dlq > threshold;
-  return (
-    <span
-      className="ml-auto flex items-center gap-0.5 shrink-0 text-[10px] tabular-nums"
-      title={breached ? t("explorer.sidebar.dlqThresholdBreached", { count: dlq, threshold }) : undefined}
-    >
-      <span className="text-zinc-500 dark:text-zinc-400">{active}</span>
-      <span className="text-zinc-300 dark:text-zinc-600 mx-0.5">·</span>
-      {breached && <Icon name="alertTriangle" size={8} className="text-red-500 dark:text-red-400 shrink-0" />}
-      <span
-        className={
-          breached
-            ? "text-red-500 dark:text-red-400 font-bold"
-            : dlq > 0
-              ? "text-amber-500 dark:text-amber-400 font-medium"
-              : "text-zinc-400 dark:text-zinc-600"
-        }
-      >
-        {dlq}
-      </span>
-    </span>
-  );
+/**
+ * Compact display for large numbers so count columns stay narrow:
+ *   185248 → "185K"  |  1_200_000 → "1.2M"  |  999_999 → "1M"
+ */
+function fmtCount(n: number): string {
+  if (n >= 1_000_000) {
+    const v = n / 1_000_000;
+    return (v < 10 ? v.toFixed(1).replace(/\.0$/, "") : String(Math.round(v))) + "M";
+  }
+  if (n >= 1_000) {
+    const v = n / 1_000;
+    const s = v < 10 ? v.toFixed(1).replace(/\.0$/, "") : String(Math.round(v));
+    return s === "1000" ? "1M" : s + "K";
+  }
+  return String(n);
 }
 
 // ─── Tree section ───────────────────────────────────────────────────────────
@@ -163,6 +149,7 @@ export interface TreeItemProps {
   onSetThreshold?: (value: number | null) => void;
   onRefreshCount?: () => Promise<void>;
   flash?: boolean;
+  sparkline?: number[] | null;
 }
 
 /**
@@ -182,14 +169,16 @@ function treeItemAreEqual(prev: TreeItemProps, next: TreeItemProps): boolean {
     prev.pinKey === next.pinKey &&
     prev.isPinned === next.isPinned &&
     prev.threshold === next.threshold &&
-    prev.flash === next.flash
+    prev.flash === next.flash &&
+    prev.sparkline === next.sparkline // Immer structural sharing: new ref only when data changes
   );
 }
 
-export const TreeItem = memo(function TreeItem({ label, itemTitle, icon, isSelected, onClick, indent = false, counts, pinKey, isPinned = false, onTogglePin, onDelete, threshold, onSetThreshold, onRefreshCount, flash = false }: TreeItemProps) {
+export const TreeItem = memo(function TreeItem({ label, itemTitle, icon, isSelected, onClick, indent = false, counts, pinKey, isPinned = false, onTogglePin, onDelete, threshold, onSetThreshold, onRefreshCount, flash = false, sparkline }: TreeItemProps) {
   const { t } = useTranslation();
   const [showPopover, setShowPopover] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const breached = threshold != null && counts != null && counts.dlq > threshold;
 
   const handleRefreshCount = useCallback(async (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -230,7 +219,41 @@ export const TreeItem = memo(function TreeItem({ label, itemTitle, icon, isSelec
           className={isSelected ? "text-azure-primary" : "text-zinc-400 dark:text-zinc-500 shrink-0"}
         />
         <span className="truncate min-w-0 flex-1">{label}</span>
-        {counts != null && <CountBadge active={counts.active} dlq={counts.dlq} threshold={threshold} />}
+        {counts != null && (
+          <span
+            className="ml-auto flex items-center gap-1 shrink-0 text-[10px] tabular-nums"
+            title={
+              breached
+                ? t("explorer.sidebar.dlqThresholdBreached", { count: counts.dlq, threshold })
+                : `${counts.active} · ${counts.dlq}`
+            }
+          >
+            {/* Trend column — only rendered when the sparkline prop is provided (feature enabled) */}
+            {sparkline !== undefined && (
+              <span className="w-8 inline-flex items-center justify-center">
+                {sparkline != null && <Sparkline data={sparkline} />}
+              </span>
+            )}
+            {/* Active count column */}
+            <span className="w-7 text-right text-zinc-500 dark:text-zinc-400">
+              {fmtCount(counts.active)}
+            </span>
+            {/* Separator */}
+            <span className="text-zinc-300 dark:text-zinc-600">·</span>
+            {/* DLQ count column — slightly wider to accommodate optional alert icon */}
+            <span className={[
+              "w-9 inline-flex items-center justify-end gap-0.5",
+              breached
+                ? "text-red-500 dark:text-red-400 font-bold"
+                : counts.dlq > 0
+                  ? "text-amber-500 dark:text-amber-400 font-medium"
+                  : "text-zinc-400 dark:text-zinc-600",
+            ].join(" ")}>
+              {breached && <Icon name="alertTriangle" size={8} className="shrink-0" />}
+              {fmtCount(counts.dlq)}
+            </span>
+          </span>
+        )}
       </button>
       {onRefreshCount != null && (
         <button
@@ -300,9 +323,10 @@ interface TopicNodeProps {
   onSetThreshold: (entityKey: string, value: number | null) => void;
   onRefreshSubscriptionCount?: (topicName: string, subscriptionName: string) => Promise<void>;
   changedSet?: Set<string>;
+  subSparklines?: Map<string, number[]>;
 }
 
-export function TopicNode({ topic, subscriptions, subCounts, dlqThresholds, onSetThreshold, onRefreshSubscriptionCount, changedSet }: TopicNodeProps) {
+export function TopicNode({ topic, subscriptions, subCounts, dlqThresholds, onSetThreshold, onRefreshSubscriptionCount, changedSet, subSparklines }: TopicNodeProps) {
   const { t } = useTranslation();
   const { explorerSelection, setExplorerSubscription, pinnedEntities, togglePin, setDeleteEntityTarget } = useAppStore();
   const pinnedSet = useMemo(() => new Set(pinnedEntities), [pinnedEntities]);
@@ -365,6 +389,7 @@ export function TopicNode({ topic, subscriptions, subCounts, dlqThresholds, onSe
               onSetThreshold={(v) => onSetThreshold(thresholdKey, v)}
               onRefreshCount={onRefreshSubscriptionCount ? () => onRefreshSubscriptionCount(topic, sub) : undefined}
               flash={changedSet?.has(`sub:${topic}/${sub}`) ?? false}
+              sparkline={subSparklines?.get(`sub:${topic}/${sub}`) ?? null}
             />
           );
         })}

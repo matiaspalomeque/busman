@@ -392,6 +392,9 @@
       "autoRefreshDescription": "Actualiza periódicamente los conteos de mensajes de todas las colas y suscripciones.",
       "autoRefreshEnabledAria": "Auto-actualización habilitada",
       "autoRefreshDisabledAria": "Auto-actualización deshabilitada",
+      "sparklineEnabled": "Líneas de tendencia",
+      "sparklineEnabledAria": "Líneas de tendencia habilitadas",
+      "sparklineDisabledAria": "Líneas de tendencia deshabilitadas",
       "dlqAlertsDescription": "Muestra una notificación de escritorio cuando el conteo DLQ de una cola o suscripción supera su umbral. Configurá los umbrales por entidad usando el ícono de campana en cada fila del panel lateral.",
       "dlqNotificationsEnabledAria": "Notificaciones DLQ de escritorio habilitadas",
       "dlqNotificationsDisabledAria": "Notificaciones DLQ de escritorio deshabilitadas"

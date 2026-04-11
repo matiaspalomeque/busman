@@ -109,8 +109,14 @@ interface AppState {
   // Auto-refresh (persisted)
   autoRefreshEnabled: boolean;
   autoRefreshInterval: 15 | 30 | 60;
+  // Sparkline / trend-line visibility (persisted)
+  sparklineEnabled: boolean;
   // Transient: entity keys whose counts changed on last auto-refresh (for flash animation)
   changedEntities: string[];
+
+  // Session-only rolling history of active message counts per entity (for sparklines).
+  // Keys: "queue:<name>" or "sub:<topic>/<subscription>" — same format as changedEntities.
+  entityCountHistory: Record<string, number[]>;
 
   // Actions
   setConnections: (connections: Connection[]) => void;
@@ -172,7 +178,10 @@ interface AppState {
   setDlqNotificationsEnabled: (enabled: boolean) => void;
   setAutoRefreshEnabled: (enabled: boolean) => void;
   setAutoRefreshInterval: (interval: 15 | 30 | 60) => void;
+  setSparklineEnabled: (enabled: boolean) => void;
   setChangedEntities: (keys: string[]) => void;
+  recordEntityCountHistory: () => void;
+  clearEntityCountHistory: () => void;
 }
 
 /** Resets all entity-specific grid/peek state. Used when switching connection, queue, or subscription. */
@@ -304,7 +313,16 @@ export const useAppStore = create<AppState>()(
       } catch {}
       return 30 as const;
     })(),
+    sparklineEnabled: (() => {
+      try {
+        const stored = localStorage.getItem("sparklineEnabled");
+        return stored === null ? true : stored === "true";
+      } catch {
+        return true;
+      }
+    })(),
     changedEntities: [],
+    entityCountHistory: {},
 
     setConnections: (connections) =>
       set((state) => {
@@ -322,6 +340,7 @@ export const useAppStore = create<AppState>()(
         state.queueCounts = {};
         state.subscriptionCounts = {};
         state.entityCountsLoading = 0;
+        state.entityCountHistory = {};
         state.isSubscriptionRulesModalOpen = false;
         state.explorerSelection = {
           kind: "none",
@@ -797,6 +816,41 @@ export const useAppStore = create<AppState>()(
         }, 2000);
       }
     },
+
+    setSparklineEnabled: (enabled) => {
+      try {
+        localStorage.setItem("sparklineEnabled", String(enabled));
+      } catch {}
+      set((state) => {
+        state.sparklineEnabled = enabled;
+      });
+    },
+
+    recordEntityCountHistory: () =>
+      set((state) => {
+        const MAX = 20;
+        for (const [name, counts] of Object.entries(state.queueCounts)) {
+          const key = `queue:${name}`;
+          if (!state.entityCountHistory[key]) state.entityCountHistory[key] = [];
+          state.entityCountHistory[key].push(counts.active);
+          if (state.entityCountHistory[key].length > MAX) {
+            state.entityCountHistory[key].splice(0, state.entityCountHistory[key].length - MAX);
+          }
+        }
+        for (const [rawKey, counts] of Object.entries(state.subscriptionCounts)) {
+          const key = `sub:${rawKey.replace(SUBSCRIPTION_KEY_SEP, "/")}`;
+          if (!state.entityCountHistory[key]) state.entityCountHistory[key] = [];
+          state.entityCountHistory[key].push(counts.active);
+          if (state.entityCountHistory[key].length > MAX) {
+            state.entityCountHistory[key].splice(0, state.entityCountHistory[key].length - MAX);
+          }
+        }
+      }),
+
+    clearEntityCountHistory: () =>
+      set((state) => {
+        state.entityCountHistory = {};
+      }),
   }))
 );
 

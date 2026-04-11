@@ -78,8 +78,11 @@ function AppearancePanel() {
 
 function AutoRefreshPanel() {
   const { t } = useTranslation();
-  const { autoRefreshEnabled, setAutoRefreshEnabled, autoRefreshInterval, setAutoRefreshInterval } =
-    useAppStore();
+  const {
+    autoRefreshEnabled, setAutoRefreshEnabled,
+    autoRefreshInterval, setAutoRefreshInterval,
+    sparklineEnabled, setSparklineEnabled,
+  } = useAppStore();
 
   return (
     <div className="px-5 py-4 space-y-3">
@@ -109,6 +112,18 @@ function AutoRefreshPanel() {
               onChange={setAutoRefreshInterval}
               disabled={!autoRefreshEnabled}
               className="transition-opacity"
+            />
+          </div>
+          <div className={ROW}>
+            <span className={LABEL}>{t("explorer.settingsModal.sparklineEnabled")}</span>
+            <ToggleSwitch
+              enabled={sparklineEnabled}
+              onToggle={() => setSparklineEnabled(!sparklineEnabled)}
+              ariaLabel={
+                sparklineEnabled
+                  ? t("explorer.settingsModal.sparklineEnabledAria")
+                  : t("explorer.settingsModal.sparklineDisabledAria")
+              }
             />
           </div>
         </div>
