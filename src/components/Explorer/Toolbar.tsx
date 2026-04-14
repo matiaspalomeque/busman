@@ -31,9 +31,11 @@ interface ToolbarButtonProps {
   danger?: boolean;
   primary?: boolean;
   warn?: boolean;
+  violet?: boolean;
+  active?: boolean;
 }
 
-function ToolbarButton({ label, icon, onClick, disabled, title, danger, primary, warn }: ToolbarButtonProps) {
+function ToolbarButton({ label, icon, onClick, disabled, title, danger, primary, warn, violet, active }: ToolbarButtonProps) {
   return (
     <button
       onClick={onClick}
@@ -48,7 +50,11 @@ function ToolbarButton({ label, icon, onClick, disabled, title, danger, primary,
             ? "border-orange-400 dark:border-orange-600 text-orange-600 dark:text-orange-400 hover:bg-orange-50 dark:hover:bg-orange-900/20"
             : primary
               ? "border-blue-300 dark:border-blue-700 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20"
-              : "border-zinc-300 dark:border-zinc-600 text-azure-secondary dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-700",
+              : violet
+                ? active
+                  ? "border-violet-400 dark:border-violet-600 bg-violet-50 dark:bg-violet-900/20 text-violet-600 dark:text-violet-400"
+                  : "border-violet-300 dark:border-violet-700 text-violet-500 dark:text-violet-400 hover:bg-violet-50 dark:hover:bg-violet-900/20"
+                : "border-zinc-300 dark:border-zinc-600 text-azure-secondary dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-700",
       ].join(" ")}
     >
       {icon}
@@ -325,6 +331,8 @@ export function Toolbar() {
     setIsMoveModalOpen,
     setIsSettingsModalOpen,
     setIsSubscriptionRulesModalOpen,
+    isInsightsPanelOpen,
+    setIsInsightsPanelOpen,
     clearPeekResults,
     setPeekResults,
     appendPeekResults,
@@ -647,6 +655,17 @@ export function Toolbar() {
             disabled={loadMoreDisabled}
             title={loadMoreTitle}
             primary
+          />
+        )}
+
+        {peekMessages.length > 0 && (
+          <ToolbarButton
+            label={t("insights.toggle")}
+            icon={<Icon name="chartBar" size={13} />}
+            onClick={() => setIsInsightsPanelOpen(!isInsightsPanelOpen)}
+            title={t("insights.toggleTitle")}
+            violet
+            active={isInsightsPanelOpen}
           />
         )}
 

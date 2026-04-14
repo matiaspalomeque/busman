@@ -76,6 +76,7 @@ interface AppState {
   gridPage: number;
   gridPageSize: number;
   eventLog: EventLogEntry[];
+  isInsightsPanelOpen: boolean;
   isSendModalOpen: boolean;
   isMoveModalOpen: boolean;
   isSettingsModalOpen: boolean;
@@ -159,6 +160,7 @@ interface AppState {
   addEventLogEntry: (entry: EventLogEntry) => void;
   updateEventLogEntry: (id: string, status: "success" | "error" | "stopped", errorMessage?: string) => void;
   setLastBrowseError: (err: string | null) => void;
+  setIsInsightsPanelOpen: (open: boolean) => void;
   setIsSendModalOpen: (open: boolean) => void;
   setIsMoveModalOpen: (open: boolean) => void;
   setIsSettingsModalOpen: (open: boolean, tab?: SettingsTab) => void;
@@ -197,6 +199,7 @@ function resetGridState(state: AppState): void {
   state.entityProperties = null;
   state.entityPropertiesLoading = false;
   state.entityPropertiesError = null;
+  state.isInsightsPanelOpen = false;
 }
 
 function computeMaxSeqNums(messages: PeekedMessage[]): { normal: number | null; dlq: number | null } {
@@ -253,6 +256,7 @@ export const useAppStore = create<AppState>()(
     gridPage: 1,
     gridPageSize: 100,
     eventLog: [],
+    isInsightsPanelOpen: false,
     isSendModalOpen: false,
     isMoveModalOpen: false,
     isSettingsModalOpen: false,
@@ -651,6 +655,11 @@ export const useAppStore = create<AppState>()(
     setLastBrowseError: (err) =>
       set((state) => {
         state.lastBrowseError = err;
+      }),
+
+    setIsInsightsPanelOpen: (open) =>
+      set((state) => {
+        state.isInsightsPanelOpen = open;
       }),
 
     setIsSendModalOpen: (open) =>

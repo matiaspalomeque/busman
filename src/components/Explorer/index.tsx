@@ -3,6 +3,7 @@ import { useEntityProperties } from "../../hooks/useEntityProperties";
 import { Sidebar } from "./Sidebar";
 import { Toolbar } from "./Toolbar";
 import { MessageGrid } from "./MessageGrid";
+import { MessageInsightsPanel } from "./MessageInsightsPanel";
 import { PropertiesPanel } from "./PropertiesPanel";
 import { EventLog } from "./EventLog";
 import { SendMessageModal } from "./SendMessageModal";
@@ -26,7 +27,11 @@ export function Explorer() {
     isSubscriptionRulesModalOpen,
     deleteEntityTarget,
     selectedMessage,
+    isInsightsPanelOpen,
   } = useAppStore();
+  const hasPeekMessages = useAppStore((s) => s.peekMessages.length > 0);
+
+  const showInsights = isInsightsPanelOpen && hasPeekMessages;
 
   return (
     <div className="fixed inset-0 flex flex-col">
@@ -34,8 +39,14 @@ export function Explorer() {
 
       <div className="flex flex-1 min-h-0">
         <Sidebar />
-        <MessageGrid />
-        {selectedMessage ? <PropertiesPanel /> : null}
+        {showInsights ? (
+          <MessageInsightsPanel />
+        ) : (
+          <>
+            <MessageGrid />
+            {selectedMessage ? <PropertiesPanel /> : null}
+          </>
+        )}
       </div>
 
       <EventLog />

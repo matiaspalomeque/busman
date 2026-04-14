@@ -230,6 +230,17 @@ function BookmarkPaths() {
   return <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" />;
 }
 
+function ChartBarPaths() {
+  return (
+    <>
+      <path d="M3 20h18" />
+      <line x1="5" y1="20" x2="5" y2="11" />
+      <line x1="11" y1="20" x2="11" y2="4" />
+      <line x1="17" y1="20" x2="17" y2="13" />
+    </>
+  );
+}
+
 // ─── Icon map ─────────────────────────────────────────────────────────────────
 
 export type IconName =
@@ -258,7 +269,8 @@ export type IconName =
   | "bellFilled"
   | "timer"
   | "alertTriangle"
-  | "bookmark";
+  | "bookmark"
+  | "chartBar";
 
 const PATHS: Record<IconName, () => JSX.Element> = {
   queue: QueuePaths,
@@ -287,6 +299,7 @@ const PATHS: Record<IconName, () => JSX.Element> = {
   timer: TimerPaths,
   alertTriangle: AlertTrianglePaths,
   bookmark: BookmarkPaths,
+  chartBar: ChartBarPaths,
 };
 
 // ─── Icon component ───────────────────────────────────────────────────────────
