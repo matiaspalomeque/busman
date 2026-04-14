@@ -226,6 +226,10 @@ function AlertTrianglePaths() {
   );
 }
 
+function BookmarkPaths() {
+  return <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" />;
+}
+
 // ─── Icon map ─────────────────────────────────────────────────────────────────
 
 export type IconName =
@@ -253,7 +257,8 @@ export type IconName =
   | "bell"
   | "bellFilled"
   | "timer"
-  | "alertTriangle";
+  | "alertTriangle"
+  | "bookmark";
 
 const PATHS: Record<IconName, () => JSX.Element> = {
   queue: QueuePaths,
@@ -281,6 +286,7 @@ const PATHS: Record<IconName, () => JSX.Element> = {
   bellFilled: BellFilledPaths,
   timer: TimerPaths,
   alertTriangle: AlertTrianglePaths,
+  bookmark: BookmarkPaths,
 };
 
 // ─── Icon component ───────────────────────────────────────────────────────────

@@ -329,7 +329,16 @@
       "addProp": "+ Agregar",
       "close": "Cerrar",
       "send": "Enviar",
-      "success": "Mensaje enviado correctamente."
+      "success": "Mensaje enviado correctamente.",
+      "templates": {
+        "loadPlaceholder": "Cargar plantilla…",
+        "empty": "No hay plantillas guardadas aún.",
+        "save": "Guardar como plantilla",
+        "namePlaceholder": "Nombre de la plantilla…",
+        "saveConfirm": "Guardar",
+        "saved": "¡Plantilla guardada!",
+        "delete": "Eliminar plantilla"
+      }
     },
     "moveModal": {
       "title": "Mover Mensajes",

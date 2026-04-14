@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { useAppStore, selectActiveConnection } from "../../store/appStore";
 import { Icon } from "../Common/Icon";
 import { extractNamespace } from "../../utils/connection";
+import { useMessageTemplates, type MessageTemplate } from "../../hooks/useMessageTemplates";
 import type { ExplorerSelection } from "../../types";
 
 interface AppProperty {
@@ -52,6 +53,75 @@ export function SendMessageModal() {
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [status, setStatus] = useState<{ ok: boolean; text: string } | null>(null);
   const [sending, setSending] = useState(false);
+
+  // ─── Templates ──────────────────────────────────────────────────────────────
+  const { templates, saveTemplate, deleteTemplate } = useMessageTemplates();
+  const [tplDropdownOpen, setTplDropdownOpen] = useState(false);
+  const [showSaveInput, setShowSaveInput] = useState(false);
+  const [tplName, setTplName] = useState("");
+  const [saveFlash, setSaveFlash] = useState(false);
+  const tplDropdownRef = useRef<HTMLDivElement>(null);
+  const saveFlashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (saveFlashTimer.current) clearTimeout(saveFlashTimer.current);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!tplDropdownOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (tplDropdownRef.current && !tplDropdownRef.current.contains(e.target as Node)) {
+        setTplDropdownOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [tplDropdownOpen]);
+
+  const loadTemplate = (tpl: MessageTemplate) => {
+    setBody(tpl.body);
+    setContentType(tpl.contentType ?? "application/json");
+    setSubject(tpl.subject ?? "");
+    setCorrelationId(tpl.correlationId ?? "");
+    setSessionId(tpl.sessionId ?? "");
+    if (tpl.entityName) setEntityName(tpl.entityName);
+    setAppProps(
+      tpl.applicationProperties
+        ? Object.entries(tpl.applicationProperties).map(([key, value]) => ({
+            key,
+            value: String(value ?? ""),
+          }))
+        : [],
+    );
+    setTplDropdownOpen(false);
+  };
+
+  const handleSaveTemplate = () => {
+    if (!tplName.trim()) return;
+    const builtProps: Record<string, unknown> = {};
+    for (const { key, value } of appProps) {
+      if (key.trim()) builtProps[key.trim()] = value;
+    }
+    saveTemplate(
+      tplName,
+      {
+        body,
+        contentType: contentType || undefined,
+        subject: subject || undefined,
+        correlationId: correlationId || undefined,
+        sessionId: sessionId || undefined,
+        applicationProperties: Object.keys(builtProps).length > 0 ? builtProps : undefined,
+      },
+      entityName || undefined,
+    );
+    setTplName("");
+    setShowSaveInput(false);
+    if (saveFlashTimer.current) clearTimeout(saveFlashTimer.current);
+    setSaveFlash(true);
+    saveFlashTimer.current = setTimeout(() => setSaveFlash(false), 2200);
+  };
 
   const overlayRef = useRef<HTMLDivElement>(null);
 
@@ -165,6 +235,135 @@ export function SendMessageModal() {
 
         {/* Body */}
         <div className="flex-1 overflow-y-auto px-5 py-4 space-y-3">
+          {/* ── Templates bar ─────────────────────────────────────────────── */}
+          <div className="flex items-center gap-2">
+            {/* Load template dropdown */}
+            <div className="relative flex-1 min-w-0" ref={tplDropdownRef}>
+              <button
+                type="button"
+                onClick={() => setTplDropdownOpen((o) => !o)}
+                aria-haspopup="listbox"
+                aria-expanded={tplDropdownOpen}
+                className="flex w-full items-center gap-1.5 rounded border border-zinc-300 dark:border-zinc-600 px-2.5 py-1.5 text-xs text-zinc-500 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors"
+              >
+                <Icon name="bookmark" size={12} />
+                <span className="flex-1 truncate text-left">
+                  {t("explorer.sendModal.templates.loadPlaceholder")}
+                </span>
+                <Icon name="chevronDown" size={10} />
+              </button>
+
+              {tplDropdownOpen && (
+                <div className="absolute z-20 top-full left-0 mt-1 w-full min-w-[220px] bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-md shadow-xl overflow-hidden">
+                  {templates.length === 0 ? (
+                    <p className="px-3 py-2.5 text-xs text-zinc-400 italic">
+                      {t("explorer.sendModal.templates.empty")}
+                    </p>
+                  ) : (
+                    <ul role="listbox">
+                      {templates.map((tpl) => (
+                        <li
+                          key={tpl.id}
+                          className="group flex items-center gap-1 px-2 py-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 cursor-pointer"
+                        >
+                          <button
+                            type="button"
+                            className="min-w-0 flex-1 text-left"
+                            onClick={() => loadTemplate(tpl)}
+                          >
+                            <span className="block truncate text-xs font-medium text-azure-dark dark:text-zinc-200">
+                              {tpl.name}
+                            </span>
+                            {tpl.entityName && (
+                              <span className="text-[10px] font-mono text-zinc-400 truncate block">
+                                {tpl.entityName}
+                              </span>
+                            )}
+                          </button>
+                          <button
+                            type="button"
+                            title={t("explorer.sendModal.templates.delete")}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              deleteTemplate(tpl.id);
+                            }}
+                            className="flex-shrink-0 p-0.5 rounded opacity-0 group-hover:opacity-100 text-zinc-400 hover:text-red-500 transition-opacity"
+                          >
+                            <Icon name="trash" size={11} />
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Save as template */}
+            {!showSaveInput ? (
+              <button
+                type="button"
+                onClick={() => setShowSaveInput(true)}
+                title={t("explorer.sendModal.templates.save")}
+                className="flex flex-shrink-0 items-center gap-1.5 rounded border border-zinc-300 dark:border-zinc-600 px-2.5 py-1.5 text-xs text-zinc-500 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors"
+              >
+                <Icon name="bookmark" size={12} />
+                <span className="hidden sm:inline">
+                  {t("explorer.sendModal.templates.save")}
+                </span>
+              </button>
+            ) : (
+              <div className="flex flex-shrink-0 items-center gap-1">
+                <input
+                  autoFocus
+                  type="text"
+                  value={tplName}
+                  onChange={(e) => setTplName(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") handleSaveTemplate();
+                    if (e.key === "Escape") {
+                      setShowSaveInput(false);
+                      setTplName("");
+                    }
+                  }}
+                  placeholder={t("explorer.sendModal.templates.namePlaceholder")}
+                  className="w-32 text-xs px-2 py-1.5 rounded border border-azure-primary bg-transparent focus:outline-none focus:ring-1 focus:ring-azure-primary dark:text-zinc-200"
+                />
+                <button
+                  type="button"
+                  onClick={handleSaveTemplate}
+                  disabled={!tplName.trim()}
+                  className="text-xs px-2 py-1.5 rounded bg-azure-primary text-white hover:bg-azure-primary/90 disabled:opacity-40"
+                >
+                  {t("explorer.sendModal.templates.saveConfirm")}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowSaveInput(false);
+                    setTplName("");
+                  }}
+                  className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200"
+                >
+                  <Icon name="close" size={13} />
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Save flash */}
+          {saveFlash && (
+            <div className="flex items-center gap-1.5 text-xs text-green-600 dark:text-green-400 -mt-1">
+              <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="20 6 9 17 4 12" />
+              </svg>
+              {t("explorer.sendModal.templates.saved")}
+            </div>
+          )}
+
+          {/* Divider */}
+          <div className="border-t border-zinc-100 dark:border-zinc-800" />
+
           {/* Entity */}
           <div className="flex flex-col gap-1">
             <label className="text-xs font-medium text-zinc-600 dark:text-zinc-300">

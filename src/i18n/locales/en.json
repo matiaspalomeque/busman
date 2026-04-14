@@ -329,7 +329,16 @@
       "addProp": "+ Add",
       "close": "Close",
       "send": "Send",
-      "success": "Message sent successfully."
+      "success": "Message sent successfully.",
+      "templates": {
+        "loadPlaceholder": "Load template…",
+        "empty": "No templates saved yet.",
+        "save": "Save as template",
+        "namePlaceholder": "Template name…",
+        "saveConfirm": "Save",
+        "saved": "Template saved!",
+        "delete": "Delete template"
+      }
     },
     "moveModal": {
       "title": "Move Messages",
