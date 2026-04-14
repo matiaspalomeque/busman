@@ -25,13 +25,6 @@ function formatTime(iso: string | null | undefined): string {
   }
 }
 
-function bodyPreview(body: unknown): string {
-  if (body === null || body === undefined) return "—";
-  if (typeof body === "string") return body.length > 120 ? body.slice(0, 120) + "…" : body;
-  const s = JSON.stringify(body);
-  return s.length > 120 ? s.slice(0, 120) + "…" : s;
-}
-
 function bodyString(body: unknown): string {
   if (body === null || body === undefined) return "";
   if (typeof body === "string") return body;
@@ -630,4 +623,4 @@ function MessageRow({ msg, index, isSelected, onClick }: MessageRowProps) {
   );
 }
 
-export { bodyPreview, bodyString };
+export { bodyString };

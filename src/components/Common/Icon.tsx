@@ -145,16 +145,6 @@ function ClosePaths() {
   );
 }
 
-function InfoPaths() {
-  return (
-    <>
-      <circle cx="12" cy="12" r="10" />
-      <line x1="12" y1="8" x2="12" y2="12" />
-      <line x1="12" y1="16" x2="12.01" y2="16" />
-    </>
-  );
-}
-
 function SendPaths() {
   return (
     <>
@@ -207,15 +197,6 @@ function BellFilledPaths() {
   );
 }
 
-function TimerPaths() {
-  return (
-    <>
-      <circle cx="12" cy="12" r="10" />
-      <polyline points="12 6 12 12 16 14" />
-    </>
-  );
-}
-
 function AlertTrianglePaths() {
   return (
     <>
@@ -259,7 +240,6 @@ export type IconName =
   | "trash"
   | "box"
   | "close"
-  | "info"
   | "send"
   | "loader"
   | "star"
@@ -267,7 +247,6 @@ export type IconName =
   | "plus"
   | "bell"
   | "bellFilled"
-  | "timer"
   | "alertTriangle"
   | "bookmark"
   | "chartBar";
@@ -288,7 +267,6 @@ const PATHS: Record<IconName, () => JSX.Element> = {
   trash: TrashPaths,
   box: BoxPaths,
   close: ClosePaths,
-  info: InfoPaths,
   send: SendPaths,
   loader: LoaderPaths,
   star: StarPaths,
@@ -296,7 +274,6 @@ const PATHS: Record<IconName, () => JSX.Element> = {
   plus: PlusPaths,
   bell: BellPaths,
   bellFilled: BellFilledPaths,
-  timer: TimerPaths,
   alertTriangle: AlertTrianglePaths,
   bookmark: BookmarkPaths,
   chartBar: ChartBarPaths,
