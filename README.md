@@ -72,9 +72,17 @@ Save multiple named connections and switch between them at any time. Connections
 
 Use **Test Connection** to validate your connection string before saving — Busman will confirm it can reach the namespace or show the specific error.
 
+Connections that share a common name prefix are automatically grouped together in the connections panel. A **search bar** lets you filter connections by name across all groups.
+
+### Export & Import Connections
+
+Back up your connections or share them with teammates using **Export** and **Import**. Exported files are encrypted so connection strings are not stored in plain text.
+
 ### Entity Browser
 
 The left sidebar lists all **Queues** and **Topics** (with their subscriptions) in the connected namespace. Each entity shows its **active and dead-letter message counts** so you can spot backlogs at a glance. Use the filter box to search by name. Click any item to select it.
+
+When **trend lines** are enabled in settings, a small sparkline next to each entity visualises how its message count has changed over recent auto-refresh cycles — making it easy to see queues that are growing or draining.
 
 ### Pin Entities
 
@@ -83,6 +91,10 @@ Right-click any queue or subscription in the sidebar and select **Pin** to keep 
 ### Create & Delete Entities
 
 You can create new **queues**, **topics**, and **subscriptions** directly from Busman without switching to the Azure Portal. You can also delete existing entities — a confirmation dialog prevents accidental removal.
+
+### Subscription Rules
+
+Right-click a subscription and select **Manage Rules** to view, create, edit, and delete its filter rules. Busman supports **SQL filters**, **correlation filters**, and **True/False (pass-all/pass-none)** rule types. Each rule is validated before saving.
 
 ### DLQ Alert Thresholds
 
@@ -120,6 +132,10 @@ Click **Send** to open the send dialog. Fill in the message body and content typ
 - Scheduled Enqueue Time — deliver the message at a future time
 - Custom Application Properties (arbitrary key/value pairs)
 
+### Message Templates
+
+Save frequently-used message payloads as named templates directly from the Send dialog. Click **Save as template** to store the current body and properties, then reload any saved template with a single click. Templates are persisted locally and tied to the entity they were created from for easy filtering.
+
 ### Move Messages
 
 Click **Move** to transfer all messages from one queue to another. Choose the mode (Normal, DLQ, or Both). Useful for routing messages between environments or queues. This operation is **irreversible** — messages are consumed from the source and re-published to the destination.
@@ -135,6 +151,16 @@ Click **Receive** to destructively read and discard all messages from a queue. U
 ### Resend a Message
 
 While inspecting a message in the properties panel, click **Resend this message** to pre-fill the Send dialog with that message's body and metadata. Edit as needed, then send.
+
+### Message Insights
+
+After browsing, click **Insights** in the toolbar to open the Message Insights panel. It analyses all currently loaded messages and surfaces:
+
+- **Summary stats** — total count, DLQ vs normal split, unique correlation IDs
+- **Actionable findings** — duplicate message IDs, empty bodies, expired messages, missing correlation IDs
+- **Error distribution** — bar chart of DLQ error reasons
+- **Time distribution** — hour-of-day heatmap showing when messages were enqueued
+- **JSON schema** — inferred schema across all message bodies
 
 ### Export Messages as JSON
 
