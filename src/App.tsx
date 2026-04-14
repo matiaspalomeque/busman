@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { ask, message } from "@tauri-apps/plugin-dialog";
 import { check } from "@tauri-apps/plugin-updater";
 import { Explorer } from "./components/Explorer";
@@ -10,7 +11,7 @@ import i18n from "./i18n/index";
 
 export function App() {
   const { loadConnections } = useConnections();
-  const { workerAvailable, setWorkerAvailable, isDark, setIsDark, language, setLanguage } = useAppStore();
+  const { workerAvailable, setWorkerAvailable, isDark, setIsDark, language, setLanguage, setIsAboutModalOpen } = useAppStore();
 
   // Initialise theme and language from localStorage / system preference.
   useEffect(() => {
@@ -97,6 +98,16 @@ export function App() {
     localStorage.setItem("language", language);
     void i18n.changeLanguage(language);
   }, [language]);
+
+  // Listen for the "About Busman" macOS menu item.
+  useEffect(() => {
+    const promise = listen("menu-about", () => {
+      setIsAboutModalOpen(true);
+    });
+    return () => {
+      promise.then((unlisten) => unlisten());
+    };
+  }, [setIsAboutModalOpen]);
 
   return (
     <div className="h-screen overflow-hidden bg-azure-light dark:bg-azure-dark text-azure-dark dark:text-azure-light">
