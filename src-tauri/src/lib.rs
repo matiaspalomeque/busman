@@ -94,6 +94,7 @@ pub fn run() {
             get_subscription_properties,
             write_json_file,
             send_message,
+            single_message_action,
             create_queue,
             create_topic,
             create_subscription,

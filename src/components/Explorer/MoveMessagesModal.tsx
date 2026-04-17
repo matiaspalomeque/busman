@@ -26,13 +26,16 @@ export function MoveMessagesModal() {
     entities,
     isRunning,
     setIsMoveModalOpen,
+    singleMessageMoveTarget,
+    setSingleMessageMoveTarget,
     addEventLogEntry,
     updateEventLogEntry,
   } = useAppStore();
 
   const { runOperation } = useScript();
 
-  const isSubscriptionSource = explorerSelection.kind === "subscription";
+  const isSingleMessage = singleMessageMoveTarget != null;
+  const isSubscriptionSource = !isSingleMessage && explorerSelection.kind === "subscription";
   const initialSource = getDisplayEntity(explorerSelection) ?? "";
 
   const [sourceQueue, setSourceQueue] = useState(initialSource);
@@ -55,7 +58,10 @@ export function MoveMessagesModal() {
     prevSourceRef.current = sourceQueue;
   }, [sourceQueue]);
 
-  const close = () => setIsMoveModalOpen(false);
+  const close = () => {
+    setIsMoveModalOpen(false);
+    setSingleMessageMoveTarget(null);
+  };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Escape") close();
@@ -63,12 +69,13 @@ export function MoveMessagesModal() {
 
   const sameQueueError =
     !isSubscriptionSource &&
+    !isSingleMessage &&
     sourceQueue.trim() === destQueue.trim() &&
     (mode === "normal" || mode === "both");
 
   const canSubmit =
     !!conn &&
-    sourceQueue.trim() !== "" &&
+    (isSingleMessage || sourceQueue.trim() !== "") &&
     destQueue.trim() !== "" &&
     !sameQueueError &&
     !isRunning;
@@ -79,6 +86,52 @@ export function MoveMessagesModal() {
     const runId = crypto.randomUUID();
     const namespace = extractNamespace(conn.connectionString);
 
+    // Close immediately so the toolbar (and its stop button) becomes accessible.
+    close();
+
+    if (isSingleMessage && singleMessageMoveTarget) {
+      const msg = singleMessageMoveTarget;
+      const isDlq = msg._source.startsWith("Dead Letter");
+      const entityLabel = getDisplayEntity(explorerSelection) ?? sourceQueue.trim();
+
+      addEventLogEntry({
+        id: runId,
+        time: new Date().toISOString(),
+        namespace,
+        entity: `${entityLabel}${msg.sequenceNumber != null ? ` #${msg.sequenceNumber}` : ""} → ${destQueue.trim()}`,
+        entityType: explorerSelection.kind === "subscription" ? "Subscription" : "Queue",
+        operation: "MoveMessage",
+        status: "running",
+      });
+
+      const params: Record<string, unknown> = {
+        action: "move",
+        sequenceNumber: Number(msg.sequenceNumber),
+        isDlq,
+        destQueue: destQueue.trim(),
+        connectionId: conn.id,
+        runId,
+      };
+      if (explorerSelection.kind === "queue") {
+        params.queueName = explorerSelection.queueName;
+      } else if (explorerSelection.kind === "subscription") {
+        params.topicName = explorerSelection.topicName;
+        params.subscriptionName = explorerSelection.subscriptionName;
+      }
+
+      void runOperation("single_message_action", params, { scope: "atomic" })
+        .then(({ exitCode, errorMessage }) => {
+          updateEventLogEntry(runId, exitCodeToStatus(exitCode), errorMessage);
+          if (exitCode === 0) {
+            useAppStore.getState().removePeekedMessageBySeq(msg.sequenceNumber);
+          }
+        })
+        .catch(() => {
+          updateEventLogEntry(runId, "error");
+        });
+      return;
+    }
+
     addEventLogEntry({
       id: runId,
       time: new Date().toISOString(),
@@ -88,9 +141,6 @@ export function MoveMessagesModal() {
       operation: "Move",
       status: "running",
     });
-
-    // Close immediately so the toolbar (and its stop button) becomes accessible.
-    close();
 
     const params: Record<string, unknown> = {
       destQueue: destQueue.trim(),
@@ -130,7 +180,7 @@ export function MoveMessagesModal() {
         <div className="flex items-center justify-between px-5 py-3.5 border-b border-zinc-200 dark:border-zinc-700">
           <h2 className="text-sm font-semibold text-azure-dark dark:text-azure-light flex items-center gap-2">
             <Icon name="move" size={14} className="text-azure-primary" />
-            {t("explorer.moveModal.title")}
+            {isSingleMessage ? t("explorer.messageContext.moveMessageTitle") : t("explorer.moveModal.title")}
           </h2>
           <button
             onClick={close}
@@ -147,24 +197,32 @@ export function MoveMessagesModal() {
             <label className="text-xs font-medium text-zinc-600 dark:text-zinc-300">
               {t(isSubscriptionSource ? "explorer.moveModal.sourceEntity" : "explorer.moveModal.sourceQueue")} <span className="text-red-500">*</span>
             </label>
-            <input
-              list={isSubscriptionSource ? undefined : "move-source-queues"}
-              type="text"
-              value={sourceQueue}
-              onChange={(e) => setSourceQueue(e.target.value)}
-              readOnly={isSubscriptionSource}
-              placeholder={t("explorer.moveModal.sourcePlaceholder")}
-              className={[
-                "text-xs px-2.5 py-1.5 rounded border border-zinc-300 dark:border-zinc-600 bg-transparent focus:outline-none focus:ring-1 focus:ring-azure-primary dark:text-zinc-200",
-                isSubscriptionSource ? "opacity-70 cursor-not-allowed" : "",
-              ].join(" ")}
-            />
-            {!isSubscriptionSource && queues.length > 0 && (
-              <datalist id="move-source-queues">
-                {queues.map((q) => (
-                  <option key={q} value={q} />
-                ))}
-              </datalist>
+            {isSingleMessage && singleMessageMoveTarget ? (
+              <div className="text-xs px-2.5 py-1.5 rounded border border-zinc-300 dark:border-zinc-600 bg-zinc-50 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 opacity-70">
+                {sourceQueue}{singleMessageMoveTarget.sequenceNumber != null ? ` #${singleMessageMoveTarget.sequenceNumber}` : ""}
+              </div>
+            ) : (
+              <>
+                <input
+                  list={isSubscriptionSource ? undefined : "move-source-queues"}
+                  type="text"
+                  value={sourceQueue}
+                  onChange={(e) => setSourceQueue(e.target.value)}
+                  readOnly={isSubscriptionSource}
+                  placeholder={t("explorer.moveModal.sourcePlaceholder")}
+                  className={[
+                    "text-xs px-2.5 py-1.5 rounded border border-zinc-300 dark:border-zinc-600 bg-transparent focus:outline-none focus:ring-1 focus:ring-azure-primary dark:text-zinc-200",
+                    isSubscriptionSource ? "opacity-70 cursor-not-allowed" : "",
+                  ].join(" ")}
+                />
+                {!isSubscriptionSource && queues.length > 0 && (
+                  <datalist id="move-source-queues">
+                    {queues.map((q) => (
+                      <option key={q} value={q} />
+                    ))}
+                  </datalist>
+                )}
+              </>
             )}
           </div>
 
@@ -193,34 +251,38 @@ export function MoveMessagesModal() {
             )}
           </div>
 
-          {/* Mode */}
-          <div className="flex flex-col gap-1">
-            <label className="text-xs font-medium text-zinc-600 dark:text-zinc-300">
-              {t("explorer.moveModal.mode")}
-            </label>
-            <div className="flex items-center border border-zinc-300 dark:border-zinc-600 rounded overflow-hidden w-fit">
-              {MODES.map((m) => (
-                <button
-                  key={m}
-                  onClick={() => setMode(m)}
-                  className={[
-                    "px-3 py-1.5 text-xs transition-colors",
-                    mode === m
-                      ? "bg-azure-primary text-white"
-                      : "text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-700",
-                  ].join(" ")}
-                >
-                  {t(`modeSelector.${m}`)}
-                </button>
-              ))}
+          {/* Mode — hidden in single-message mode */}
+          {!isSingleMessage && (
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-medium text-zinc-600 dark:text-zinc-300">
+                {t("explorer.moveModal.mode")}
+              </label>
+              <div className="flex items-center border border-zinc-300 dark:border-zinc-600 rounded overflow-hidden w-fit">
+                {MODES.map((m) => (
+                  <button
+                    key={m}
+                    onClick={() => setMode(m)}
+                    className={[
+                      "px-3 py-1.5 text-xs transition-colors",
+                      mode === m
+                        ? "bg-azure-primary text-white"
+                        : "text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-700",
+                    ].join(" ")}
+                  >
+                    {t(`modeSelector.${m}`)}
+                  </button>
+                ))}
+              </div>
             </div>
-          </div>
+          )}
 
-          {/* Warning */}
+          {/* Warning / note */}
           <div className="flex items-start gap-2 px-3 py-2 rounded bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700">
             <span className="text-amber-500 mt-0.5 shrink-0">⚠</span>
             <p className="text-[11px] text-amber-800 dark:text-amber-300">
-              {t("explorer.moveModal.warning")}
+              {isSingleMessage
+                ? t("explorer.messageContext.moveWarning")
+                : t("explorer.moveModal.warning")}
             </p>
           </div>
         </div>

@@ -35,14 +35,15 @@ export function useScript() {
   const runOperation = useCallback(
     async (
       command: string,
-      params: Record<string, unknown>
+      params: Record<string, unknown>,
+      options?: { scope?: "atomic" | "bulk" }
     ): Promise<{ exitCode: number; errorMessage?: string }> => {
       if (isRunningRef.current) throw new Error("An operation is already running");
 
       clearOutput();
       const runId = crypto.randomUUID();
       activeRunIdRef.current = runId;
-      setRunning(true, runId);
+      setRunning(true, runId, options?.scope ?? "bulk");
 
       let lastStderrLine = "";
 

@@ -1528,3 +1528,213 @@ func handleSendMessage(raw json.RawMessage) (any, error) {
 	}
 	return map[string]bool{"sent": true}, nil
 }
+
+// ─── singleMessageAction ─────────────────────────────────────────────────────
+
+type singleMessageActionParams struct {
+	subscriptionSource
+	Action         string            `json:"action"` // "delete" | "move" | "replay"
+	SequenceNumber int64             `json:"sequenceNumber"`
+	IsDlq          bool              `json:"isDlq"`
+	QueueName      string            `json:"queueName"`
+	DestQueue      string            `json:"destQueue"`
+	DestTopic      string            `json:"destTopic"`
+	Env            map[string]string `json:"env"`
+	RunID          string            `json:"runId"`
+}
+
+func handleSingleMessageAction(raw json.RawMessage) (any, error) {
+	var p singleMessageActionParams
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return nil, fmt.Errorf("invalid params: %w", err)
+	}
+	cs, err := requireConnectionString(p.Env)
+	if err != nil {
+		return nil, err
+	}
+
+	switch p.Action {
+	case "delete", "move", "replay":
+	default:
+		return nil, fmt.Errorf("unknown action %q: must be delete, move, or replay", p.Action)
+	}
+
+	if p.isSubscription() {
+		if err := validateEntityName(p.TopicName, "Topic"); err != nil {
+			return nil, err
+		}
+		if err := validateEntityName(p.SubscriptionName, "Subscription"); err != nil {
+			return nil, err
+		}
+	} else {
+		if err := validateEntityName(p.QueueName, "Queue"); err != nil {
+			return nil, err
+		}
+	}
+
+	if p.Action == "move" {
+		if err := validateEntityName(p.DestQueue, "Destination queue"); err != nil {
+			return nil, fmt.Errorf("move requires a valid destination queue: %w", err)
+		}
+	}
+	if p.Action == "replay" && p.isSubscription() {
+		if err := validateEntityName(p.DestTopic, "Destination topic"); err != nil {
+			return nil, fmt.Errorf("subscription replay requires a valid destination topic: %w", err)
+		}
+	}
+
+	startedAt := time.Now()
+	scanBudget := parseIntOrDefault(p.Env["SINGLE_MSG_SCAN_BUDGET"], 1000)
+	if scanBudget < 50 {
+		scanBudget = 50
+	}
+	batchSize := parseIntOrDefault(p.Env["RECEIVE_MESSAGES_COUNT"], 50)
+	if batchSize > scanBudget {
+		batchSize = scanBudget
+	}
+	maxWaitMs := parseIntOrDefault(p.Env["MAX_WAIT_TIME_IN_MS"], 5000)
+	completeConcurrency := parseIntOrDefault(p.Env["COMPLETE_CONCURRENCY"], 8)
+	if completeConcurrency > 32 {
+		completeConcurrency = 32
+	}
+
+	client, err := azservicebus.NewClientFromConnectionString(cs, nil)
+	if err != nil {
+		return nil, fmt.Errorf("service bus client error: %w", err)
+	}
+	defer client.Close(context.Background())
+
+	var receiverOpts *azservicebus.ReceiverOptions
+	if p.IsDlq {
+		receiverOpts = &azservicebus.ReceiverOptions{SubQueue: azservicebus.SubQueueDeadLetter}
+	}
+	var receiver *azservicebus.Receiver
+	if p.isSubscription() {
+		receiver, err = client.NewReceiverForSubscription(p.TopicName, p.SubscriptionName, receiverOpts)
+	} else {
+		receiver, err = client.NewReceiverForQueue(p.QueueName, receiverOpts)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("receiver error: %w", err)
+	}
+	defer receiver.Close(context.Background())
+
+	var sender *azservicebus.Sender
+	if p.Action == "move" || p.Action == "replay" {
+		destEntity := p.DestQueue
+		if p.Action == "replay" {
+			if p.isSubscription() {
+				destEntity = p.DestTopic
+			} else {
+				// DLQ replay sends back to the main queue.
+				destEntity = p.QueueName
+			}
+		}
+		sender, err = client.NewSender(destEntity, nil)
+		if err != nil {
+			return nil, fmt.Errorf("sender error: %w", err)
+		}
+		defer sender.Close(context.Background())
+	}
+
+	entityLabel := p.label(p.QueueName)
+	if p.IsDlq {
+		entityLabel += " (DLQ)"
+	}
+	emitOutput(p.RunID,
+		fmt.Sprintf("🔍 Searching for message with sequence number %d in %s...", p.SequenceNumber, entityLabel),
+		false, elapsedSince(startedAt))
+
+	scanned := 0
+	for scanned < scanBudget {
+		remaining := scanBudget - scanned
+		fetch := batchSize
+		if fetch > remaining {
+			fetch = remaining
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(maxWaitMs)*time.Millisecond)
+		msgs, recvErr := receiver.ReceiveMessages(ctx, fetch, nil)
+		cancel()
+
+		if recvErr != nil && len(msgs) == 0 {
+			if errors.Is(recvErr, context.DeadlineExceeded) || errors.Is(recvErr, context.Canceled) {
+				return nil, fmt.Errorf("message with sequence number %d not found in %s", p.SequenceNumber, entityLabel)
+			}
+			return nil, fmt.Errorf("receive error: %w", recvErr)
+		}
+		if len(msgs) == 0 {
+			return nil, fmt.Errorf("message with sequence number %d not found in %s", p.SequenceNumber, entityLabel)
+		}
+
+		var target *azservicebus.ReceivedMessage
+		others := make([]*azservicebus.ReceivedMessage, 0, len(msgs))
+		for _, m := range msgs {
+			if m.SequenceNumber != nil && *m.SequenceNumber == p.SequenceNumber {
+				target = m
+			} else {
+				others = append(others, m)
+			}
+		}
+
+		if len(others) > 0 {
+			sem := make(chan struct{}, completeConcurrency)
+			var wg sync.WaitGroup
+			for _, o := range others {
+				sem <- struct{}{}
+				wg.Add(1)
+				go func(msg *azservicebus.ReceivedMessage) {
+					defer wg.Done()
+					defer func() { <-sem }()
+					_ = receiver.AbandonMessage(context.Background(), msg, nil)
+				}(o)
+			}
+			wg.Wait()
+		}
+
+		if target != nil {
+			switch p.Action {
+			case "delete":
+				if err := receiver.CompleteMessage(context.Background(), target, nil); err != nil {
+					return nil, fmt.Errorf("complete message error: %w", err)
+				}
+			case "move", "replay":
+				newMsg := &azservicebus.Message{
+					Body:                  target.Body,
+					ContentType:           target.ContentType,
+					CorrelationID:         target.CorrelationID,
+					Subject:               target.Subject,
+					ApplicationProperties: target.ApplicationProperties,
+					To:                    target.To,
+					ReplyTo:               target.ReplyTo,
+					SessionID:             target.SessionID,
+					TimeToLive:            target.TimeToLive,
+				}
+				if target.MessageID != "" {
+					idCopy := target.MessageID
+					newMsg.MessageID = &idCopy
+				}
+				if err := sender.SendMessage(context.Background(), newMsg, nil); err != nil {
+					_ = receiver.AbandonMessage(context.Background(), target, nil)
+					return nil, fmt.Errorf("send message error: %w", err)
+				}
+				if err := receiver.CompleteMessage(context.Background(), target, nil); err != nil {
+					return nil, fmt.Errorf("complete message error: %w", err)
+				}
+			}
+			emitOutput(p.RunID,
+				fmt.Sprintf("✅ %s completed for message %d in %.2fs", p.Action, p.SequenceNumber, time.Since(startedAt).Seconds()),
+				false, elapsedSince(startedAt))
+			return map[string]int64{"sequenceNumber": p.SequenceNumber}, nil
+		}
+
+		scanned += len(msgs)
+		if scanned > 0 && scanned%100 == 0 {
+			emitProgress(p.RunID,
+				fmt.Sprintf("Scanned %d messages...", scanned),
+				elapsedSince(startedAt))
+		}
+	}
+
+	return nil, fmt.Errorf("message with sequence number %d not found after scanning %d messages (budget exhausted)", p.SequenceNumber, scanned)
+}

@@ -367,6 +367,26 @@
         "delete": "Eliminar plantilla"
       }
     },
+    "messageContext": {
+      "copySection": "Copiar",
+      "copyMessageId": "Copiar ID de Mensaje",
+      "copySequenceNumber": "Copiar Número de Secuencia",
+      "copyBody": "Copiar Cuerpo",
+      "copyJson": "Copiar JSON Completo",
+      "resend": "Reenviar (enviar copia)",
+      "move": "Mover a cola…",
+      "replay": "Replay a cola principal",
+      "delete": "Eliminar este mensaje",
+      "moveMessageTitle": "Mover este mensaje",
+      "moveWarning": "Esto eliminará el mensaje de su ubicación actual. Esta acción no se puede deshacer.",
+      "deleteConfirmTitle": "¿Eliminar mensaje{{seq}}?",
+      "deleteConfirmBody": "Se eliminará permanentemente. Esta acción no se puede deshacer.",
+      "replayConfirmTitle": "¿Hacer replay del mensaje{{seq}}?",
+      "replayConfirmBody": "Lo mueve de la DLQ a la entidad principal.",
+      "deleteConfirm": "Eliminar",
+      "replayConfirm": "Replay",
+      "cancel": "Cancelar"
+    },
     "moveModal": {
       "title": "Mover Mensajes",
       "sourceQueue": "Cola de Origen",

@@ -17,6 +17,7 @@ const mockListen = vi.mocked(listen);
 const RUN_ID = "00000000-0000-0000-0000-000000000001";
 
 type ListenCallback = EventCallback<unknown>;
+type OpResult = { exitCode: number; errorMessage?: string };
 
 let eventListeners: Map<string, ListenCallback>;
 
@@ -55,16 +56,20 @@ describe("useScript", () => {
 
     const { result } = renderHook(() => useScript());
 
-    const opPromise = result.current.runOperation("peek_messages", { queue: "q1" });
+    // Wrap the initial call so clearOutput() + setRunning(true) fire inside act.
+    let opPromise!: Promise<OpResult>;
+    await act(async () => { opPromise = result.current.runOperation("peek_messages", { queue: "q1" }); });
 
     // Let the three listen() calls and the invoke() settle.
     await act(async () => {});
 
     expect(eventListeners.size).toBe(3);
 
-    emit(`script-done:${RUN_ID}`, { exitCode: 0 });
-
-    const outcome = await opPromise;
+    let outcome!: OpResult;
+    await act(async () => {
+      emit(`script-done:${RUN_ID}`, { exitCode: 0 });
+      outcome = await opPromise;
+    });
 
     expect(outcome.exitCode).toBe(0);
     expect(outcome.errorMessage).toBeUndefined();
@@ -75,15 +80,16 @@ describe("useScript", () => {
     mockInvoke.mockResolvedValueOnce(undefined);
 
     const { result } = renderHook(() => useScript());
-    const opPromise = result.current.runOperation("peek_messages", {});
-
+    let opPromise!: Promise<OpResult>;
+    await act(async () => { opPromise = result.current.runOperation("peek_messages", {}); });
     await act(async () => {});
 
-    emit(`script-output:${RUN_ID}`, { line: "line 1", isStderr: false, elapsedMs: 10 });
-    emit(`script-output:${RUN_ID}`, { line: "stderr msg", isStderr: true, elapsedMs: 20 });
-    emit(`script-done:${RUN_ID}`, { exitCode: 0 });
-
-    await opPromise;
+    await act(async () => {
+      emit(`script-output:${RUN_ID}`, { line: "line 1", isStderr: false, elapsedMs: 10 });
+      emit(`script-output:${RUN_ID}`, { line: "stderr msg", isStderr: true, elapsedMs: 20 });
+      emit(`script-done:${RUN_ID}`, { exitCode: 0 });
+      await opPromise;
+    });
 
     const lines = useAppStore.getState().outputLines;
     expect(lines).toHaveLength(2);
@@ -96,15 +102,17 @@ describe("useScript", () => {
     mockInvoke.mockResolvedValueOnce(undefined);
 
     const { result } = renderHook(() => useScript());
-    const opPromise = result.current.runOperation("peek_messages", {});
-
+    let opPromise!: Promise<OpResult>;
+    await act(async () => { opPromise = result.current.runOperation("peek_messages", {}); });
     await act(async () => {});
 
-    emit(`script-output:${RUN_ID}`, { line: "first error", isStderr: true, elapsedMs: 5 });
-    emit(`script-output:${RUN_ID}`, { line: "fatal: timeout", isStderr: true, elapsedMs: 10 });
-    emit(`script-done:${RUN_ID}`, { exitCode: 1 });
-
-    const outcome = await opPromise;
+    let outcome!: OpResult;
+    await act(async () => {
+      emit(`script-output:${RUN_ID}`, { line: "first error", isStderr: true, elapsedMs: 5 });
+      emit(`script-output:${RUN_ID}`, { line: "fatal: timeout", isStderr: true, elapsedMs: 10 });
+      emit(`script-done:${RUN_ID}`, { exitCode: 1 });
+      outcome = await opPromise;
+    });
 
     expect(outcome.exitCode).toBe(1);
     expect(outcome.errorMessage).toBe("fatal: timeout");
@@ -114,12 +122,12 @@ describe("useScript", () => {
     mockInvoke.mockRejectedValueOnce(new Error("Connection refused"));
 
     const { result } = renderHook(() => useScript());
-    const opPromise = result.current.runOperation("peek_messages", {});
+    let opPromise!: Promise<OpResult>;
+    await act(async () => { opPromise = result.current.runOperation("peek_messages", {}); });
 
     // invoke rejects → resolveDone(-1) is called internally → no done event needed
-    await act(async () => {});
-
-    const outcome = await opPromise;
+    let outcome!: OpResult;
+    await act(async () => { outcome = await opPromise; });
 
     expect(outcome.exitCode).toBe(-1);
     expect(outcome.errorMessage).toBe("Error: Connection refused");
@@ -131,8 +139,9 @@ describe("useScript", () => {
 
     const { result } = renderHook(() => useScript());
 
-    // Start first operation (don't await)
-    result.current.runOperation("peek_messages", {});
+    // Start first operation inside act so setRunning(true) fires inside act.
+    let firstOp!: Promise<OpResult>;
+    await act(async () => { firstOp = result.current.runOperation("peek_messages", {}); });
     await act(async () => {}); // let setRunning(true) propagate to the ref via effect
 
     await expect(result.current.runOperation("peek_messages", {})).rejects.toThrow(
@@ -140,7 +149,10 @@ describe("useScript", () => {
     );
 
     // Clean up the first operation
-    emit(`script-done:${RUN_ID}`, { exitCode: 0 });
+    await act(async () => {
+      emit(`script-done:${RUN_ID}`, { exitCode: 0 });
+      await firstOp;
+    });
   });
 
   it("stop() invokes stop_current_operation with the active runId", async () => {
@@ -148,7 +160,8 @@ describe("useScript", () => {
 
     const { result } = renderHook(() => useScript());
 
-    const opPromise = result.current.runOperation("peek_messages", {});
+    let opPromise!: Promise<OpResult>;
+    await act(async () => { opPromise = result.current.runOperation("peek_messages", {}); });
     await act(async () => {});
 
     await act(async () => { await result.current.stop(); });
@@ -156,8 +169,11 @@ describe("useScript", () => {
     expect(mockInvoke).toHaveBeenCalledWith("stop_current_operation", { runId: RUN_ID });
 
     // Complete the operation to avoid a hanging promise
-    emit(`script-done:${RUN_ID}`, { exitCode: 130 });
-    const outcome = await opPromise;
+    let outcome!: OpResult;
+    await act(async () => {
+      emit(`script-done:${RUN_ID}`, { exitCode: 130 });
+      outcome = await opPromise;
+    });
     expect(outcome.exitCode).toBe(130);
   });
 
@@ -176,7 +192,8 @@ describe("useScript", () => {
     mockInvoke.mockResolvedValueOnce(undefined);
     const { result } = renderHook(() => useScript());
 
-    const opPromise = result.current.runOperation("peek_messages", {});
+    let opPromise!: Promise<OpResult>;
+    await act(async () => { opPromise = result.current.runOperation("peek_messages", {}); });
     await act(async () => {});
 
     expect(mockListen).toHaveBeenCalledTimes(3);
@@ -184,8 +201,10 @@ describe("useScript", () => {
     expect(mockListen).toHaveBeenCalledWith(`script-progress:${RUN_ID}`, expect.any(Function));
     expect(mockListen).toHaveBeenCalledWith(`script-done:${RUN_ID}`, expect.any(Function));
 
-    emit(`script-done:${RUN_ID}`, { exitCode: 0 });
-    await opPromise;
+    await act(async () => {
+      emit(`script-done:${RUN_ID}`, { exitCode: 0 });
+      await opPromise;
+    });
   });
 
   it("calls unlisten for all listeners after the operation completes", async () => {
@@ -200,11 +219,14 @@ describe("useScript", () => {
     });
 
     const { result } = renderHook(() => useScript());
-    const opPromise = result.current.runOperation("peek_messages", {});
+    let opPromise!: Promise<OpResult>;
+    await act(async () => { opPromise = result.current.runOperation("peek_messages", {}); });
     await act(async () => {});
 
-    emit(`script-done:${RUN_ID}`, { exitCode: 0 });
-    await opPromise;
+    await act(async () => {
+      emit(`script-done:${RUN_ID}`, { exitCode: 0 });
+      await opPromise;
+    });
 
     expect(unlistenFns).toHaveLength(3);
     unlistenFns.forEach((fn) => expect(fn).toHaveBeenCalledOnce());
@@ -214,13 +236,16 @@ describe("useScript", () => {
     mockInvoke.mockResolvedValueOnce(undefined);
     const { result } = renderHook(() => useScript());
 
-    const opPromise = result.current.runOperation("peek_messages", {});
+    let opPromise!: Promise<OpResult>;
+    await act(async () => { opPromise = result.current.runOperation("peek_messages", {}); });
     await act(async () => {});
 
     await waitFor(() => expect(useAppStore.getState().isRunning).toBe(true));
 
-    emit(`script-done:${RUN_ID}`, { exitCode: 0 });
-    await opPromise;
+    await act(async () => {
+      emit(`script-done:${RUN_ID}`, { exitCode: 0 });
+      await opPromise;
+    });
 
     expect(useAppStore.getState().isRunning).toBe(false);
   });

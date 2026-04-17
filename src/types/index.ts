@@ -144,7 +144,7 @@ export interface EventLogEntry {
   namespace: string;
   entity: string;
   entityType: "Queue" | "Subscription" | "Topic";
-  operation: "Browse" | "Send" | "Receive" | "Replay" | "Republish" | "Move" | "Create" | "Delete";
+  operation: "Browse" | "Send" | "Receive" | "Replay" | "Republish" | "Move" | "Create" | "Delete" | "DeleteMessage" | "ReplayMessage" | "MoveMessage";
   status: "running" | "success" | "error" | "stopped";
   errorMessage?: string;
 }

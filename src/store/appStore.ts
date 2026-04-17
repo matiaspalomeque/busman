@@ -31,6 +31,7 @@ interface AppState {
 
   // Script execution state
   isRunning: boolean;
+  operationScope: "atomic" | "bulk" | null;
   runId: string | null;
   outputLines: OutputLine[];
   progress: ProgressUpdate | null;
@@ -85,6 +86,8 @@ interface AppState {
   isCreateEntityModalOpen: boolean;
   isSubscriptionRulesModalOpen: boolean;
   deleteEntityTarget: { type: "queue" | "topic" | "subscription"; name: string; topicName?: string } | null;
+  messageContextMenu: { x: number; y: number; msg: PeekedMessage } | null;
+  singleMessageMoveTarget: PeekedMessage | null;
   sidebarCollapsed: { queues: boolean; topics: boolean; system: boolean };
 
   // Sidebar width (persisted)
@@ -126,7 +129,7 @@ interface AppState {
   setExplorerQueue: (queueName: string) => void;
   setExplorerSubscription: (topicName: string, subscriptionName: string) => void;
   clearExplorerSelection: () => void;
-  setRunning: (running: boolean, runId?: string) => void;
+  setRunning: (running: boolean, runId?: string, scope?: "atomic" | "bulk") => void;
   appendOutputLine: (line: string, isStderr: boolean, elapsedMs: number) => void;
   setProgress: (progress: ProgressUpdate | null) => void;
   clearOutput: () => void;
@@ -169,6 +172,9 @@ interface AppState {
   setIsCreateEntityModalOpen: (open: boolean) => void;
   setIsSubscriptionRulesModalOpen: (open: boolean) => void;
   setDeleteEntityTarget: (target: { type: "queue" | "topic" | "subscription"; name: string; topicName?: string } | null) => void;
+  setMessageContextMenu: (menu: { x: number; y: number; msg: PeekedMessage } | null) => void;
+  setSingleMessageMoveTarget: (msg: PeekedMessage | null) => void;
+  removePeekedMessageBySeq: (sequenceNumber: string | null | undefined) => void;
   toggleSidebarSection: (section: "queues" | "topics" | "system") => void;
   setSidebarWidth: (width: number) => void;
   setPropertiesPanelWidth: (width: number) => void;
@@ -230,6 +236,7 @@ export const useAppStore = create<AppState>()(
       subscriptionName: null,
     },
     isRunning: false,
+    operationScope: null,
     runId: null,
     outputLines: [],
     progress: null,
@@ -265,6 +272,8 @@ export const useAppStore = create<AppState>()(
     isCreateEntityModalOpen: false,
     isSubscriptionRulesModalOpen: false,
     deleteEntityTarget: null,
+    messageContextMenu: null,
+    singleMessageMoveTarget: null,
     sidebarCollapsed: { queues: false, topics: false, system: false },
     sidebarWidth: (() => {
       try {
@@ -439,10 +448,11 @@ export const useAppStore = create<AppState>()(
         state.isSubscriptionRulesModalOpen = false;
       }),
 
-    setRunning: (running, runId) =>
+    setRunning: (running, runId, scope) =>
       set((state) => {
         state.isRunning = running;
         state.runId = runId ?? null;
+        state.operationScope = running ? (scope ?? "bulk") : null;
         if (!running) {
           state.progress = null;
         }
@@ -705,6 +715,28 @@ export const useAppStore = create<AppState>()(
     setDeleteEntityTarget: (target) =>
       set((state) => {
         state.deleteEntityTarget = target;
+      }),
+
+    setMessageContextMenu: (menu) =>
+      set((state) => {
+        state.messageContextMenu = menu;
+      }),
+
+    setSingleMessageMoveTarget: (msg) =>
+      set((state) => {
+        state.singleMessageMoveTarget = msg;
+      }),
+
+    removePeekedMessageBySeq: (sequenceNumber) =>
+      set((state) => {
+        if (sequenceNumber == null) return;
+        const idx = state.peekMessages.findIndex((m) => m.sequenceNumber === sequenceNumber);
+        if (idx >= 0) {
+          state.peekMessages.splice(idx, 1);
+          if (state.selectedMessage?.sequenceNumber === sequenceNumber) {
+            state.selectedMessage = null;
+          }
+        }
       }),
 
     toggleSidebarSection: (section) =>

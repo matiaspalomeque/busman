@@ -1,17 +1,8 @@
 import { useTranslation } from "react-i18next";
 import { useAppStore } from "../../store/appStore";
 import { useResizable } from "../../hooks/useResizable";
-import { bodyString } from "./MessageGrid";
 import { formatTimestamp as formatTime } from "./entityDetailsFormat";
-
-function formatBodyJson(body: unknown): string {
-  const raw = bodyString(body);
-  try {
-    return JSON.stringify(JSON.parse(raw), null, 2);
-  } catch {
-    return raw;
-  }
-}
+import { formatBodyJson, openResend } from "./messageActions";
 
 // ─── Section header ────────────────────────────────────────────────────────────
 
@@ -45,11 +36,10 @@ export function PropertiesPanel() {
   const {
     selectedMessage,
     setSelectedMessage,
-    setIsSendModalOpen,
-    setSendDraft,
     propertiesPanelWidth,
     setPropertiesPanelWidth,
   } = useAppStore();
+  const store = useAppStore.getState;
 
   const { widthRef, onPointerDown } = useResizable({
     initialWidth: propertiesPanelWidth,
@@ -63,17 +53,7 @@ export function PropertiesPanel() {
 
   const appProps = selectedMessage.applicationProperties;
 
-  const handleResend = () => {
-    const raw = bodyString(selectedMessage.body);
-    setSendDraft({
-      body: raw,
-      contentType: selectedMessage.contentType ?? undefined,
-      subject: selectedMessage.subject ?? undefined,
-      correlationId: selectedMessage.correlationId ?? undefined,
-      applicationProperties: selectedMessage.applicationProperties ?? undefined,
-    });
-    setIsSendModalOpen(true);
-  };
+  const handleResend = () => openResend(selectedMessage, store());
 
   return (
     <aside

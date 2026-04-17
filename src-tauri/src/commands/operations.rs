@@ -313,6 +313,55 @@ pub struct SendMessageArgs {
     pub message: serde_json::Value,
 }
 
+#[derive(serde::Deserialize)]
+pub struct SingleMessageActionArgs {
+    pub action: String,
+    #[serde(rename = "sequenceNumber")]
+    pub sequence_number: i64,
+    #[serde(rename = "isDlq")]
+    pub is_dlq: bool,
+    #[serde(rename = "queueName", default)]
+    pub queue_name: Option<String>,
+    #[serde(rename = "topicName", default)]
+    pub topic_name: Option<String>,
+    #[serde(rename = "subscriptionName", default)]
+    pub subscription_name: Option<String>,
+    #[serde(rename = "destQueue", default)]
+    pub dest_queue: Option<String>,
+    #[serde(rename = "destTopic", default)]
+    pub dest_topic: Option<String>,
+    #[serde(rename = "connectionId")]
+    pub connection_id: String,
+    #[serde(rename = "runId")]
+    pub run_id: String,
+}
+
+#[tauri::command]
+pub async fn single_message_action(
+    app: AppHandle,
+    args: SingleMessageActionArgs,
+) -> Result<(), String> {
+    let env = store::resolve_connection_env(&app, &args.connection_id)?;
+    run_worker_operation(
+        &app,
+        "singleMessageAction",
+        json!({
+            "action": args.action,
+            "sequenceNumber": args.sequence_number,
+            "isDlq": args.is_dlq,
+            "queueName": args.queue_name.unwrap_or_default(),
+            "topicName": args.topic_name.unwrap_or_default(),
+            "subscriptionName": args.subscription_name.unwrap_or_default(),
+            "destQueue": args.dest_queue.unwrap_or_default(),
+            "destTopic": args.dest_topic.unwrap_or_default(),
+            "env": env,
+            "runId": args.run_id,
+        }),
+        &args.run_id,
+    )
+    .await
+}
+
 #[tauri::command]
 pub async fn send_message(app: AppHandle, args: SendMessageArgs) -> Result<(), String> {
     let env = store::resolve_connection_env(&app, &args.connection_id)?;

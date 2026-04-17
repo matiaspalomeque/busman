@@ -134,6 +134,7 @@ var handlers = map[string]handlerFn{
 	"createSubscriptionRule":     handleCreateSubscriptionRule,
 	"updateSubscriptionRule":     handleUpdateSubscriptionRule,
 	"deleteSubscriptionRule":     handleDeleteSubscriptionRule,
+	"singleMessageAction":        handleSingleMessageAction,
 }
 
 func handleHealth(_ json.RawMessage) (any, error) {

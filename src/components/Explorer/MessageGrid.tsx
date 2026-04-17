@@ -152,6 +152,33 @@ function formatElapsed(ms: number): string {
   return `${min}:${sec.toString().padStart(2, "0")}`;
 }
 
+// ─── Atomic operation banner ──────────────────────────────────────────────────
+
+function AtomicOperationBanner() {
+  const runningEntry = useAppStore((s) => s.eventLog.find((e) => e.status === "running"));
+  const operation = runningEntry?.operation ?? "Operation";
+  const entity = runningEntry?.entity ?? "";
+
+  return (
+    <div className="shrink-0 flex items-center gap-2 px-3 py-2 border-b border-azure-primary/20 bg-azure-primary/5 dark:bg-azure-primary/10 text-xs">
+      <svg
+        className="animate-spin shrink-0 text-azure-primary"
+        width={12}
+        height={12}
+        viewBox="0 0 24 24"
+        fill="none"
+      >
+        <circle cx={12} cy={12} r={10} stroke="currentColor" strokeWidth={3} strokeOpacity={0.2} />
+        <path d="M12 2a10 10 0 0 1 10 10" stroke="currentColor" strokeWidth={3} strokeLinecap="round" />
+      </svg>
+      <span className="font-medium text-azure-primary">{operation}</span>
+      {entity && (
+        <span className="text-zinc-400 dark:text-zinc-500 truncate">{entity}</span>
+      )}
+    </div>
+  );
+}
+
 // ─── Operation progress panel ─────────────────────────────────────────────────
 
 function OperationProgressPanel() {
@@ -306,6 +333,7 @@ export function MessageGrid() {
     explorerSelection,
     selectedMessage,
     setSelectedMessage,
+    setMessageContextMenu,
     gridFilters,
     setGridFilter,
     gridPage,
@@ -313,6 +341,7 @@ export function MessageGrid() {
     setGridPage,
     setGridPageSize,
     isRunning,
+    operationScope,
     lastBrowseError,
     setLastBrowseError,
   } = useAppStore();
@@ -384,10 +413,11 @@ export function MessageGrid() {
   const pageRows = filtered.slice(pageStart, pageEnd);
 
   const hasSelection = explorerSelection.kind !== "none";
-  const browsing = isRunning;
+  const atomicRunning = isRunning && operationScope === "atomic";
+  const browsing = isRunning && operationScope !== "atomic";
 
   // Show entity details panel when entity selected but no browse performed yet
-  const showEntityDetails = hasSelection && peekFilename === null && !browsing;
+  const showEntityDetails = hasSelection && peekFilename === null && !browsing && !atomicRunning;
 
   return (
     <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
@@ -405,6 +435,7 @@ export function MessageGrid() {
         <OperationProgressPanel />
       ) : (
       <>
+      {atomicRunning && <AtomicOperationBanner />}
       {/* Body filter bar */}
       <BodyFilterBar
         value={gridFilters.body}
@@ -426,17 +457,6 @@ export function MessageGrid() {
           ) : null
         }
       />
-
-      {peekMessages.length > 0 && !selectedMessage && (
-        <div className="shrink-0 flex items-center gap-2 px-3 py-2 border-b border-azure-primary/15 bg-azure-primary/5 dark:border-azure-primary/20 dark:bg-azure-primary/10">
-          <span className="text-[10px] font-semibold uppercase tracking-wider text-azure-primary">
-            {t("explorer.properties.messageDetail")}
-          </span>
-          <span className="text-xs text-zinc-500 dark:text-zinc-400">
-            {t("explorer.properties.clickToInspect")}
-          </span>
-        </div>
-      )}
 
       {/* Table */}
       <div className="flex-1 overflow-auto">
@@ -498,6 +518,10 @@ export function MessageGrid() {
                   index={pageStart + idx + 1}
                   isSelected={selectedMessage === msg}
                   onClick={() => setSelectedMessage(msg === selectedMessage ? null : msg)}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    setMessageContextMenu({ x: e.clientX, y: e.clientY, msg });
+                  }}
                 />
               ))
             )}
@@ -583,12 +607,14 @@ interface MessageRowProps {
   index: number;
   isSelected: boolean;
   onClick: () => void;
+  onContextMenu: (e: React.MouseEvent) => void;
 }
 
-function MessageRow({ msg, index, isSelected, onClick }: MessageRowProps) {
+function MessageRow({ msg, index, isSelected, onClick, onContextMenu }: MessageRowProps) {
   return (
     <tr
       onClick={onClick}
+      onContextMenu={onContextMenu}
       className={[
         "cursor-pointer transition-colors",
         isSelected

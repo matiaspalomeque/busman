@@ -10,6 +10,16 @@ export default defineConfig({
     environment: "jsdom",
     globals: true,
   },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          "react-vendor": ["react", "react-dom"],
+          vendor: ["i18next", "react-i18next", "immer", "zustand", "zod"],
+        },
+      },
+    },
+  },
   clearScreen: false,
   server: {
     port: 1420,

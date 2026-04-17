@@ -13,6 +13,7 @@ import { CreateEntityModal } from "./CreateEntityModal";
 import { DeleteEntityDialog } from "./DeleteEntityDialog";
 import { SubscriptionRulesModal } from "./SubscriptionRulesModal";
 import { AboutModal } from "../Common/AboutModal";
+import { MessageContextMenu } from "./MessageContextMenu";
 
 export function Explorer() {
   useEntityProperties();
@@ -28,6 +29,7 @@ export function Explorer() {
     deleteEntityTarget,
     selectedMessage,
     isInsightsPanelOpen,
+    messageContextMenu,
   } = useAppStore();
   const hasPeekMessages = useAppStore((s) => s.peekMessages.length > 0);
 
@@ -58,6 +60,7 @@ export function Explorer() {
       {isCreateEntityModalOpen && <CreateEntityModal />}
       {isSubscriptionRulesModalOpen && <SubscriptionRulesModal />}
       {deleteEntityTarget != null && <DeleteEntityDialog />}
+      {messageContextMenu != null && <MessageContextMenu />}
     </div>
   );
 }

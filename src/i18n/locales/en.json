@@ -367,6 +367,26 @@
         "delete": "Delete template"
       }
     },
+    "messageContext": {
+      "copySection": "Copy",
+      "copyMessageId": "Copy Message ID",
+      "copySequenceNumber": "Copy Sequence Number",
+      "copyBody": "Copy Body",
+      "copyJson": "Copy Full JSON",
+      "resend": "Resend (send a copy)",
+      "move": "Move to queue…",
+      "replay": "Replay to main queue",
+      "delete": "Delete this message",
+      "moveMessageTitle": "Move this message",
+      "moveWarning": "This will remove the message from its current location. It cannot be undone.",
+      "deleteConfirmTitle": "Delete message{{seq}}?",
+      "deleteConfirmBody": "This will permanently remove it. Cannot be undone.",
+      "replayConfirmTitle": "Replay message{{seq}}?",
+      "replayConfirmBody": "Moves it from the DLQ to the main entity.",
+      "deleteConfirm": "Delete",
+      "replayConfirm": "Replay",
+      "cancel": "Cancel"
+    },
     "moveModal": {
       "title": "Move Messages",
       "sourceQueue": "Source Queue",
