@@ -1,0 +1,31 @@
+{
+  "version": "0.1.20",
+  "notes": "- feat: add atomic operation banner and context menu for message actions (c5bbe71)\n- Add unit tests for hooks and utility functions (94c1936)\n- refactor: remove unused icon paths and bodyPreview function (137d549)\n- feat: implement \"About Busman\" menu item functionality and window centering logic (61cae54)\n\nSee the assets below to download and install this version.",
+  "pub_date": "2026-04-17T23:03:43.556Z",
+  "platforms": {
+    "darwin-aarch64": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTbVVPMUlUWVZQSDl5YXdSQnZxdnErZFJpRFMzT1JZbUNHeERXK0lvemRReW53NEpJemVPbDVSS2Q0ZU5iK0xndERJVXN4VC83enk4TzJLU1FmYWFxWWYyV1dVNkNmRFFNPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzc2NDY2ODIwCWZpbGU6QnVzbWFuLmFwcC50YXIuZ3oKYU1BWmZXckxJSHp4MTBtbEFlUnZjcmJJZ0JabURacjNBNTF0U0d4dGFCa1ZwQy92QVptUmlhYkpUVUZpT0lERVZuSXo3WFdBRUFFd2NWbGFGMkpLQ0E9PQo=",
+      "url": "https://github.com/matiaspalomeque/busman/releases/download/v0.1.20/Busman_aarch64.app.tar.gz"
+    },
+    "darwin-aarch64-app": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTbVVPMUlUWVZQSDl5YXdSQnZxdnErZFJpRFMzT1JZbUNHeERXK0lvemRReW53NEpJemVPbDVSS2Q0ZU5iK0xndERJVXN4VC83enk4TzJLU1FmYWFxWWYyV1dVNkNmRFFNPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzc2NDY2ODIwCWZpbGU6QnVzbWFuLmFwcC50YXIuZ3oKYU1BWmZXckxJSHp4MTBtbEFlUnZjcmJJZ0JabURacjNBNTF0U0d4dGFCa1ZwQy92QVptUmlhYkpUVUZpT0lERVZuSXo3WFdBRUFFd2NWbGFGMkpLQ0E9PQo=",
+      "url": "https://github.com/matiaspalomeque/busman/releases/download/v0.1.20/Busman_aarch64.app.tar.gz"
+    },
+    "windows-x86_64": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTbVVPMUlUWVZQSHlONEhiN3lBRmZzT3huTS90TzhQcU95RmpSRjNZejBOUDJWU3pIWEdzWmJWbytoakJieE5yaUNVeTlZYUZKQWY0MFd0TDE4Yjk2T0JzVzM2bWhnSWc4PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzc2NDY3MDIwCWZpbGU6QnVzbWFuXzAuMS4yMF94NjQtc2V0dXAuZXhlCldZazhpdEw0ZzZRMTQwS3dFZTVkRURjNmFNcC93MXI0OWQxbTNqRk1mRGRoc3N2NGh6TW1XZ1cxSW9PVWEwNSszbGV3SUladGZ5NExwLy9xbVZZWENRPT0K",
+      "url": "https://github.com/matiaspalomeque/busman/releases/download/v0.1.20/Busman_0.1.20_x64-setup.exe"
+    },
+    "windows-x86_64-nsis": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTbVVPMUlUWVZQSHlONEhiN3lBRmZzT3huTS90TzhQcU95RmpSRjNZejBOUDJWU3pIWEdzWmJWbytoakJieE5yaUNVeTlZYUZKQWY0MFd0TDE4Yjk2T0JzVzM2bWhnSWc4PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzc2NDY3MDIwCWZpbGU6QnVzbWFuXzAuMS4yMF94NjQtc2V0dXAuZXhlCldZazhpdEw0ZzZRMTQwS3dFZTVkRURjNmFNcC93MXI0OWQxbTNqRk1mRGRoc3N2NGh6TW1XZ1cxSW9PVWEwNSszbGV3SUladGZ5NExwLy9xbVZZWENRPT0K",
+      "url": "https://github.com/matiaspalomeque/busman/releases/download/v0.1.20/Busman_0.1.20_x64-setup.exe"
+    },
+    "windows-x86_64-msi": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTbVVPMUlUWVZQSDNlckJYNlAwVis1dk5VWUFwWVlHVEtNYzBFbGNacDYyUm56dzNSRVkzTWUzWmhrL1orVUJOeXY0a2IwRkUyd1V1WU0rMFFqNjZ0U0o0UlQ3TFB1bVFrPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzc2NDY3MDIwCWZpbGU6QnVzbWFuXzAuMS4yMF94NjRfZW4tVVMubXNpCnowOWlRdzdndy9CcTd2NWdsaVQvKzhtLzlvSmMxbmhmUWt4WFpDOWU3SXE0K1d0dzh4eWhSNGdFUSswTHF2d3JOcXhyYVJpTzM1dWJEa2tnc1VnWEJnPT0K",
+      "url": "https://github.com/matiaspalomeque/busman/releases/download/v0.1.20/Busman_0.1.20_x64_en-US.msi"
+    },
+    "windows-x86_64-portable": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVTbVVPMUlUWVZQSDk5Snl0ZGhDcktBZzErb2NBVzJadWwwc1ppWWpOY2ViV0dHeEUvZC9OQ2t0bnEyTW1TM2dqU0dwdDJSNHBndkpGejNNdk5OREpNR0FFbVpqeWxZdVFFPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzc2NDY3MDc3CWZpbGU6YnVzbWFuLXBvcnRhYmxlLXdpbjY0LmV4ZQp2Q3NuVEFJODNnSFJTRS81YWFDSkkxYTNZY09Cbm9YKzFDQ0lCSVhyWlREZk51NUNUVU0yTjNLdlNOV0VLTTBPN0t1c290bmEyeVJRUDNHSml1TmVEUT09Cg==",
+      "url": "https://github.com/matiaspalomeque/busman/releases/download/v0.1.20/busman-portable-win64.exe"
+    }
+  }
+}
