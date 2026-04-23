@@ -119,7 +119,9 @@
       "moveTitle": "Move all messages to another queue",
       "moveSelectFirst": "Select an entity first",
       "noSeqAvailable": "No sequence number available",
-      "loadMoreFromSeq": "Append next {{count}} messages from sequence {{seq}}"
+      "loadMoreFromSeq": "Append next {{count}} messages from sequence {{seq}}",
+      "more": "More",
+      "moreActions": "More actions"
     },
     "progress": {
       "inProgress": "{{operation}} in progress",
@@ -330,9 +332,12 @@
       "emptyNoBrowse": "Click Browse to load and preview messages before receiving or replaying.",
       "emptyNoMessages": "No messages found. This queue appears to be empty.",
       "emptyNoMatch": "No messages match the current filters.",
+      "emptyHint": "Try adjusting filters or browse more messages",
       "zeroMessages": "0 messages",
       "messageRange": "{{start}}–{{end}} of {{total}}",
-      "filteredFrom": "(filtered from {{total}})"
+      "filteredFrom": "(filtered from {{total}})",
+      "sortTitle": "Click to sort",
+      "filterTitle": "Click to filter"
     },
     "sendModal": {
       "title": "Send Message",

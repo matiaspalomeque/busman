@@ -119,7 +119,9 @@
       "moveTitle": "Mover todos los mensajes a otra cola",
       "moveSelectFirst": "Seleccioná una entidad primero",
       "noSeqAvailable": "Número de secuencia no disponible",
-      "loadMoreFromSeq": "Agregar los próximos {{count}} mensajes desde la secuencia {{seq}}"
+      "loadMoreFromSeq": "Agregar los próximos {{count}} mensajes desde la secuencia {{seq}}",
+      "more": "Más",
+      "moreActions": "Más acciones"
     },
     "progress": {
       "inProgress": "{{operation}} en progreso",
@@ -330,9 +332,12 @@
       "emptyNoBrowse": "Hacé clic en Explorar para cargar y previsualizar mensajes antes de recibir o reproducir.",
       "emptyNoMessages": "No se encontraron mensajes. La cola parece estar vacía.",
       "emptyNoMatch": "Ningún mensaje coincide con los filtros actuales.",
+      "emptyHint": "Intentá ajustar los filtros o explorar más mensajes",
       "zeroMessages": "0 mensajes",
       "messageRange": "{{start}}–{{end}} de {{total}}",
-      "filteredFrom": "(filtrado de {{total}})"
+      "filteredFrom": "(filtrado de {{total}})",
+      "sortTitle": "Clic para ordenar",
+      "filterTitle": "Clic para filtrar"
     },
     "sendModal": {
       "title": "Enviar Mensaje",

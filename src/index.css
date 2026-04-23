@@ -12,11 +12,13 @@
     font-family: var(--bb-ui-font);
     user-select: none;
     -webkit-user-select: none;
+    font-size: 13px;
+    line-height: 1.5;
   }
 
   ::-webkit-scrollbar {
-    width: 6px;
-    height: 6px;
+    width: 8px;
+    height: 8px;
   }
 
   ::-webkit-scrollbar-track {

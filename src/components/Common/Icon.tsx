@@ -222,6 +222,16 @@ function ChartBarPaths() {
   );
 }
 
+function MoreHorizontalPaths() {
+  return (
+    <>
+      <circle cx="12" cy="12" r="1" />
+      <circle cx="19" cy="12" r="1" />
+      <circle cx="5" cy="12" r="1" />
+    </>
+  );
+}
+
 // ─── Icon map ─────────────────────────────────────────────────────────────────
 
 export type IconName =
@@ -249,7 +259,8 @@ export type IconName =
   | "bellFilled"
   | "alertTriangle"
   | "bookmark"
-  | "chartBar";
+  | "chartBar"
+  | "moreHorizontal";
 
 const PATHS: Record<IconName, () => JSX.Element> = {
   queue: QueuePaths,
@@ -277,6 +288,7 @@ const PATHS: Record<IconName, () => JSX.Element> = {
   alertTriangle: AlertTrianglePaths,
   bookmark: BookmarkPaths,
   chartBar: ChartBarPaths,
+  moreHorizontal: MoreHorizontalPaths,
 };
 
 // ─── Icon component ───────────────────────────────────────────────────────────

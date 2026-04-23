@@ -42,7 +42,7 @@ function ToolbarButton({ label, icon, onClick, disabled, title, danger, primary,
       disabled={disabled}
       title={title}
       className={[
-        "flex items-center gap-1.5 px-3 py-1.5 text-xs border rounded transition-colors",
+        "flex items-center gap-2 px-3.5 py-2 text-sm font-medium border rounded-lg transition-all duration-150",
         "disabled:opacity-40 disabled:cursor-not-allowed",
         danger
           ? "border-red-300 dark:border-red-700 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20"
@@ -52,7 +52,7 @@ function ToolbarButton({ label, icon, onClick, disabled, title, danger, primary,
               ? "border-blue-300 dark:border-blue-700 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20"
               : violet
                 ? active
-                  ? "border-violet-400 dark:border-violet-600 bg-violet-50 dark:bg-violet-900/20 text-violet-600 dark:text-violet-400"
+                  ? "border-violet-400 dark:border-violet-600 bg-violet-50 dark:bg-violet-900/20 text-violet-600 dark:text-violet-400 shadow-sm"
                   : "border-violet-300 dark:border-violet-700 text-violet-500 dark:text-violet-400 hover:bg-violet-50 dark:hover:bg-violet-900/20"
                 : "border-zinc-300 dark:border-zinc-600 text-azure-secondary dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-700",
       ].join(" ")}
@@ -122,6 +122,110 @@ function ConfirmModal({ title, message, danger, onConfirm, onCancel }: ConfirmMo
   );
 }
 
+// ─── More Actions Dropdown ─────────────────────────────────────────────────────
+
+interface MoreActionsDropdownProps {
+  onMove: () => void;
+  onReceive: () => void;
+  onReplay: () => void;
+  onRepublish: () => void;
+  onManageRules: () => void;
+  disabled: boolean;
+  canReplay: boolean;
+  canRepublish: boolean;
+  canManageRules: boolean;
+}
+
+function MoreActionsDropdown({ onMove, onReceive, onReplay, onRepublish, onManageRules, disabled, canReplay, canRepublish, canManageRules }: MoreActionsDropdownProps) {
+  const { t } = useTranslation();
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [open]);
+
+  return (
+    <div ref={containerRef} className="relative">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        disabled={disabled}
+        className="flex items-center gap-2 px-3.5 py-2 text-sm font-medium border rounded-lg transition-all duration-150 border-zinc-300 dark:border-zinc-600 text-azure-secondary dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-700 disabled:opacity-40 disabled:cursor-not-allowed"
+        title={t("explorer.toolbar.moreActions")}
+      >
+        <Icon name="moreHorizontal" size={16} />
+        <span>{t("explorer.toolbar.more")}</span>
+        <Icon name="chevronDown" size={10} className="opacity-50" />
+      </button>
+
+      {open && (
+        <div className="absolute right-0 top-full mt-2 w-48 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 shadow-lg z-50 overflow-hidden animate-fade-in">
+          <div className="py-1">
+            <button
+              onClick={() => { onMove(); setOpen(false); }}
+              disabled={disabled}
+              title={t("explorer.toolbar.moveTitle")}
+              className="w-full flex items-center gap-2 px-3 py-2 text-sm text-left hover:bg-zinc-100 dark:hover:bg-zinc-700 disabled:opacity-40 disabled:cursor-not-allowed dark:text-zinc-200"
+            >
+              <Icon name="move" size={14} />
+              {t("explorer.toolbar.move")}
+            </button>
+            <button
+              onClick={() => { onReceive(); setOpen(false); }}
+              disabled={disabled}
+              title={t("explorer.toolbar.receiveTitle")}
+              className="w-full flex items-center gap-2 px-3 py-2 text-sm text-left text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              <Icon name="box" size={14} />
+              {t("explorer.toolbar.receive")}
+            </button>
+            {canReplay && (
+              <button
+                onClick={() => { onReplay(); setOpen(false); }}
+                disabled={disabled}
+                title={t("explorer.toolbar.replayTitle")}
+                className="w-full flex items-center gap-2 px-3 py-2 text-sm text-left text-orange-600 dark:text-orange-400 hover:bg-orange-50 dark:hover:bg-orange-900/20 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <Icon name="move" size={14} />
+                {t("explorer.toolbar.replay")}
+              </button>
+            )}
+            {canRepublish && (
+              <button
+                onClick={() => { onRepublish(); setOpen(false); }}
+                disabled={disabled}
+                title={t("explorer.toolbar.republishTitle")}
+                className="w-full flex items-center gap-2 px-3 py-2 text-sm text-left text-orange-600 dark:text-orange-400 hover:bg-orange-50 dark:hover:bg-orange-900/20 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                <Icon name="send" size={14} />
+                {t("explorer.toolbar.republish")}
+              </button>
+            )}
+            {canManageRules && (
+              <button
+                onClick={() => { onManageRules(); setOpen(false); }}
+                disabled={disabled}
+                title={t("explorer.toolbar.manageRulesTitle")}
+                className="w-full flex items-center gap-2 px-3 py-2 text-sm text-left hover:bg-zinc-100 dark:hover:bg-zinc-700 disabled:opacity-40 disabled:cursor-not-allowed dark:text-zinc-200"
+              >
+                <Icon name="settings" size={14} />
+                {t("explorer.toolbar.manageRules")}
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Mode selector ────────────────────────────────────────────────────────────
 
 const MODES: QueueMode[] = ["dlq", "normal", "both"];
@@ -134,13 +238,13 @@ interface ModeSelectorProps {
 function ModeSelector({ value, onChange }: ModeSelectorProps) {
   const { t } = useTranslation();
   return (
-    <div className="flex items-center border border-zinc-300 dark:border-zinc-600 rounded overflow-hidden">
+    <div className="flex items-center border border-zinc-300 dark:border-zinc-600 rounded-lg overflow-hidden">
       {MODES.map((m) => (
         <button
           key={m}
           onClick={() => onChange(m)}
           className={[
-            "px-2.5 py-1.5 text-xs transition-colors",
+            "px-3 py-2 text-sm font-medium transition-colors",
             value === m
               ? "bg-azure-primary text-white"
               : "text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-700",
@@ -605,35 +709,35 @@ export function Toolbar() {
   })();
 
   return (
-    <header className="relative shrink-0 h-12 flex items-center px-3 gap-3 border-b border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900">
+    <header className="relative shrink-0 h-14 flex items-center px-4 gap-4 border-b border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900">
       {/* Mode selector */}
       <ModeSelector value={peekMode} onChange={setPeekMode} />
 
       {/* Count input */}
-      <div className="flex items-center gap-1.5">
-        <span className="text-xs text-zinc-500 dark:text-zinc-400">{t("explorer.toolbar.countLabel")}</span>
+      <div className="flex items-center gap-2">
+        <span className="text-sm text-zinc-500 dark:text-zinc-400">{t("explorer.toolbar.countLabel")}</span>
         <input
           type="number"
           value={peekCount}
           min={1}
           max={5000}
           onChange={(e) => setPeekCount(Math.max(1, Math.min(5000, Number(e.target.value))))}
-          className="w-16 text-xs px-2 py-1.5 rounded border border-zinc-300 dark:border-zinc-600 bg-transparent focus:outline-none focus:ring-1 focus:ring-azure-primary dark:text-zinc-200"
+          className="w-20 text-sm px-3 py-2 rounded-lg border border-zinc-300 dark:border-zinc-600 bg-transparent focus:outline-none focus:ring-2 focus:ring-azure-primary/50 dark:text-zinc-200"
         />
       </div>
 
       {/* Divider */}
-      <div className="h-6 w-px bg-zinc-200 dark:bg-zinc-700" />
+      <div className="h-8 w-px bg-zinc-200 dark:bg-zinc-700" />
 
       {/* Action buttons */}
-      <div className="flex items-center gap-1.5">
+      <div className="flex items-center gap-2">
         <ToolbarButton
           label={t("explorer.toolbar.browse")}
           icon={
             browsing ? (
-              <span className="w-3.5 h-3.5 border-2 border-current border-t-transparent rounded-full animate-spin" />
+              <span className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
             ) : (
-              <Icon name="eye" size={13} />
+              <Icon name="eye" size={14} />
             )
           }
           onClick={handleBrowse}
@@ -646,9 +750,9 @@ export function Toolbar() {
             label={t("explorer.toolbar.loadMore")}
             icon={
               loadingMore ? (
-                <span className="w-3.5 h-3.5 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                <span className="w-5 h-5 border-2 border-current border-t-transparent rounded-full animate-spin" />
               ) : (
-                <Icon name="chevronDown" size={13} />
+                <Icon name="chevronDown" size={16} />
               )
             }
             onClick={handleLoadMore}
@@ -661,7 +765,7 @@ export function Toolbar() {
         {peekMessages.length > 0 && (
           <ToolbarButton
             label={t("insights.toggle")}
-            icon={<Icon name="chartBar" size={13} />}
+            icon={<Icon name="chartBar" size={14} />}
             onClick={() => setIsInsightsPanelOpen(!isInsightsPanelOpen)}
             title={t("insights.toggleTitle")}
             violet
@@ -671,77 +775,22 @@ export function Toolbar() {
 
         <ToolbarButton
           label={t("explorer.toolbar.send")}
-          icon={<Icon name="send" size={13} />}
+          icon={<Icon name="send" size={14} />}
           onClick={() => setIsSendModalOpen(!isSendModalOpen)}
           disabled={!hasSelection}
           title={hasSelection ? t("explorer.toolbar.sendTitle") : t("explorer.toolbar.sendTitleDisabled")}
         />
 
-        <ToolbarButton
-          label={t("explorer.toolbar.move")}
-          icon={<Icon name="move" size={13} />}
-          onClick={() => setIsMoveModalOpen(true)}
+        <MoreActionsDropdown
+          onMove={() => setIsMoveModalOpen(true)}
+          onReceive={() => setConfirm("receive")}
+          onReplay={() => setConfirm("replay")}
+          onRepublish={() => setConfirm("republish")}
+          onManageRules={() => setIsSubscriptionRulesModalOpen(true)}
           disabled={!hasSelection || busy}
-          title={
-            !hasSelection
-              ? t("explorer.toolbar.moveSelectFirst")
-              : t("explorer.toolbar.moveTitle")
-          }
-        />
-
-        <ToolbarButton
-          label={t("explorer.toolbar.receive")}
-          icon={<Icon name="box" size={13} />}
-          onClick={() => setConfirm("receive")}
-          disabled={!hasSelection || busy}
-          title={
-            !hasSelection
-              ? t("explorer.toolbar.receiveSelectFirst")
-              : t("explorer.toolbar.receiveTitle")
-          }
-          danger
-        />
-
-        <ToolbarButton
-          label={t("explorer.toolbar.replay")}
-          icon={<Icon name="move" size={13} />}
-          onClick={() => setConfirm("replay")}
-          disabled={!hasSelection || !canReplay || busy}
-          title={
-            !hasSelection
-              ? t("explorer.toolbar.replaySelectFirst")
-              : !canReplay
-                ? t("explorer.toolbar.replayQueuesOnly")
-                : t("explorer.toolbar.replayTitle")
-          }
-          warn
-        />
-
-        {canRepublish && (
-          <ToolbarButton
-            label={t("explorer.toolbar.republish")}
-            icon={<Icon name="send" size={13} />}
-            onClick={() => setConfirm("republish")}
-            disabled={!hasSelection || !canRepublish || busy}
-            title={
-              !hasSelection
-                ? t("explorer.toolbar.republishSelectFirst")
-                : t("explorer.toolbar.republishTitle")
-            }
-            warn
-          />
-        )}
-
-        <ToolbarButton
-          label={t("explorer.toolbar.manageRules")}
-          icon={<Icon name="settings" size={13} />}
-          onClick={() => setIsSubscriptionRulesModalOpen(true)}
-          disabled={!canManageRules || busy}
-          title={
-            !canManageRules
-              ? t("explorer.toolbar.manageRulesSelectSubscription")
-              : t("explorer.toolbar.manageRulesTitle")
-          }
+          canReplay={canReplay}
+          canRepublish={canRepublish}
+          canManageRules={canManageRules}
         />
       </div>
 
@@ -749,15 +798,15 @@ export function Toolbar() {
       <div className="flex-1" />
 
       {/* Connection selector */}
-      <div className="flex items-center gap-1.5">
+      <div className="flex items-center gap-2">
         <ConnectionSelector />
 
         <button
           onClick={() => setIsSettingsModalOpen(true, "connections")}
-          className="p-1.5 rounded border border-zinc-300 dark:border-zinc-600 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-700 transition-colors"
+          className="p-2 rounded-lg border border-zinc-300 dark:border-zinc-600 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-700 transition-colors"
           title={t("explorer.settingsModal.title")}
         >
-          <Icon name="settings" size={14} />
+          <Icon name="settings" size={15} />
         </button>
 
       </div>

@@ -158,12 +158,12 @@ export function Sidebar() {
       style={{ width: sidebarWidth }}
     >
       {/* Namespace header */}
-      <div className="px-3 py-2.5 border-b border-zinc-200 dark:border-zinc-700">
-        <div className="text-[10px] font-semibold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider mb-0.5">
+      <div className="px-4 py-3 border-b border-zinc-200 dark:border-zinc-700">
+        <div className="text-[11px] font-semibold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider mb-1">
           {t("explorer.sidebar.namespace")}
         </div>
         <div
-          className="text-xs text-azure-dark dark:text-zinc-200 truncate font-medium"
+          className="text-sm text-azure-dark dark:text-zinc-200 truncate font-medium"
           title={namespace}
         >
           {namespace || t("explorer.sidebar.notConnected")}
@@ -172,34 +172,34 @@ export function Sidebar() {
       </div>
 
       {/* Filter input + create button */}
-      <div className="px-2 py-2 border-b border-zinc-200 dark:border-zinc-700 flex items-center gap-1.5">
+      <div className="px-3 py-2.5 border-b border-zinc-200 dark:border-zinc-700 flex items-center gap-2">
         <div className="relative flex-1">
           <Icon
             name="search"
-            size={12}
-            className="absolute left-2 top-1/2 -translate-y-1/2 text-zinc-400 pointer-events-none"
+            size={13}
+            className="absolute left-2.5 top-1/2 -translate-y-1/2 text-zinc-400 pointer-events-none"
           />
           <input
             type="text"
             value={treeFilter}
             onChange={(e) => setTreeFilter(e.target.value)}
             placeholder={t("explorer.sidebar.filterPlaceholder")}
-            className="w-full text-xs pl-6 pr-2 py-1.5 rounded border border-zinc-200 dark:border-zinc-600 bg-transparent focus:outline-none focus:ring-1 focus:ring-azure-primary placeholder-zinc-400 dark:placeholder-zinc-600 dark:text-zinc-200"
+            className="w-full text-sm pl-8 pr-3 py-2 rounded-lg border border-zinc-200 dark:border-zinc-600 bg-transparent focus:outline-none focus:ring-2 focus:ring-azure-primary/50 placeholder-zinc-400 dark:placeholder-zinc-600 dark:text-zinc-200"
           />
         </div>
         {entities && (
           <button
             onClick={() => setIsCreateEntityModalOpen(true)}
             title={t("explorer.sidebar.createEntityTitle")}
-            className="shrink-0 p-1 rounded text-zinc-400 hover:text-azure-primary hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+            className="shrink-0 p-2 rounded-lg text-zinc-400 hover:text-azure-primary hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
           >
-            <Icon name="plus" size={14} />
+            <Icon name="plus" size={15} />
           </button>
         )}
       </div>
 
       {/* Tree view */}
-      <div className="flex-1 overflow-y-auto py-1 space-y-0.5">
+      <div className="flex-1 overflow-y-auto py-2 space-y-1">
         {entitiesLoading && !entities && (
           <div className="px-3 py-4 flex items-center gap-2 text-xs text-zinc-400">
             <Icon name="loader" size={14} className="animate-spin shrink-0" />
@@ -334,19 +334,19 @@ export function Sidebar() {
       </div>
 
       {/* Footer */}
-      <div className="px-2 py-2 border-t border-zinc-200 dark:border-zinc-700">
+      <div className="px-3 py-2.5 border-t border-zinc-200 dark:border-zinc-700">
         <div className="flex items-center justify-between">
-          <span className="text-[10px] text-zinc-400">
+          <span className="text-[11px] text-zinc-400">
             {entitiesLoading ? t("explorer.sidebar.refreshing") : t("explorer.sidebar.entityTree")}
           </span>
           <div className="flex items-center gap-1">
             <button
               onClick={() => void refreshEntities()}
               disabled={entitiesLoading}
-              className="p-1 rounded text-zinc-400 hover:text-azure-primary hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-40 transition-colors"
+              className="p-1.5 rounded-lg text-zinc-400 hover:text-azure-primary hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-40 transition-colors"
               title={t("explorer.sidebar.refreshTitle")}
             >
-              <Icon name="refresh" size={13} className={entitiesLoading ? "animate-spin" : undefined} />
+              <Icon name="refresh" size={14} className={entitiesLoading ? "animate-spin" : undefined} />
             </button>
           </div>
         </div>

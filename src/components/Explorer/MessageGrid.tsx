@@ -1,10 +1,11 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { save } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
 import { useAppStore } from "../../store/appStore";
 import type { PeekedMessage } from "../../types";
 import { EntityDetailsPanel } from "./EntityDetailsPanel";
+import { Icon } from "../Common/Icon";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -103,33 +104,75 @@ function BodyFilterBar({ value, onChange, rightSlot }: BodyFilterBarProps) {
 
 // ─── Column header ────────────────────────────────────────────────────────────
 
-interface ColHeaderProps {
+type FilterKey = "messageId" | "deadLetterReason" | "deadLetterErrorDescription" | "body";
+type SortKey = "enqueuedTimeUtc" | "messageId";
+
+function ColHeader({
+  label,
+  filterKey,
+  filterActive,
+  onFilterToggle,
+  sortKey,
+  sortColumn,
+  sortDirection,
+  onSort,
+}: {
   label: string;
-  filterKey?: string;
+  filterKey?: FilterKey;
   filterActive?: boolean;
   onFilterToggle?: () => void;
-}
-
-function ColHeader({ label, filterKey, filterActive, onFilterToggle }: ColHeaderProps) {
+  sortKey?: SortKey;
+  sortColumn?: SortKey | null;
+  sortDirection?: "asc" | "desc";
+  onSort?: (column: SortKey) => void;
+}) {
+  const { t } = useTranslation();
+  const sortable = Boolean(sortKey && onSort);
+  const isSorted = sortable && sortColumn === sortKey;
+  const triggerSort = () => {
+    if (sortKey && onSort) onSort(sortKey);
+  };
   return (
-    <th className="px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-400 border-b border-zinc-200 dark:border-zinc-700 whitespace-nowrap">
+    <th className="px-3 py-2.5 text-left text-xs font-medium text-zinc-500 dark:text-zinc-400 border-b border-zinc-200 dark:border-zinc-700">
       <div className="flex items-center gap-1">
-        <span>{label}</span>
-        {filterKey && (
+        <span
+          className={`flex-1 ${sortable ? "cursor-pointer hover:text-zinc-700 dark:hover:text-zinc-300 select-none" : ""}`}
+          onClick={sortable ? triggerSort : undefined}
+        >
+          {label}
+        </span>
+        {sortable && (
           <button
-            onClick={onFilterToggle}
-            title="Toggle column filter"
-            className={[
-              "p-0.5 rounded transition-colors",
-              filterActive
-                ? "text-azure-primary bg-azure-primary/10"
-                : "text-zinc-300 dark:text-zinc-600 hover:text-zinc-500 dark:hover:text-zinc-400",
-            ].join(" ")}
+            onClick={(e) => {
+              e.stopPropagation();
+              triggerSort();
+            }}
+            className="p-0.5 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-400"
+            title={t("explorer.grid.sortTitle")}
           >
-            {/* Filter funnel icon */}
-            <svg width={10} height={10} viewBox="0 0 24 24" fill="currentColor" stroke="none">
-              <path d="M3 4h18l-7 8v7l-4-2v-5L3 4z" />
-            </svg>
+            <Icon
+              name="chevronDown"
+              size={10}
+              className={
+                isSorted
+                  ? `transform ${sortDirection === "desc" ? "rotate-180" : ""}`
+                  : "opacity-30"
+              }
+            />
+          </button>
+        )}
+        {filterKey && onFilterToggle && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onFilterToggle();
+            }}
+            className={`p-0.5 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 ${
+              filterActive ? "text-azure-primary" : "text-zinc-400"
+            }`}
+            title={t("explorer.grid.filterTitle")}
+          >
+            <Icon name="search" size={10} />
           </button>
         )}
       </div>
@@ -313,11 +356,20 @@ function OperationProgressPanel() {
 
 // ─── Empty state ──────────────────────────────────────────────────────────────
 
-function EmptyState({ message }: { message: string }) {
+function EmptyState({ message, icon = "search" }: { message: string; icon?: "search" | "box" | "alertTriangle" }) {
+  const { t } = useTranslation();
   return (
     <tr>
-      <td colSpan={5} className="px-4 py-12 text-center text-sm text-zinc-400 dark:text-zinc-500">
-        {message}
+      <td colSpan={5} className="px-4 py-16 text-center">
+        <div className="flex flex-col items-center justify-center gap-4 animate-fade-in">
+          <div className="w-16 h-16 rounded-full bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center">
+            <Icon name={icon} size={32} className="text-zinc-300 dark:text-zinc-600" />
+          </div>
+          <div className="space-y-1">
+            <p className="text-sm font-medium text-zinc-500 dark:text-zinc-400">{message}</p>
+            <p className="text-xs text-zinc-400 dark:text-zinc-500">{t("explorer.grid.emptyHint")}</p>
+          </div>
+        </div>
       </td>
     </tr>
   );
@@ -348,6 +400,29 @@ export function MessageGrid() {
 
   // Track which column filter inputs are visible
   const [visibleFilters, setVisibleFilters] = useState<Set<string>>(new Set());
+  
+  // Track sorting state
+  const [sortColumn, setSortColumn] = useState<"enqueuedTimeUtc" | "messageId" | null>(null);
+  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
+
+  // Apply sorting to filtered messages
+  const sortedMessages = useMemo(() => {
+    if (!sortColumn) return peekMessages;
+    
+    return [...peekMessages].sort((a, b) => {
+      let comparison = 0;
+      
+      if (sortColumn === "enqueuedTimeUtc") {
+        const aTime = a.enqueuedTimeUtc ? new Date(a.enqueuedTimeUtc).getTime() : 0;
+        const bTime = b.enqueuedTimeUtc ? new Date(b.enqueuedTimeUtc).getTime() : 0;
+        comparison = aTime - bTime;
+      } else if (sortColumn === "messageId") {
+        comparison = (a.messageId || "").localeCompare(b.messageId || "");
+      }
+      
+      return sortDirection === "asc" ? comparison : -comparison;
+    });
+  }, [peekMessages, sortColumn, sortDirection]);
 
   const handleExport = async () => {
     const sanitize = (s: string) => s.replace(/[/\\:*?"<>|]/g, "-");
@@ -385,8 +460,17 @@ export function MessageGrid() {
     });
   };
 
-  // Apply client-side filters
-  const filtered = peekMessages.filter((msg) => {
+  const handleSort = (column: "enqueuedTimeUtc" | "messageId") => {
+    if (sortColumn === column) {
+      setSortDirection(sortDirection === "asc" ? "desc" : "asc");
+    } else {
+      setSortColumn(column);
+      setSortDirection("desc");
+    }
+  };
+
+  // Apply client-side filters to sorted messages
+  const filtered = sortedMessages.filter((msg) => {
     const { messageId, deadLetterReason, deadLetterErrorDescription, body } = gridFilters;
     if (messageId && !String(msg.messageId ?? "").toLowerCase().includes(messageId.toLowerCase()))
       return false;
@@ -464,12 +548,22 @@ export function MessageGrid() {
           <thead className="sticky top-0 z-10 bg-zinc-50 dark:bg-zinc-800">
             <tr>
               <ColHeader label={t("explorer.grid.colIndex")} />
-              <ColHeader label={t("explorer.grid.colEnqueuedTime")} />
+              <ColHeader
+                label={t("explorer.grid.colEnqueuedTime")}
+                sortKey="enqueuedTimeUtc"
+                sortColumn={sortColumn}
+                sortDirection={sortDirection}
+                onSort={handleSort}
+              />
               <ColHeader
                 label={t("explorer.grid.colMessageId")}
                 filterKey="messageId"
                 filterActive={visibleFilters.has("messageId")}
                 onFilterToggle={() => toggleFilter("messageId")}
+                sortKey="messageId"
+                sortColumn={sortColumn}
+                sortDirection={sortDirection}
+                onSort={handleSort}
               />
               <ColHeader
                 label={t("explorer.grid.colDeadLetterReason")}
@@ -508,6 +602,13 @@ export function MessageGrid() {
                       : peekMessages.length === 0
                         ? t("explorer.grid.emptyNoMessages")
                         : t("explorer.grid.emptyNoMatch")
+                }
+                icon={
+                  !hasSelection
+                    ? "search"
+                    : peekFilename === null || peekMessages.length === 0
+                      ? "box"
+                      : "search"
                 }
               />
             ) : (

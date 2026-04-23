@@ -35,20 +35,28 @@ describe("Toolbar", () => {
     useAppStore.getState().setActiveConnectionId(CONN.id);
   });
 
-  it("disables Manage Rules unless a subscription is selected", () => {
+  it("hides Manage Rules unless a subscription is selected", () => {
     render(<Toolbar />);
-    expect((screen.getByRole("button", { name: "Manage Rules" }) as HTMLButtonElement).disabled).toBe(true);
+
+    // With no selection the More dropdown is disabled, so Manage Rules is not reachable.
+    const moreButton = screen.getByRole("button", { name: /More/ }) as HTMLButtonElement;
+    expect(moreButton.disabled).toBe(true);
+    expect(screen.queryByRole("button", { name: "Manage Rules" })).toBeNull();
   });
 
-  it("enables Manage Rules for subscriptions and opens the modal", () => {
+  it("shows Manage Rules for subscriptions and opens the modal", () => {
     useAppStore.getState().setExplorerSubscription("billing", "processor");
 
     render(<Toolbar />);
 
-    const button = screen.getByRole("button", { name: "Manage Rules" }) as HTMLButtonElement;
-    expect(button.disabled).toBe(false);
+    const moreButton = screen.getByRole("button", { name: /More/ }) as HTMLButtonElement;
+    expect(moreButton.disabled).toBe(false);
+    fireEvent.click(moreButton);
 
-    fireEvent.click(button);
+    const manageRulesButton = screen.getByRole("button", { name: "Manage Rules" }) as HTMLButtonElement;
+    expect(manageRulesButton.disabled).toBe(false);
+
+    fireEvent.click(manageRulesButton);
 
     expect(useAppStore.getState().isSubscriptionRulesModalOpen).toBe(true);
   });
