@@ -155,6 +155,74 @@ describe("useScript", () => {
     });
   });
 
+  it("allows multiple atomic operations to run and settle independently", async () => {
+    mockInvoke.mockResolvedValue(undefined);
+
+    const { result } = renderHook(() => useScript());
+
+    let firstOp!: Promise<OpResult>;
+    let secondOp!: Promise<OpResult>;
+    await act(async () => {
+      firstOp = result.current.runOperation(
+        "single_message_action",
+        { action: "delete" },
+        { scope: "atomic", runId: "atomic-1" },
+      );
+      secondOp = result.current.runOperation(
+        "single_message_action",
+        { action: "replay" },
+        { scope: "atomic", runId: "atomic-2" },
+      );
+    });
+    await act(async () => {});
+
+    expect(useAppStore.getState().isRunning).toBe(false);
+    expect(mockInvoke).toHaveBeenCalledTimes(2);
+    expect(mockInvoke).toHaveBeenCalledWith("single_message_action", {
+      args: { action: "delete", runId: "atomic-1" },
+    });
+    expect(mockInvoke).toHaveBeenCalledWith("single_message_action", {
+      args: { action: "replay", runId: "atomic-2" },
+    });
+    expect(mockListen).toHaveBeenCalledTimes(6);
+
+    let secondOutcome!: OpResult;
+    await act(async () => {
+      emit("script-done:atomic-2", { exitCode: 0 });
+      secondOutcome = await secondOp;
+    });
+    expect(secondOutcome.exitCode).toBe(0);
+
+    let firstOutcome!: OpResult;
+    await act(async () => {
+      emit("script-output:atomic-1", { line: "fatal", isStderr: true, elapsedMs: 10 });
+      emit("script-done:atomic-1", { exitCode: 1 });
+      firstOutcome = await firstOp;
+    });
+    expect(firstOutcome).toEqual({ exitCode: 1, errorMessage: "fatal" });
+  });
+
+  it("rejects atomic operations while a bulk operation is running", async () => {
+    mockInvoke.mockResolvedValue(undefined);
+
+    const { result } = renderHook(() => useScript());
+
+    let bulkOp!: Promise<OpResult>;
+    await act(async () => {
+      bulkOp = result.current.runOperation("move_messages", {});
+    });
+    await act(async () => {});
+
+    await expect(
+      result.current.runOperation("single_message_action", {}, { scope: "atomic" }),
+    ).rejects.toThrow("An operation is already running");
+
+    await act(async () => {
+      emit(`script-done:${RUN_ID}`, { exitCode: 0 });
+      await bulkOp;
+    });
+  });
+
   it("stop() invokes stop_current_operation with the active runId", async () => {
     mockInvoke.mockResolvedValue(undefined); // operation invoke + stop invoke
 

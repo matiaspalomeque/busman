@@ -16,21 +16,12 @@ export function useScript() {
     isRunningRef.current = isRunning;
   }, [isRunning]);
 
-  // Track the active runId so stop() can reference it without being recreated.
-  const activeRunIdRef = useRef<string | null>(null);
-
-  // Store active unlisten functions so they can be cleaned up if the component unmounts.
-  const unlistenersRef = useRef<Array<() => void>>([]);
+  // Track active runIds owned by this hook instance without forcing rerenders.
+  const activeRunIdsRef = useRef<Set<string>>(new Set());
   useEffect(() => {
     return () => {
-      // If this hook instance owns an in-flight operation, leave the listeners alive.
-      // runOperation() removes them itself (via unlistenOutput/Progress/Done) once
-      // the operation settles. Removing them here prematurely would prevent
-      // script-done from firing and leave exitCodePromise hanging forever.
-      if (!activeRunIdRef.current) {
-        unlistenersRef.current.forEach((fn) => fn());
-        unlistenersRef.current = [];
-      }
+      // In-flight operations clean up their own listeners in finally blocks.
+      activeRunIdsRef.current.clear();
     };
   }, []);
 
@@ -38,17 +29,23 @@ export function useScript() {
     async (
       command: string,
       params: Record<string, unknown>,
-      options?: { scope?: "atomic" | "bulk" }
+      options?: { scope?: "atomic" | "bulk"; runId?: string }
     ): Promise<{ exitCode: number; errorMessage?: string }> => {
-      if (isRunningRef.current) throw new Error("An operation is already running");
+      const scope = options?.scope ?? "bulk";
+      if (useAppStore.getState().isRunning) throw new Error("An operation is already running");
 
-      clearOutput();
-      const runId = crypto.randomUUID();
-      activeRunIdRef.current = runId;
-      setRunning(true, runId, options?.scope ?? "bulk");
+      const runId =
+        options?.runId ??
+        (typeof params.runId === "string" ? params.runId : crypto.randomUUID());
+      activeRunIdsRef.current.add(runId);
+      if (scope === "bulk") {
+        clearOutput();
+        setRunning(true, runId, scope);
+      }
 
       let lastStderrLine = "";
       let watchdogId: ReturnType<typeof setTimeout> | null = null;
+      let unlisteners: Array<() => void> = [];
 
       let resolveDone: (code: number) => void = () => {};
       const exitCodePromise = new Promise<number>((resolve) => {
@@ -68,7 +65,7 @@ export function useScript() {
 
       try {
         // Set up all listeners BEFORE invoking to avoid race conditions.
-        const [unlistenOutput, unlistenProgress, unlistenDone] = await Promise.all([
+        unlisteners = await Promise.all([
           listen<ScriptOutputEvent>(`script-output:${runId}`, (ev) => {
             appendOutputLine(ev.payload.line, ev.payload.isStderr, ev.payload.elapsedMs);
             if (ev.payload.isStderr && ev.payload.line.trim()) {
@@ -76,15 +73,14 @@ export function useScript() {
             }
           }),
           listen<ScriptProgressEvent>(`script-progress:${runId}`, (ev) => {
-            setProgress({ text: ev.payload.text, elapsedMs: ev.payload.elapsedMs });
+            if (scope === "bulk") {
+              setProgress({ text: ev.payload.text, elapsedMs: ev.payload.elapsedMs });
+            }
           }),
           listen<ScriptDoneEvent>(`script-done:${runId}`, (ev) => {
             resolveDone(ev.payload.exitCode);
           }),
         ]);
-
-        // Register for cleanup-on-unmount.
-        unlistenersRef.current = [unlistenOutput, unlistenProgress, unlistenDone];
 
         try {
           await invoke(command, {
@@ -112,10 +108,11 @@ export function useScript() {
         return { exitCode: -1, errorMessage: errMsg };
       } finally {
         if (watchdogId !== null) clearTimeout(watchdogId);
-        unlistenersRef.current.forEach((fn) => fn());
-        unlistenersRef.current = [];
-        activeRunIdRef.current = null;
-        setRunning(false);
+        unlisteners.forEach((fn) => fn());
+        activeRunIdsRef.current.delete(runId);
+        if (scope === "bulk") {
+          setRunning(false);
+        }
       }
     },
     // isRunning intentionally omitted — read via ref to keep the callback stable.
@@ -124,10 +121,10 @@ export function useScript() {
 
   // Kill the in-flight worker. The Rust layer emits script-done with exit code 130.
   const stop = useCallback(async () => {
-    // activeRunIdRef is set when this hook instance started the operation.
-    // Fall back to the store's runId so any hook instance (e.g. Toolbar) can stop
+    // The store's runId tracks the current bulk operation so any hook instance
+    // (e.g. Toolbar) can stop
     // an operation started by a different instance (e.g. MoveMessagesModal).
-    const runId = activeRunIdRef.current ?? storeRunId;
+    const runId = storeRunId;
     if (!isRunningRef.current || !runId) return;
     try {
       await invoke("stop_current_operation", { runId });

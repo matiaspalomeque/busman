@@ -6,6 +6,7 @@ import { useAppStore } from "../../store/appStore";
 import type { PeekedMessage } from "../../types";
 import { EntityDetailsPanel } from "./EntityDetailsPanel";
 import { Icon } from "../Common/Icon";
+import { messageOperationKey, type MessageOperation } from "../../utils/messageOperation";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -198,9 +199,9 @@ function formatElapsed(ms: number): string {
 // ─── Atomic operation banner ──────────────────────────────────────────────────
 
 function AtomicOperationBanner() {
-  const runningEntry = useAppStore((s) => s.eventLog.find((e) => e.status === "running"));
-  const operation = runningEntry?.operation ?? "Operation";
-  const entity = runningEntry?.entity ?? "";
+  const { t } = useTranslation();
+  const pendingCount = useAppStore((s) => Object.keys(s.pendingMessageOperations).length);
+  if (pendingCount === 0) return null;
 
   return (
     <div className="shrink-0 flex items-center gap-2 px-3 py-2 border-b border-azure-primary/20 bg-azure-primary/5 dark:bg-azure-primary/10 text-xs">
@@ -214,12 +215,18 @@ function AtomicOperationBanner() {
         <circle cx={12} cy={12} r={10} stroke="currentColor" strokeWidth={3} strokeOpacity={0.2} />
         <path d="M12 2a10 10 0 0 1 10 10" stroke="currentColor" strokeWidth={3} strokeLinecap="round" />
       </svg>
-      <span className="font-medium text-azure-primary">{operation}</span>
-      {entity && (
-        <span className="text-zinc-400 dark:text-zinc-500 truncate">{entity}</span>
-      )}
+      <span className="font-medium text-azure-primary">
+        {t("explorer.grid.messageOperationsRunning", { count: pendingCount })}
+      </span>
     </div>
   );
+}
+
+function pendingOperationLabel(t: ReturnType<typeof useTranslation>["t"], operation: MessageOperation): string {
+  if (operation === "DeleteMessage") return t("explorer.grid.pendingDelete");
+  if (operation === "ReplayMessage") return t("explorer.grid.pendingReplay");
+  if (operation === "MoveMessage") return t("explorer.grid.pendingMove");
+  return t("explorer.grid.pendingOperation");
 }
 
 // ─── Operation progress panel ─────────────────────────────────────────────────
@@ -394,6 +401,7 @@ export function MessageGrid() {
     setGridPageSize,
     isRunning,
     operationScope,
+    pendingMessageOperations,
     lastBrowseError,
     setLastBrowseError,
   } = useAppStore();
@@ -497,11 +505,11 @@ export function MessageGrid() {
   const pageRows = filtered.slice(pageStart, pageEnd);
 
   const hasSelection = explorerSelection.kind !== "none";
-  const atomicRunning = isRunning && operationScope === "atomic";
+  const atomicRunning = Object.keys(pendingMessageOperations).length > 0;
   const browsing = isRunning && operationScope !== "atomic";
 
   // Show entity details panel when entity selected but no browse performed yet
-  const showEntityDetails = hasSelection && peekFilename === null && !browsing && !atomicRunning;
+  const showEntityDetails = hasSelection && peekFilename === null && !browsing;
 
   return (
     <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
@@ -613,17 +621,28 @@ export function MessageGrid() {
               />
             ) : (
               pageRows.map((msg, idx) => (
-                <MessageRow
-                  key={msg.messageId ?? msg.sequenceNumber ?? idx}
-                  msg={msg}
-                  index={pageStart + idx + 1}
-                  isSelected={selectedMessage === msg}
-                  onClick={() => setSelectedMessage(msg === selectedMessage ? null : msg)}
-                  onContextMenu={(e) => {
-                    e.preventDefault();
-                    setMessageContextMenu({ x: e.clientX, y: e.clientY, msg });
-                  }}
-                />
+                (() => {
+                  const pendingKey = messageOperationKey(msg);
+                  const pendingOperation = pendingKey ? pendingMessageOperations[pendingKey] : undefined;
+                  return (
+                    <MessageRow
+                      key={pendingKey ?? msg.messageId ?? idx}
+                      msg={msg}
+                      index={pageStart + idx + 1}
+                      isSelected={selectedMessage === msg}
+                      pendingOperation={pendingOperation?.operation}
+                      onClick={() => {
+                        if (pendingOperation) return;
+                        setSelectedMessage(msg === selectedMessage ? null : msg);
+                      }}
+                      onContextMenu={(e) => {
+                        e.preventDefault();
+                        if (pendingOperation) return;
+                        setMessageContextMenu({ x: e.clientX, y: e.clientY, msg });
+                      }}
+                    />
+                  );
+                })()
               ))
             )}
           </tbody>
@@ -707,11 +726,45 @@ interface MessageRowProps {
   msg: PeekedMessage;
   index: number;
   isSelected: boolean;
+  pendingOperation?: MessageOperation;
   onClick: () => void;
   onContextMenu: (e: React.MouseEvent) => void;
 }
 
-function MessageRow({ msg, index, isSelected, onClick, onContextMenu }: MessageRowProps) {
+function MessageRow({ msg, index, isSelected, pendingOperation, onClick, onContextMenu }: MessageRowProps) {
+  const { t } = useTranslation();
+  if (pendingOperation) {
+    const skeleton = "h-3 rounded bg-zinc-200 dark:bg-zinc-700";
+    return (
+      <tr
+        aria-busy="true"
+        className="animate-pulse bg-zinc-50 dark:bg-zinc-800/50"
+      >
+        <td className="px-3 py-2 text-zinc-400 dark:text-zinc-500 tabular-nums whitespace-nowrap">
+          {index}
+        </td>
+        <td className="px-3 py-2">
+          <div className={`${skeleton} w-28`} />
+        </td>
+        <td className="px-3 py-2">
+          <div className="flex items-center gap-2">
+            <span className="w-3 h-3 border-2 border-azure-primary border-t-transparent rounded-full animate-spin shrink-0" />
+            <span className="text-[11px] font-medium text-azure-primary whitespace-nowrap">
+              {pendingOperationLabel(t, pendingOperation)}
+            </span>
+            <div className={`${skeleton} flex-1 max-w-[120px]`} />
+          </div>
+        </td>
+        <td className="px-3 py-2">
+          <div className={`${skeleton} w-20`} />
+        </td>
+        <td className="px-3 py-2">
+          <div className={`${skeleton} w-32`} />
+        </td>
+      </tr>
+    );
+  }
+
   return (
     <tr
       onClick={onClick}

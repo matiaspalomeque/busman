@@ -12,6 +12,7 @@ import {
   openResend,
   openMoveSingle,
 } from "./messageActions";
+import { messageOperationKey, type MessageOperation } from "../../utils/messageOperation";
 
 type ConfirmAction = "delete" | "replay";
 
@@ -26,9 +27,12 @@ export function MessageContextMenu() {
     setMessageContextMenu,
     explorerSelection,
     isRunning,
+    pendingMessageOperations,
     addEventLogEntry,
     updateEventLogEntry,
-    removePeekedMessageBySeq,
+    startMessageOperation,
+    finishMessageOperation,
+    removePeekedMessageByKey,
   } = useAppStore();
   const store = useAppStore.getState;
   const { runOperation } = useScript();
@@ -72,14 +76,18 @@ export function MessageContextMenu() {
   const y = Math.min(messageContextMenu.y, window.innerHeight - MENU_H - 8);
 
   const seqLabel = msg.sequenceNumber != null ? ` #${msg.sequenceNumber}` : "";
+  const msgKey = messageOperationKey(msg);
+  const isPending = msgKey ? pendingMessageOperations[msgKey] != null : false;
 
   const handleConfirm = () => {
-    if (!conn || isRunning || !confirmAction || msg.sequenceNumber == null) return;
+    if (!conn || isRunning || isPending || !confirmAction || msg.sequenceNumber == null || !msgKey) return;
 
     const action = confirmAction;
     const targetMsg = msg;
+    const targetKey = msgKey;
     const namespace = extractNamespace(conn.connectionString);
     const runId = crypto.randomUUID();
+    const operation: MessageOperation = action === "delete" ? "DeleteMessage" : "ReplayMessage";
     const entityLabel =
       explorerSelection.kind === "queue"
         ? explorerSelection.queueName
@@ -93,11 +101,15 @@ export function MessageContextMenu() {
       namespace,
       entity: `${entityLabel}${seqLabel}`,
       entityType: explorerSelection.kind === "subscription" ? "Subscription" : "Queue",
-      operation: action === "delete" ? "DeleteMessage" : "ReplayMessage",
+      operation,
       status: "running",
     });
+    startMessageOperation(targetKey, {
+      runId,
+      operation,
+      startedAt: new Date().toISOString(),
+    });
 
-    // Close the menu now so the toolbar Stop button becomes accessible.
     close();
 
     const params: Record<string, unknown> = {
@@ -115,15 +127,18 @@ export function MessageContextMenu() {
       if (action === "replay") params.destTopic = explorerSelection.topicName;
     }
 
-    void runOperation("single_message_action", params, { scope: "atomic" })
+    void runOperation("single_message_action", params, { scope: "atomic", runId })
       .then(({ exitCode, errorMessage }) => {
         updateEventLogEntry(runId, exitCodeToStatus(exitCode), errorMessage);
         if (exitCode === 0) {
-          removePeekedMessageBySeq(targetMsg.sequenceNumber);
+          removePeekedMessageByKey(targetKey);
         }
       })
       .catch(() => {
         updateEventLogEntry(runId, "error");
+      })
+      .finally(() => {
+        finishMessageOperation(targetKey);
       });
   };
 
@@ -159,7 +174,7 @@ export function MessageContextMenu() {
           </button>
           <button
             onClick={handleConfirm}
-            disabled={isRunning}
+            disabled={isRunning || isPending}
             className={[
               "px-2.5 py-1 rounded text-white text-[11px] disabled:opacity-40 disabled:cursor-not-allowed",
               isDelete ? "bg-red-600 hover:bg-red-700" : "bg-amber-500 hover:bg-amber-600",
@@ -194,8 +209,8 @@ export function MessageContextMenu() {
       <MenuItem label={t("explorer.messageContext.resend")} onClick={() => { close(); openResend(msg, store()); }} />
       {isDlq && (
         <>
-          <MenuItem label={t("explorer.messageContext.move")} onClick={() => { close(); openMoveSingle(msg, store()); }} />
-          <MenuItem label={t("explorer.messageContext.replay")} onClick={() => setConfirmAction("replay")} />
+          <MenuItem label={t("explorer.messageContext.move")} onClick={() => { close(); openMoveSingle(msg, store()); }} disabled={isPending} />
+          <MenuItem label={t("explorer.messageContext.replay")} onClick={() => setConfirmAction("replay")} disabled={isPending} />
 
           <Divider />
 
@@ -203,6 +218,7 @@ export function MessageContextMenu() {
             label={t("explorer.messageContext.delete")}
             onClick={() => setConfirmAction("delete")}
             danger
+            disabled={isPending}
           />
         </>
       )}
@@ -214,17 +230,20 @@ function MenuItem({
   label,
   onClick,
   danger,
+  disabled,
 }: {
   label: string;
   onClick: () => void;
   danger?: boolean;
+  disabled?: boolean;
 }) {
   return (
     <button
       role="menuitem"
       onClick={onClick}
+      disabled={disabled}
       className={[
-        "w-full text-left px-3 py-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors",
+        "w-full text-left px-3 py-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors disabled:opacity-40 disabled:cursor-not-allowed",
         danger ? "text-red-600 dark:text-red-400" : "text-zinc-700 dark:text-zinc-200",
       ].join(" ")}
     >

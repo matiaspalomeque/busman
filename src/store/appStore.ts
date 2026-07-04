@@ -11,11 +11,18 @@ import type {
   ProgressUpdate,
   SendMessageDraft,
 } from "../types";
+import { messageOperationKey, type MessageOperation } from "../utils/messageOperation";
 
 /** Internal key separator for subscription store entries: "topic\0subscription". */
 export const SUBSCRIPTION_KEY_SEP = "\0";
 
 export type SettingsTab = "connections" | "appearance" | "autoRefresh" | "notifications";
+
+export interface PendingMessageOperation {
+  runId: string;
+  operation: MessageOperation;
+  startedAt: string;
+}
 
 /** Timer handle for the changedEntities auto-clear. Module-scoped since the store is a singleton. */
 let changedEntitiesTimer: ReturnType<typeof setTimeout> | null = null;
@@ -88,6 +95,7 @@ interface AppState {
   deleteEntityTarget: { type: "queue" | "topic" | "subscription"; name: string; topicName?: string } | null;
   messageContextMenu: { x: number; y: number; msg: PeekedMessage } | null;
   singleMessageMoveTarget: PeekedMessage | null;
+  pendingMessageOperations: Record<string, PendingMessageOperation>;
   sidebarCollapsed: { queues: boolean; topics: boolean; system: boolean };
 
   // Sidebar width (persisted)
@@ -174,7 +182,10 @@ interface AppState {
   setDeleteEntityTarget: (target: { type: "queue" | "topic" | "subscription"; name: string; topicName?: string } | null) => void;
   setMessageContextMenu: (menu: { x: number; y: number; msg: PeekedMessage } | null) => void;
   setSingleMessageMoveTarget: (msg: PeekedMessage | null) => void;
+  startMessageOperation: (key: string, operation: PendingMessageOperation) => void;
+  finishMessageOperation: (key: string) => void;
   removePeekedMessageBySeq: (sequenceNumber: string | null | undefined) => void;
+  removePeekedMessageByKey: (key: string) => void;
   toggleSidebarSection: (section: "queues" | "topics" | "system") => void;
   setSidebarWidth: (width: number) => void;
   setPropertiesPanelWidth: (width: number) => void;
@@ -206,6 +217,7 @@ function resetGridState(state: AppState): void {
   state.entityPropertiesLoading = false;
   state.entityPropertiesError = null;
   state.isInsightsPanelOpen = false;
+  state.pendingMessageOperations = {};
 }
 
 function computeMaxSeqNums(messages: PeekedMessage[]): { normal: number | null; dlq: number | null } {
@@ -274,6 +286,7 @@ export const useAppStore = create<AppState>()(
     deleteEntityTarget: null,
     messageContextMenu: null,
     singleMessageMoveTarget: null,
+    pendingMessageOperations: {},
     sidebarCollapsed: { queues: false, topics: false, system: false },
     sidebarWidth: (() => {
       try {
@@ -727,6 +740,16 @@ export const useAppStore = create<AppState>()(
         state.singleMessageMoveTarget = msg;
       }),
 
+    startMessageOperation: (key, operation) =>
+      set((state) => {
+        state.pendingMessageOperations[key] = operation;
+      }),
+
+    finishMessageOperation: (key) =>
+      set((state) => {
+        delete state.pendingMessageOperations[key];
+      }),
+
     removePeekedMessageBySeq: (sequenceNumber) =>
       set((state) => {
         if (sequenceNumber == null) return;
@@ -734,6 +757,17 @@ export const useAppStore = create<AppState>()(
         if (idx >= 0) {
           state.peekMessages.splice(idx, 1);
           if (state.selectedMessage?.sequenceNumber === sequenceNumber) {
+            state.selectedMessage = null;
+          }
+        }
+      }),
+
+    removePeekedMessageByKey: (key) =>
+      set((state) => {
+        const idx = state.peekMessages.findIndex((m) => messageOperationKey(m) === key);
+        if (idx >= 0) {
+          const [removed] = state.peekMessages.splice(idx, 1);
+          if (state.selectedMessage && messageOperationKey(state.selectedMessage) === messageOperationKey(removed)) {
             state.selectedMessage = null;
           }
         }

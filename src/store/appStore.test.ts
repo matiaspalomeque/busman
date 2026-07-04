@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { useAppStore, selectActiveConnection, SUBSCRIPTION_KEY_SEP } from "./appStore";
+import { messageOperationKey } from "../utils/messageOperation";
+import type { PeekedMessage } from "../types";
 
 // Reset store to initial state before each test.
 beforeEach(() => {
@@ -164,6 +166,72 @@ describe("appStore", () => {
       useAppStore.getState().updateEventLogEntry("log1", "success");
       const entry = useAppStore.getState().eventLog.find((e) => e.id === "log1");
       expect(entry?.status).toBe("success");
+    });
+  });
+
+  // ─── Single-message operations ─────────────────────────────────────
+
+  describe("single-message operation state", () => {
+    it("tracks pending operations by message key independently", () => {
+      const state = useAppStore.getState();
+
+      state.startMessageOperation("source-a\0 1", {
+        runId: "run-a",
+        operation: "DeleteMessage",
+        startedAt: "2026-01-01T00:00:00.000Z",
+      });
+      state.startMessageOperation("source-b\0 2", {
+        runId: "run-b",
+        operation: "ReplayMessage",
+        startedAt: "2026-01-01T00:00:01.000Z",
+      });
+
+      expect(Object.keys(useAppStore.getState().pendingMessageOperations)).toHaveLength(2);
+
+      state.finishMessageOperation("source-a\0 1");
+
+      expect(useAppStore.getState().pendingMessageOperations).toEqual({
+        ["source-b\0 2"]: {
+          runId: "run-b",
+          operation: "ReplayMessage",
+          startedAt: "2026-01-01T00:00:01.000Z",
+        },
+      });
+    });
+
+    it("removes a peeked message by source and sequence instead of sequence alone", () => {
+      const normal: PeekedMessage = {
+        messageId: "normal",
+        sequenceNumber: "42",
+        body: {},
+        subject: null,
+        contentType: null,
+        correlationId: null,
+        partitionKey: null,
+        traceParent: null,
+        applicationProperties: null,
+        enqueuedTimeUtc: null,
+        expiresAtUtc: null,
+        _source: "Normal Queue: q1",
+      };
+      const dlq: PeekedMessage = {
+        ...normal,
+        messageId: "dlq",
+        deadLetterReason: "failed",
+        _source: "Dead Letter Queue: q1",
+      };
+
+      useAppStore.getState().setPeekResults([normal, dlq], "peek.json");
+      useAppStore.getState().setSelectedMessage(dlq);
+
+      const dlqKey = messageOperationKey(dlq);
+      expect(dlqKey).toBeTruthy();
+
+      useAppStore.getState().removePeekedMessageByKey(dlqKey!);
+
+      const updated = useAppStore.getState();
+      expect(updated.peekMessages).toEqual([normal]);
+      expect(updated.selectedMessage).toBeNull();
     });
   });
 

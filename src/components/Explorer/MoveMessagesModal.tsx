@@ -7,6 +7,7 @@ import { getDisplayEntity } from "./toolbarActions";
 import { extractNamespace } from "../../utils/connection";
 import { exitCodeToStatus } from "../../utils/exitCode";
 import type { QueueMode } from "../../types";
+import { messageOperationKey } from "../../utils/messageOperation";
 
 const MODES: QueueMode[] = ["normal", "dlq", "both"];
 
@@ -28,14 +29,18 @@ export function MoveMessagesModal() {
     setIsMoveModalOpen,
     singleMessageMoveTarget,
     setSingleMessageMoveTarget,
+    pendingMessageOperations,
     addEventLogEntry,
     updateEventLogEntry,
+    startMessageOperation,
   } = useAppStore();
 
   const { runOperation } = useScript();
 
   const isSingleMessage = singleMessageMoveTarget != null;
   const isSingleMessageDlq = singleMessageMoveTarget?._source.startsWith("Dead Letter") ?? false;
+  const singleMessageKey = singleMessageMoveTarget ? messageOperationKey(singleMessageMoveTarget) : null;
+  const singleMessagePending = singleMessageKey ? pendingMessageOperations[singleMessageKey] != null : false;
   const isSubscriptionSource = !isSingleMessage && explorerSelection.kind === "subscription";
   const initialSource = getDisplayEntity(explorerSelection) ?? "";
 
@@ -80,7 +85,8 @@ export function MoveMessagesModal() {
     (!isSingleMessage || isSingleMessageDlq) &&
     destQueue.trim() !== "" &&
     !sameQueueError &&
-    !isRunning;
+    !isRunning &&
+    !singleMessagePending;
 
   const handleMove = () => {
     if (!conn || !canSubmit) return;
@@ -101,7 +107,7 @@ export function MoveMessagesModal() {
     // Close immediately so the toolbar (and its stop button) becomes accessible.
     close();
 
-    if (isSingleMessage && singleMessageMoveTarget) {
+    if (isSingleMessage && singleMessageMoveTarget && singleMessageKey) {
       const msg = singleMessageMoveTarget;
       const isDlq = msg._source.startsWith("Dead Letter");
       const entityLabel = getDisplayEntity(explorerSelection) ?? sourceQueue.trim();
@@ -115,6 +121,11 @@ export function MoveMessagesModal() {
         operation: "MoveMessage",
         status: "running",
       });
+      startMessageOperation(singleMessageKey, {
+        runId,
+        operation: "MoveMessage",
+        startedAt: new Date().toISOString(),
+      });
 
       const params: Record<string, unknown> = {
         action: "move",
@@ -122,7 +133,6 @@ export function MoveMessagesModal() {
         isDlq,
         destQueue: destQueue.trim(),
         connectionId: conn.id,
-        runId,
       };
       if (explorerSelection.kind === "queue") {
         params.queueName = explorerSelection.queueName;
@@ -131,15 +141,18 @@ export function MoveMessagesModal() {
         params.subscriptionName = explorerSelection.subscriptionName;
       }
 
-      void runOperation("single_message_action", params, { scope: "atomic" })
+      void runOperation("single_message_action", params, { scope: "atomic", runId })
         .then(({ exitCode, errorMessage }) => {
           updateEventLogEntry(runId, exitCodeToStatus(exitCode), errorMessage);
           if (exitCode === 0) {
-            useAppStore.getState().removePeekedMessageBySeq(msg.sequenceNumber);
+            useAppStore.getState().removePeekedMessageByKey(singleMessageKey);
           }
         })
         .catch(() => {
           updateEventLogEntry(runId, "error");
+        })
+        .finally(() => {
+          useAppStore.getState().finishMessageOperation(singleMessageKey);
         });
       return;
     }

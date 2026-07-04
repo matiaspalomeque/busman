@@ -337,7 +337,13 @@
       "messageRange": "{{start}}–{{end}} of {{total}}",
       "filteredFrom": "(filtered from {{total}})",
       "sortTitle": "Click to sort",
-      "filterTitle": "Click to filter"
+      "filterTitle": "Click to filter",
+      "messageOperationsRunning": "{{count}} message operation running",
+      "messageOperationsRunning_other": "{{count}} message operations running",
+      "pendingDelete": "Deleting…",
+      "pendingReplay": "Replaying…",
+      "pendingMove": "Moving…",
+      "pendingOperation": "Working…"
     },
     "sendModal": {
       "title": "Send Message",
