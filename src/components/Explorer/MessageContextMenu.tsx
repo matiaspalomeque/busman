@@ -192,18 +192,20 @@ export function MessageContextMenu() {
       <Divider />
 
       <MenuItem label={t("explorer.messageContext.resend")} onClick={() => { close(); openResend(msg, store()); }} />
-      <MenuItem label={t("explorer.messageContext.move")} onClick={() => { close(); openMoveSingle(msg, store()); }} />
       {isDlq && (
-        <MenuItem label={t("explorer.messageContext.replay")} onClick={() => setConfirmAction("replay")} />
+        <>
+          <MenuItem label={t("explorer.messageContext.move")} onClick={() => { close(); openMoveSingle(msg, store()); }} />
+          <MenuItem label={t("explorer.messageContext.replay")} onClick={() => setConfirmAction("replay")} />
+
+          <Divider />
+
+          <MenuItem
+            label={t("explorer.messageContext.delete")}
+            onClick={() => setConfirmAction("delete")}
+            danger
+          />
+        </>
       )}
-
-      <Divider />
-
-      <MenuItem
-        label={t("explorer.messageContext.delete")}
-        onClick={() => setConfirmAction("delete")}
-        danger
-      />
     </div>
   );
 }

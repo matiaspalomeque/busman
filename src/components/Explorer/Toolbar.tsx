@@ -1,6 +1,5 @@
 import { useState, useRef, useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import { invoke } from "@tauri-apps/api/core";
 import { useAppStore, selectActiveConnection } from "../../store/appStore";
 import { useConnections } from "../../hooks/useConnections";
 import { useEscapeKey } from "../../hooks/useEscapeKey";
@@ -9,7 +8,8 @@ import { Icon } from "../Common/Icon";
 import { extractNamespace } from "../../utils/connection";
 import { exitCodeToStatus } from "../../utils/exitCode";
 import { safeColor } from "../../utils/color";
-import type { PeekResult, QueueMode, Connection } from "../../types";
+import { PeekResultSchema, safeInvoke } from "../../schemas/ipc";
+import type { QueueMode, Connection, ExplorerSelection } from "../../types";
 import {
   buildEmptyMessagesParams,
   buildReplayParams,
@@ -19,6 +19,14 @@ import {
   canRepublishSelection,
   getDisplayEntity,
 } from "./toolbarActions";
+
+function selectionKey(selection: ExplorerSelection): string {
+  if (selection.kind === "queue") return `queue:${selection.queueName}`;
+  if (selection.kind === "subscription") {
+    return `subscription:${selection.topicName}/${selection.subscriptionName}`;
+  }
+  return "none";
+}
 
 // ─── Toolbar button ───────────────────────────────────────────────────────────
 
@@ -482,6 +490,12 @@ export function Toolbar() {
 
     const runId = crypto.randomUUID();
     const namespace = extractNamespace(conn.connectionString);
+    const requestConnId = conn.id;
+    const requestSelectionKey = selectionKey(explorerSelection);
+    const isCurrentRequest = () => {
+      const state = useAppStore.getState();
+      return state.activeConnectionId === requestConnId && selectionKey(state.explorerSelection) === requestSelectionKey;
+    };
 
     // argv format must match the Go worker's peekMessages parser.
     // count must be a string; include an empty startSequence to match expected arg positions.
@@ -517,18 +531,22 @@ export function Toolbar() {
     setBrowsing(true);
 
     try {
-      const result = await invoke<PeekResult>("peek_messages", {
+      const result = await safeInvoke("peek_messages", PeekResultSchema, {
         args: {
           argv,
-          connectionId: conn.id,
+          connectionId: requestConnId,
           runId,
         },
       });
+      if (!isCurrentRequest()) {
+        updateEventLogEntry(runId, "stopped", "Browse result ignored because selection changed");
+        return;
+      }
       setPeekResults(result.messages, result.filename);
       updateEventLogEntry(runId, "success");
     } catch (err) {
       const msg = String(err);
-      setLastBrowseError(msg);
+      if (isCurrentRequest()) setLastBrowseError(msg);
       updateEventLogEntry(runId, "error", msg);
     } finally {
       setBrowsing(false);
@@ -541,6 +559,12 @@ export function Toolbar() {
 
     const runId = crypto.randomUUID();
     const namespace = extractNamespace(conn.connectionString);
+    const requestConnId = conn.id;
+    const requestSelectionKey = selectionKey(explorerSelection);
+    const isCurrentRequest = () => {
+      const state = useAppStore.getState();
+      return state.activeConnectionId === requestConnId && selectionKey(state.explorerSelection) === requestSelectionKey;
+    };
 
     addEventLogEntry({
       id: runId,
@@ -571,7 +595,7 @@ export function Toolbar() {
 
     const invokeArgs = (argv: string[]) => ({
       argv,
-      connectionId: conn.id,
+      connectionId: requestConnId,
       runId,
     });
 
@@ -579,29 +603,41 @@ export function Toolbar() {
       if (peekMode === "both") {
         // DLQ and normal queue have independent sequence number spaces — run separately.
         if (lastPeekNormalMaxSeqNum !== null) {
-          const r = await invoke<PeekResult>("peek_messages", {
+          const r = await safeInvoke("peek_messages", PeekResultSchema, {
             args: invokeArgs(buildArgv("normal", String(lastPeekNormalMaxSeqNum + 1))),
           });
+          if (!isCurrentRequest()) {
+            updateEventLogEntry(runId, "stopped", "Browse result ignored because selection changed");
+            return;
+          }
           appendPeekResults(r.messages, r.filename);
         }
         if (lastPeekDlqMaxSeqNum !== null) {
-          const r = await invoke<PeekResult>("peek_messages", {
+          const r = await safeInvoke("peek_messages", PeekResultSchema, {
             args: invokeArgs(buildArgv("dlq", String(lastPeekDlqMaxSeqNum + 1))),
           });
+          if (!isCurrentRequest()) {
+            updateEventLogEntry(runId, "stopped", "Browse result ignored because selection changed");
+            return;
+          }
           appendPeekResults(r.messages, r.filename);
         }
       } else {
         const startSeqNum = peekMode === "normal" ? lastPeekNormalMaxSeqNum : lastPeekDlqMaxSeqNum;
         if (startSeqNum === null) return;
-        const r = await invoke<PeekResult>("peek_messages", {
+        const r = await safeInvoke("peek_messages", PeekResultSchema, {
           args: invokeArgs(buildArgv(peekMode, String(startSeqNum + 1))),
         });
+        if (!isCurrentRequest()) {
+          updateEventLogEntry(runId, "stopped", "Browse result ignored because selection changed");
+          return;
+        }
         appendPeekResults(r.messages, r.filename);
       }
       updateEventLogEntry(runId, "success");
     } catch (err) {
       const msg = String(err);
-      setLastBrowseError(msg);
+      if (isCurrentRequest()) setLastBrowseError(msg);
       updateEventLogEntry(runId, "error", msg);
     } finally {
       setLoadingMore(false);

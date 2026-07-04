@@ -329,7 +329,7 @@ async fn log_worker_stderr(stderr: ChildStderr) {
             Ok(_) => {
                 let trimmed = line.trim();
                 if !trimmed.is_empty() {
-                    log::warn!("[worker stderr] {}", trimmed);
+                    log::warn!("[worker stderr] {}", redact_secrets(trimmed));
                 }
                 line.clear();
             }
@@ -380,7 +380,10 @@ async fn reader_loop(app: AppHandle, mut stdout: BufReader<ChildStdout>, pending
         let parsed: WorkerMessage = match serde_json::from_str(trimmed) {
             Ok(value) => value,
             Err(e) => {
-                log::debug!("Worker non-protocol line skipped ({e}): {trimmed}");
+                log::debug!(
+                    "Worker non-protocol line skipped ({e}): {}",
+                    redact_secrets(trimmed)
+                );
                 continue;
             }
         };

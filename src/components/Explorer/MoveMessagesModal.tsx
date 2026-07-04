@@ -35,6 +35,7 @@ export function MoveMessagesModal() {
   const { runOperation } = useScript();
 
   const isSingleMessage = singleMessageMoveTarget != null;
+  const isSingleMessageDlq = singleMessageMoveTarget?._source.startsWith("Dead Letter") ?? false;
   const isSubscriptionSource = !isSingleMessage && explorerSelection.kind === "subscription";
   const initialSource = getDisplayEntity(explorerSelection) ?? "";
 
@@ -76,6 +77,7 @@ export function MoveMessagesModal() {
   const canSubmit =
     !!conn &&
     (isSingleMessage || sourceQueue.trim() !== "") &&
+    (!isSingleMessage || isSingleMessageDlq) &&
     destQueue.trim() !== "" &&
     !sameQueueError &&
     !isRunning;
@@ -85,6 +87,16 @@ export function MoveMessagesModal() {
 
     const runId = crypto.randomUUID();
     const namespace = extractNamespace(conn.connectionString);
+
+    const singleMessageSequenceNumber =
+      isSingleMessage && singleMessageMoveTarget ? Number(singleMessageMoveTarget.sequenceNumber) : null;
+    if (
+      isSingleMessage &&
+      (!Number.isFinite(singleMessageSequenceNumber) || singleMessageSequenceNumber === null || singleMessageSequenceNumber <= 0)
+    ) {
+      return;
+    }
+    if (isSingleMessage && !isSingleMessageDlq) return;
 
     // Close immediately so the toolbar (and its stop button) becomes accessible.
     close();
@@ -106,7 +118,7 @@ export function MoveMessagesModal() {
 
       const params: Record<string, unknown> = {
         action: "move",
-        sequenceNumber: Number(msg.sequenceNumber),
+        sequenceNumber: singleMessageSequenceNumber,
         isDlq,
         destQueue: destQueue.trim(),
         connectionId: conn.id,

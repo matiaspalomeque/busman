@@ -4,6 +4,8 @@ import { useCallback, useEffect, useRef } from "react";
 import { useAppStore } from "../store/appStore";
 import type { ScriptOutputEvent, ScriptProgressEvent, ScriptDoneEvent } from "../types";
 
+const SCRIPT_DONE_TIMEOUT_MS = 30 * 60 * 1000;
+
 export function useScript() {
   const { isRunning, runId: storeRunId, setRunning, appendOutputLine, setProgress, clearOutput } =
     useAppStore();
@@ -46,58 +48,75 @@ export function useScript() {
       setRunning(true, runId, options?.scope ?? "bulk");
 
       let lastStderrLine = "";
+      let watchdogId: ReturnType<typeof setTimeout> | null = null;
 
       let resolveDone: (code: number) => void = () => {};
       const exitCodePromise = new Promise<number>((resolve) => {
-        resolveDone = resolve;
+        let settled = false;
+        resolveDone = (code: number) => {
+          if (settled) return;
+          settled = true;
+          resolve(code);
+        };
+        watchdogId = setTimeout(() => {
+          const msg = "Operation timed out waiting for completion event";
+          appendOutputLine(`Error: ${msg}`, true, 0);
+          lastStderrLine = msg;
+          resolveDone(-1);
+        }, SCRIPT_DONE_TIMEOUT_MS);
       });
 
-      // Set up all listeners BEFORE invoking to avoid race conditions.
-      const [unlistenOutput, unlistenProgress, unlistenDone] = await Promise.all([
-        listen<ScriptOutputEvent>(`script-output:${runId}`, (ev) => {
-          appendOutputLine(ev.payload.line, ev.payload.isStderr, ev.payload.elapsedMs);
-          if (ev.payload.isStderr && ev.payload.line.trim()) {
-            lastStderrLine = ev.payload.line.trim();
-          }
-        }),
-        listen<ScriptProgressEvent>(`script-progress:${runId}`, (ev) => {
-          setProgress({ text: ev.payload.text, elapsedMs: ev.payload.elapsedMs });
-        }),
-        listen<ScriptDoneEvent>(`script-done:${runId}`, (ev) => {
-          resolveDone(ev.payload.exitCode);
-        }),
-      ]);
-
-      // Register for cleanup-on-unmount.
-      unlistenersRef.current = [unlistenOutput, unlistenProgress, unlistenDone];
-
       try {
-        await invoke(command, {
-          args: { ...params, runId },
-        });
+        // Set up all listeners BEFORE invoking to avoid race conditions.
+        const [unlistenOutput, unlistenProgress, unlistenDone] = await Promise.all([
+          listen<ScriptOutputEvent>(`script-output:${runId}`, (ev) => {
+            appendOutputLine(ev.payload.line, ev.payload.isStderr, ev.payload.elapsedMs);
+            if (ev.payload.isStderr && ev.payload.line.trim()) {
+              lastStderrLine = ev.payload.line.trim();
+            }
+          }),
+          listen<ScriptProgressEvent>(`script-progress:${runId}`, (ev) => {
+            setProgress({ text: ev.payload.text, elapsedMs: ev.payload.elapsedMs });
+          }),
+          listen<ScriptDoneEvent>(`script-done:${runId}`, (ev) => {
+            resolveDone(ev.payload.exitCode);
+          }),
+        ]);
+
+        // Register for cleanup-on-unmount.
+        unlistenersRef.current = [unlistenOutput, unlistenProgress, unlistenDone];
+
+        try {
+          await invoke(command, {
+            args: { ...params, runId },
+          });
+        } catch (e: unknown) {
+          const errMsg = String(e);
+          appendOutputLine(`Error: ${errMsg}`, true, 0);
+          lastStderrLine = errMsg;
+          // If backend returns an error before emitting script-done,
+          // resolve locally to avoid leaving the UI in a running state.
+          resolveDone(-1);
+        }
+
+        // Wait for the done event.
+        const code = await exitCodePromise;
+
+        return {
+          exitCode: code,
+          errorMessage: code !== 0 && lastStderrLine ? lastStderrLine : undefined,
+        };
       } catch (e: unknown) {
         const errMsg = String(e);
         appendOutputLine(`Error: ${errMsg}`, true, 0);
-        lastStderrLine = errMsg;
-        // If backend returns an error before emitting script-done,
-        // resolve locally to avoid leaving the UI in a running state.
-        resolveDone(-1);
+        return { exitCode: -1, errorMessage: errMsg };
+      } finally {
+        if (watchdogId !== null) clearTimeout(watchdogId);
+        unlistenersRef.current.forEach((fn) => fn());
+        unlistenersRef.current = [];
+        activeRunIdRef.current = null;
+        setRunning(false);
       }
-
-      // Wait for the done event.
-      const code = await exitCodePromise;
-
-      unlistenOutput();
-      unlistenProgress();
-      unlistenDone();
-      unlistenersRef.current = [];
-      activeRunIdRef.current = null;
-      setRunning(false);
-
-      return {
-        exitCode: code,
-        errorMessage: code !== 0 && lastStderrLine ? lastStderrLine : undefined,
-      };
     },
     // isRunning intentionally omitted — read via ref to keep the callback stable.
     [setRunning, appendOutputLine, setProgress, clearOutput]

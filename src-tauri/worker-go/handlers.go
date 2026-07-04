@@ -39,6 +39,9 @@ func getAdminClient(connectionString string) (*admin.Client, error) {
 // ─── Shared validation / parsing helpers ─────────────────────────────────────
 
 const entityNameMaxLen = 260
+const maxReceiveBatchSize = 500
+const maxPeekBatchSize = 500
+const maxSearchMatches = 10000
 
 var entityNameRe = regexp.MustCompile(`^[a-zA-Z0-9._\-/]+$`)
 
@@ -88,6 +91,14 @@ func parseIntOrDefault(s string, def int) int {
 	return v
 }
 
+func boundedIntFromEnv(env map[string]string, key string, def int, max int) int {
+	v := parseIntOrDefault(env[key], def)
+	if v > max {
+		return max
+	}
+	return v
+}
+
 func parseBoolOrDefault(s string, def bool) bool {
 	if s == "" {
 		return def
@@ -119,6 +130,24 @@ func calculateRate(count int, durationMs int64) int {
 		return 0
 	}
 	return int(math.Round(float64(count) / (float64(durationMs) / 1000.0)))
+}
+
+func timeoutMsFromEnv(env map[string]string, key string, def int) int {
+	ms := parseIntOrDefault(env[key], def)
+	if ms < 1000 {
+		return 1000
+	}
+	return ms
+}
+
+func operationContext(env map[string]string, defMs int) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.Background(), time.Duration(timeoutMsFromEnv(env, "OPERATION_TIMEOUT_IN_MS", defMs))*time.Millisecond)
+}
+
+func closeWithTimeout(resource interface{ Close(context.Context) error }) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_ = resource.Close(ctx)
 }
 
 // bodyToJSON tries to decode as JSON and returns the value; falls back to string.
@@ -172,7 +201,8 @@ func handleListEntities(raw json.RawMessage) (any, error) {
 		return nil, err
 	}
 
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 	queues := []string{}
 	topics := map[string][]string{}
 
@@ -417,7 +447,7 @@ func handleEmptyMessages(raw json.RawMessage) (any, error) {
 		}
 	}
 
-	batchSize := parseIntOrDefault(p.Env["RECEIVE_MESSAGES_COUNT"], 50)
+	batchSize := boundedIntFromEnv(p.Env, "RECEIVE_MESSAGES_COUNT", 50, maxReceiveBatchSize)
 	maxWaitMs := parseIntOrDefault(p.Env["MAX_WAIT_TIME_IN_MS"], 5000)
 	drainWaitMs := resolveDrainReceiveWaitMs(p.Env, maxWaitMs)
 	emptyProgressIntervalMs := parseIntOrDefault(p.Env["EMPTY_PROGRESS_INTERVAL_MS"], 1000)
@@ -434,12 +464,12 @@ func handleEmptyMessages(raw json.RawMessage) (any, error) {
 	if err != nil {
 		return nil, fmt.Errorf("service bus client error: %w", err)
 	}
-	defer client.Close(context.Background())
+	defer closeWithTimeout(client)
 
 	grandTotal := 0
 
 	runOne := func(receiver *azservicebus.Receiver, queueType string) (int, error) {
-		defer receiver.Close(context.Background())
+		defer closeWithTimeout(receiver)
 		totalDeleted := 0
 		stageStart := time.Now()
 		lastProgressEmitAt := time.Time{}
@@ -478,7 +508,9 @@ func handleEmptyMessages(raw json.RawMessage) (any, error) {
 					defer wg.Done()
 					sem <- struct{}{}
 					defer func() { <-sem }()
-					if err := receiver.CompleteMessage(context.Background(), m, nil); err != nil {
+					completeCtx, completeCancel := operationContext(p.Env, maxWaitMs)
+					defer completeCancel()
+					if err := receiver.CompleteMessage(completeCtx, m, nil); err != nil {
 						errCh <- fmt.Errorf("complete message error: %w", err)
 					}
 				}(msg)
@@ -651,7 +683,7 @@ func handleMoveMessages(raw json.RawMessage) (any, error) {
 		return nil, err
 	}
 
-	batchSize := parseIntOrDefault(p.Env["RECEIVE_MESSAGES_COUNT"], 50)
+	batchSize := boundedIntFromEnv(p.Env, "RECEIVE_MESSAGES_COUNT", 50, maxReceiveBatchSize)
 	maxWaitMs := parseIntOrDefault(p.Env["MAX_WAIT_TIME_IN_MS"], 5000)
 	drainWaitMs := resolveDrainReceiveWaitMs(p.Env, maxWaitMs)
 	moveProgressIntervalMs := parseIntOrDefault(p.Env["MOVE_PROGRESS_INTERVAL_MS"], 500)
@@ -668,18 +700,18 @@ func handleMoveMessages(raw json.RawMessage) (any, error) {
 	if err != nil {
 		return nil, fmt.Errorf("service bus client error: %w", err)
 	}
-	defer client.Close(context.Background())
+	defer closeWithTimeout(client)
 
 	sender, err := client.NewSender(p.DestQueue, nil)
 	if err != nil {
 		return nil, fmt.Errorf("sender error: %w", err)
 	}
-	defer sender.Close(context.Background())
+	defer closeWithTimeout(sender)
 
 	grandTotal := 0
 
 	runOne := func(receiver *azservicebus.Receiver, queueType string) (int, error) {
-		defer receiver.Close(context.Background())
+		defer closeWithTimeout(receiver)
 		totalMoved := 0
 		stageStart := time.Now()
 		lastProgressEmitAt := time.Time{}
@@ -712,7 +744,9 @@ func handleMoveMessages(raw json.RawMessage) (any, error) {
 				if outboundBatch.NumMessages() == 0 {
 					return nil
 				}
-				if err := sender.SendMessageBatch(context.Background(), outboundBatch, nil); err != nil {
+				sendCtx, sendCancel := operationContext(p.Env, maxWaitMs)
+				defer sendCancel()
+				if err := sender.SendMessageBatch(sendCtx, outboundBatch, nil); err != nil {
 					return fmt.Errorf("send message batch error: %w", err)
 				}
 				// Complete source messages in parallel with bounded concurrency.
@@ -725,7 +759,9 @@ func handleMoveMessages(raw json.RawMessage) (any, error) {
 						defer wg.Done()
 						sem <- struct{}{}
 						defer func() { <-sem }()
-						if err := receiver.CompleteMessage(context.Background(), msg, nil); err != nil {
+						completeCtx, completeCancel := operationContext(p.Env, maxWaitMs)
+						defer completeCancel()
+						if err := receiver.CompleteMessage(completeCtx, msg, nil); err != nil {
 							errCh <- fmt.Errorf("complete message error: %w", err)
 						}
 					}(srcMsg)
@@ -738,7 +774,9 @@ func handleMoveMessages(raw json.RawMessage) (any, error) {
 				return nil
 			}
 
-			outboundBatch, err := sender.NewMessageBatch(context.Background(), nil)
+			batchCtx, batchCancel := operationContext(p.Env, maxWaitMs)
+			outboundBatch, err := sender.NewMessageBatch(batchCtx, nil)
+			batchCancel()
 			if err != nil {
 				return 0, fmt.Errorf("create message batch error: %w", err)
 			}
@@ -750,9 +788,11 @@ func handleMoveMessages(raw json.RawMessage) (any, error) {
 					ContentType:           msg.ContentType,
 					CorrelationID:         msg.CorrelationID,
 					Subject:               msg.Subject,
+					PartitionKey:          msg.PartitionKey,
 					ApplicationProperties: msg.ApplicationProperties,
 					To:                    msg.To,
 					ReplyTo:               msg.ReplyTo,
+					ReplyToSessionID:      msg.ReplyToSessionID,
 					SessionID:             msg.SessionID,
 					TimeToLive:            msg.TimeToLive,
 				}
@@ -772,7 +812,9 @@ func handleMoveMessages(raw json.RawMessage) (any, error) {
 							return 0, err
 						}
 
-						outboundBatch, err = sender.NewMessageBatch(context.Background(), nil)
+						batchCtx, batchCancel := operationContext(p.Env, maxWaitMs)
+						outboundBatch, err = sender.NewMessageBatch(batchCtx, nil)
+						batchCancel()
 						if err != nil {
 							return 0, fmt.Errorf("create message batch error: %w", err)
 						}
@@ -964,8 +1006,11 @@ func handleSearchMessages(raw json.RawMessage) (any, error) {
 	if maxMatches < 1 {
 		return nil, fmt.Errorf("max matches must be a positive integer")
 	}
+	if maxMatches > maxSearchMatches {
+		maxMatches = maxSearchMatches
+	}
 
-	batchSize := parseIntOrDefault(p.Env["BATCH_SIZE"], 50)
+	batchSize := boundedIntFromEnv(p.Env, "BATCH_SIZE", 50, maxPeekBatchSize)
 	maxWaitMs := parseIntOrDefault(p.Env["MAX_WAIT_TIME_IN_MS"], 60000)
 	caseSensitive := p.Env["CASE_SENSITIVE"] == "true"
 	startedAt := time.Now()
@@ -974,7 +1019,7 @@ func handleSearchMessages(raw json.RawMessage) (any, error) {
 	if err != nil {
 		return nil, fmt.Errorf("service bus client error: %w", err)
 	}
-	defer client.Close(context.Background())
+	defer closeWithTimeout(client)
 
 	grandChecked := 0
 	grandMatches := 0
@@ -983,7 +1028,7 @@ func handleSearchMessages(raw json.RawMessage) (any, error) {
 	searchLower := strings.ToLower(searchStr)
 
 	runOne := func(receiver *azservicebus.Receiver, queueType string) error {
-		defer receiver.Close(context.Background())
+		defer closeWithTimeout(receiver)
 		if reachedLimit {
 			return nil
 		}
@@ -1256,7 +1301,7 @@ func handlePeekMessages(raw json.RawMessage) (any, error) {
 	var startSeqNum *int64
 	if trimmed := strings.TrimSpace(seqArg); trimmed != "" {
 		n, err := strconv.ParseInt(trimmed, 10, 64)
-		if err != nil {
+		if err != nil || n <= 0 {
 			return nil, fmt.Errorf("start sequence number must be a positive integer")
 		}
 		startSeqNum = &n
@@ -1268,13 +1313,13 @@ func handlePeekMessages(raw json.RawMessage) (any, error) {
 	if err != nil {
 		return nil, fmt.Errorf("service bus client error: %w", err)
 	}
-	defer client.Close(context.Background())
+	defer closeWithTimeout(client)
 
 	allMessages := []map[string]any{}
 	const innerBatchSize = 250
 
 	runOne := func(receiver *azservicebus.Receiver, sourceLabel string) error {
-		defer receiver.Close(context.Background())
+		defer closeWithTimeout(receiver)
 
 		seqNumHint := ""
 		if startSeqNum != nil {
@@ -1502,9 +1547,10 @@ func handleSendMessage(raw json.RawMessage) (any, error) {
 	}
 	if v, _ := msg["scheduledEnqueueTimeUtc"].(string); v != "" {
 		t, err := time.Parse(time.RFC3339, v)
-		if err == nil {
-			sbMsg.ScheduledEnqueueTime = &t
+		if err != nil {
+			return nil, fmt.Errorf("scheduledEnqueueTimeUtc must be an RFC3339 timestamp: %w", err)
 		}
+		sbMsg.ScheduledEnqueueTime = &t
 	}
 
 	maxWaitMs := parseIntOrDefault(p.Env["MAX_WAIT_TIME_IN_MS"], 60000)
@@ -1513,13 +1559,13 @@ func handleSendMessage(raw json.RawMessage) (any, error) {
 	if err != nil {
 		return nil, fmt.Errorf("service bus client error: %w", err)
 	}
-	defer client.Close(context.Background())
+	defer closeWithTimeout(client)
 
 	sender, err := client.NewSender(p.EntityName, nil)
 	if err != nil {
 		return nil, fmt.Errorf("sender error: %w", err)
 	}
-	defer sender.Close(context.Background())
+	defer closeWithTimeout(sender)
 
 	sendCtx, sendCancel := context.WithTimeout(context.Background(), time.Duration(maxWaitMs)*time.Millisecond)
 	defer sendCancel()
@@ -1558,6 +1604,9 @@ func handleSingleMessageAction(raw json.RawMessage) (any, error) {
 	default:
 		return nil, fmt.Errorf("unknown action %q: must be delete, move, or replay", p.Action)
 	}
+	if !p.IsDlq {
+		return nil, fmt.Errorf("single-message actions are only supported for dead-letter messages; use bulk operations for active messages")
+	}
 
 	if p.isSubscription() {
 		if err := validateEntityName(p.TopicName, "Topic"); err != nil {
@@ -1588,7 +1637,7 @@ func handleSingleMessageAction(raw json.RawMessage) (any, error) {
 	if scanBudget < 50 {
 		scanBudget = 50
 	}
-	batchSize := parseIntOrDefault(p.Env["RECEIVE_MESSAGES_COUNT"], 50)
+	batchSize := boundedIntFromEnv(p.Env, "RECEIVE_MESSAGES_COUNT", 50, maxReceiveBatchSize)
 	if batchSize > scanBudget {
 		batchSize = scanBudget
 	}
@@ -1602,7 +1651,7 @@ func handleSingleMessageAction(raw json.RawMessage) (any, error) {
 	if err != nil {
 		return nil, fmt.Errorf("service bus client error: %w", err)
 	}
-	defer client.Close(context.Background())
+	defer closeWithTimeout(client)
 
 	var receiverOpts *azservicebus.ReceiverOptions
 	if p.IsDlq {
@@ -1617,7 +1666,7 @@ func handleSingleMessageAction(raw json.RawMessage) (any, error) {
 	if err != nil {
 		return nil, fmt.Errorf("receiver error: %w", err)
 	}
-	defer receiver.Close(context.Background())
+	defer closeWithTimeout(receiver)
 
 	var sender *azservicebus.Sender
 	if p.Action == "move" || p.Action == "replay" {
@@ -1634,7 +1683,7 @@ func handleSingleMessageAction(raw json.RawMessage) (any, error) {
 		if err != nil {
 			return nil, fmt.Errorf("sender error: %w", err)
 		}
-		defer sender.Close(context.Background())
+		defer closeWithTimeout(sender)
 	}
 
 	entityLabel := p.label(p.QueueName)
@@ -1680,22 +1729,33 @@ func handleSingleMessageAction(raw json.RawMessage) (any, error) {
 		if len(others) > 0 {
 			sem := make(chan struct{}, completeConcurrency)
 			var wg sync.WaitGroup
+			errCh := make(chan error, len(others))
 			for _, o := range others {
 				sem <- struct{}{}
 				wg.Add(1)
 				go func(msg *azservicebus.ReceivedMessage) {
 					defer wg.Done()
 					defer func() { <-sem }()
-					_ = receiver.AbandonMessage(context.Background(), msg, nil)
+					abandonCtx, abandonCancel := operationContext(p.Env, maxWaitMs)
+					defer abandonCancel()
+					if err := receiver.AbandonMessage(abandonCtx, msg, nil); err != nil {
+						errCh <- fmt.Errorf("abandon non-target message error: %w", err)
+					}
 				}(o)
 			}
 			wg.Wait()
+			close(errCh)
+			if err := <-errCh; err != nil {
+				return nil, err
+			}
 		}
 
 		if target != nil {
 			switch p.Action {
 			case "delete":
-				if err := receiver.CompleteMessage(context.Background(), target, nil); err != nil {
+				completeCtx, completeCancel := operationContext(p.Env, maxWaitMs)
+				defer completeCancel()
+				if err := receiver.CompleteMessage(completeCtx, target, nil); err != nil {
 					return nil, fmt.Errorf("complete message error: %w", err)
 				}
 			case "move", "replay":
@@ -1704,9 +1764,11 @@ func handleSingleMessageAction(raw json.RawMessage) (any, error) {
 					ContentType:           target.ContentType,
 					CorrelationID:         target.CorrelationID,
 					Subject:               target.Subject,
+					PartitionKey:          target.PartitionKey,
 					ApplicationProperties: target.ApplicationProperties,
 					To:                    target.To,
 					ReplyTo:               target.ReplyTo,
+					ReplyToSessionID:      target.ReplyToSessionID,
 					SessionID:             target.SessionID,
 					TimeToLive:            target.TimeToLive,
 				}
@@ -1714,11 +1776,18 @@ func handleSingleMessageAction(raw json.RawMessage) (any, error) {
 					idCopy := target.MessageID
 					newMsg.MessageID = &idCopy
 				}
-				if err := sender.SendMessage(context.Background(), newMsg, nil); err != nil {
-					_ = receiver.AbandonMessage(context.Background(), target, nil)
+				sendCtx, sendCancel := operationContext(p.Env, maxWaitMs)
+				if err := sender.SendMessage(sendCtx, newMsg, nil); err != nil {
+					sendCancel()
+					abandonCtx, abandonCancel := operationContext(p.Env, maxWaitMs)
+					_ = receiver.AbandonMessage(abandonCtx, target, nil)
+					abandonCancel()
 					return nil, fmt.Errorf("send message error: %w", err)
 				}
-				if err := receiver.CompleteMessage(context.Background(), target, nil); err != nil {
+				sendCancel()
+				completeCtx, completeCancel := operationContext(p.Env, maxWaitMs)
+				defer completeCancel()
+				if err := receiver.CompleteMessage(completeCtx, target, nil); err != nil {
 					return nil, fmt.Errorf("complete message error: %w", err)
 				}
 			}

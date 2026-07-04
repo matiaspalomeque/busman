@@ -5,7 +5,7 @@ import { useAppStore, SUBSCRIPTION_KEY_SEP } from "../store/appStore";
  * Polls entity counts at a configurable interval and highlights entities whose counts changed.
  * Must be called from a component that also calls useEntityList (so entities + counts are loaded).
  */
-export function useAutoRefresh(refreshAllCounts: () => void) {
+export function useAutoRefresh(refreshAllCounts: () => boolean | void) {
   const {
     autoRefreshEnabled,
     autoRefreshInterval,
@@ -72,7 +72,10 @@ export function useAutoRefresh(refreshAllCounts: () => void) {
         subs: { ...state.subscriptionCounts },
       };
       refreshInFlightRef.current = true;
-      refreshAllCounts();
+      if (refreshAllCounts() === false) {
+        refreshInFlightRef.current = false;
+        snapshotRef.current = null;
+      }
     };
 
     const id = setInterval(tick, autoRefreshInterval * 1000);

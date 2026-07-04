@@ -45,6 +45,7 @@ export function useEntityList() {
 
       const topicNames = Object.keys(result.topics);
       const totalEntities = result.queues.length + topicNames.length;
+      if (totalEntities === 0) return false;
       let completed = 0;
 
       // Progressive flushing for initial load (shows counts as they arrive).
@@ -68,7 +69,7 @@ export function useEntityList() {
 
       // In singleFlush mode, only increment by 1 (and decrement once at the end)
       // to avoid N individual store writes for the loading counter.
-      if (totalEntities > 0) incrementCountsLoading(opts?.singleFlush ? 1 : totalEntities);
+      incrementCountsLoading(opts?.singleFlush ? 1 : totalEntities);
 
       for (const queueName of result.queues) {
         safeInvoke("get_queue_count", QueueCountResultSchema, {
@@ -93,6 +94,8 @@ export function useEntityList() {
           .catch((err) => { console.warn(`[fetchCounts] get_topic_subscription_counts(${topicName}) failed:`, err); })
           .finally(onDone);
       }
+
+      return true;
     },
     [batchSetCounts, incrementCountsLoading, decrementCountsLoading]
   );
@@ -134,27 +137,9 @@ export function useEntityList() {
   const refreshAllCounts = useCallback(() => {
     const state = useAppStore.getState();
     const connId = selectActiveConnection(state)?.id;
-    if (!connId || !state.entities) return;
+    if (!connId || !state.entities) return false;
 
-    const filter = state.treeFilter.toLowerCase();
-    const entitiesToRefresh = !filter
-      ? state.entities
-      : {
-          queues: state.entities.queues.filter((q) => q.toLowerCase().includes(filter)),
-          topics: Object.entries(state.entities.topics).reduce<Record<string, string[]>>(
-            (acc, [topic, subs]) => {
-              const topicMatches = topic.toLowerCase().includes(filter);
-              const matchingSubs = subs.filter((s) => s.toLowerCase().includes(filter));
-              if (topicMatches || matchingSubs.length > 0) {
-                acc[topic] = topicMatches ? subs : matchingSubs;
-              }
-              return acc;
-            },
-            {}
-          ),
-        };
-
-    fetchCounts(entitiesToRefresh, connId, { singleFlush: true });
+    return fetchCounts(state.entities, connId, { singleFlush: true });
   }, [fetchCounts]);
 
   type RefreshTarget =

@@ -1,6 +1,7 @@
 use crate::error::BusmanError;
 use crate::models::ConnectionsConfig;
 use std::collections::HashMap;
+use std::io::Write;
 use std::path::PathBuf;
 use tauri::Manager;
 
@@ -17,8 +18,18 @@ pub fn load(app: &tauri::AppHandle) -> Result<ConnectionsConfig, String> {
     if !path.exists() {
         return Ok(ConnectionsConfig::default());
     }
-    let raw = std::fs::read_to_string(&path).map_err(|e| format!("Failed to read config: {e}"))?;
-    serde_json::from_str(&raw).map_err(|e| format!("Failed to parse config: {e}"))
+    match read_config_file(&path) {
+        Ok(config) => Ok(config),
+        Err(primary_err) => {
+            let backup = backup_config_path(&path);
+            if backup.exists() {
+                if let Ok(config) = read_config_file(&backup) {
+                    return Ok(config);
+                }
+            }
+            Err(primary_err)
+        }
+    }
 }
 
 pub fn save(app: &tauri::AppHandle, config: &ConnectionsConfig) -> Result<(), String> {
@@ -28,7 +39,33 @@ pub fn save(app: &tauri::AppHandle, config: &ConnectionsConfig) -> Result<(), St
     }
     let json = serde_json::to_string_pretty(config)
         .map_err(|e| format!("Failed to serialize config: {e}"))?;
-    std::fs::write(&path, json).map_err(|e| format!("Failed to write config: {e}"))?;
+    let tmp_path = temp_config_path(&path);
+    let backup_path = backup_config_path(&path);
+
+    {
+        let mut file = std::fs::File::create(&tmp_path)
+            .map_err(|e| format!("Failed to create temporary config: {e}"))?;
+
+        // Restrict permissions so other OS users cannot read connection strings.
+        #[cfg(unix)]
+        {
+            use std::fs::Permissions;
+            use std::os::unix::fs::PermissionsExt;
+            file.set_permissions(Permissions::from_mode(0o600))
+                .map_err(|e| format!("Failed to set temporary config permissions: {e}"))?;
+        }
+
+        file.write_all(json.as_bytes())
+            .map_err(|e| format!("Failed to write temporary config: {e}"))?;
+        file.sync_all()
+            .map_err(|e| format!("Failed to sync temporary config: {e}"))?;
+    }
+
+    if path.exists() {
+        let _ = std::fs::copy(&path, &backup_path);
+    }
+
+    replace_config_file(&tmp_path, &path)?;
 
     // Restrict permissions so other OS users cannot read connection strings.
     #[cfg(unix)]
@@ -40,6 +77,63 @@ pub fn save(app: &tauri::AppHandle, config: &ConnectionsConfig) -> Result<(), St
     }
 
     Ok(())
+}
+
+fn read_config_file(path: &PathBuf) -> Result<ConnectionsConfig, String> {
+    let raw = std::fs::read_to_string(path).map_err(|e| format!("Failed to read config: {e}"))?;
+    serde_json::from_str(&raw).map_err(|e| format!("Failed to parse config: {e}"))
+}
+
+fn temp_config_path(path: &PathBuf) -> PathBuf {
+    path.with_extension(format!(
+        "{}.tmp",
+        path.extension()
+            .and_then(|ext| ext.to_str())
+            .unwrap_or("json")
+    ))
+}
+
+fn backup_config_path(path: &PathBuf) -> PathBuf {
+    path.with_extension(format!(
+        "{}.bak",
+        path.extension()
+            .and_then(|ext| ext.to_str())
+            .unwrap_or("json")
+    ))
+}
+
+#[cfg(not(target_os = "windows"))]
+fn replace_config_file(tmp_path: &PathBuf, path: &PathBuf) -> Result<(), String> {
+    std::fs::rename(tmp_path, path).map_err(|e| format!("Failed to replace config: {e}"))?;
+    sync_parent_dir(path);
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn replace_config_file(tmp_path: &PathBuf, path: &PathBuf) -> Result<(), String> {
+    let backup_path = backup_config_path(path);
+    if path.exists() {
+        let _ = std::fs::remove_file(&backup_path);
+        std::fs::rename(path, &backup_path)
+            .map_err(|e| format!("Failed to stage existing config for replacement: {e}"))?;
+    }
+    if let Err(err) = std::fs::rename(tmp_path, path) {
+        if backup_path.exists() {
+            let _ = std::fs::rename(&backup_path, path);
+        }
+        return Err(format!("Failed to replace config: {err}"));
+    }
+    let _ = std::fs::remove_file(backup_path);
+    sync_parent_dir(path);
+    Ok(())
+}
+
+fn sync_parent_dir(path: &PathBuf) {
+    if let Some(parent) = path.parent() {
+        if let Ok(dir) = std::fs::File::open(parent) {
+            let _ = dir.sync_all();
+        }
+    }
 }
 
 /// Resolves the environment variables for a saved connection.

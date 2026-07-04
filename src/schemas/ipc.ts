@@ -5,7 +5,9 @@ import { invoke } from "@tauri-apps/api/core";
 
 export const PeekedMessageSchema = z.object({
   messageId: z.string().nullable(),
-  sequenceNumber: z.string().nullable().optional(),
+  sequenceNumber: z.union([z.string(), z.number()]).nullable().optional().transform((value) =>
+    value == null ? value : String(value)
+  ),
   body: z.unknown(),
   subject: z.string().nullable(),
   contentType: z.string().nullable(),
@@ -217,7 +219,12 @@ export const ConnectionsConfigSchema = z.object({
     })
   ),
   activeConnectionId: z.string().nullable(),
-});
+}).refine(
+  (config) =>
+    config.activeConnectionId === null ||
+    config.connections.some((connection) => connection.id === config.activeConnectionId),
+  { message: "activeConnectionId must refer to an existing connection" }
+);
 
 // ─── Validated invoke ───────────────────────────────────────────────────────
 
@@ -231,7 +238,7 @@ export async function safeInvoke<T>(
   schema: z.ZodType<T>,
   args?: Record<string, unknown>
 ): Promise<T> {
-  const raw = await invoke(command, args);
+  const raw = args === undefined ? await invoke(command) : await invoke(command, args);
   const result = schema.safeParse(raw);
   if (!result.success) {
     console.error(

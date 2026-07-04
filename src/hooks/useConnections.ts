@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { useCallback } from "react";
 import { useAppStore } from "../store/appStore";
+import { ConnectionsConfigSchema, safeInvoke } from "../schemas/ipc";
 import type { Connection, ConnectionsConfig } from "../types";
 
 export function useConnections() {
@@ -16,7 +17,7 @@ export function useConnections() {
   );
 
   const loadConnections = useCallback(async () => {
-    const config = await invoke<ConnectionsConfig>("load_connections");
+    const config = await safeInvoke("load_connections", ConnectionsConfigSchema);
     setConnections(config.connections);
     // Do not auto-select a persisted connection on startup.
     setActiveConnectionId(null);
@@ -29,7 +30,7 @@ export function useConnections() {
         env: {},
         ...connection,
       };
-      const config = await invoke<ConnectionsConfig>("save_connection", {
+      const config = await safeInvoke("save_connection", ConnectionsConfigSchema, {
         connection: payload,
       });
       // Do not apply activeConnectionId from backend — saving a connection should
@@ -41,7 +42,7 @@ export function useConnections() {
 
   const deleteConnection = useCallback(
     async (id: string) => {
-      const config = await invoke<ConnectionsConfig>("delete_connection", { id });
+      const config = await safeInvoke("delete_connection", ConnectionsConfigSchema, { id });
       // Clean up per-connection localStorage keys to prevent stale data accumulation.
       try { localStorage.removeItem(`pins:${id}`); } catch {}
       try { localStorage.removeItem(`dlqThresholds:${id}`); } catch {}
@@ -52,7 +53,7 @@ export function useConnections() {
 
   const setActive = useCallback(
     async (id: string | null) => {
-      const config = await invoke<ConnectionsConfig>("set_active_connection", { id });
+      const config = await safeInvoke("set_active_connection", ConnectionsConfigSchema, { id });
       applyConfig(config);
     },
     [applyConfig]
@@ -75,7 +76,7 @@ export function useConnections() {
       });
       if (!path) return 0;
       const before = useAppStore.getState().connections.length;
-      const config = await invoke<ConnectionsConfig>("import_connections", {
+      const config = await safeInvoke("import_connections", ConnectionsConfigSchema, {
         path,
         password,
         merge,

@@ -100,7 +100,7 @@ async fn run_worker_operation(
                 },
             );
             emit_done(app, run_id, -1, started.elapsed().as_millis() as u64);
-            Ok(())
+            Err(redact_secrets(&err))
         }
     }
 }

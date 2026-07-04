@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/messaging/azservicebus/admin"
@@ -279,6 +280,26 @@ func TestHandleRepublishSubscriptionDlqValidation(t *testing.T) {
 				t.Fatalf("expected no error, got: %v", err)
 			}
 		})
+	}
+}
+
+func TestHandleSingleMessageActionRejectsActiveMessages(t *testing.T) {
+	raw, _ := json.Marshal(map[string]any{
+		"env": map[string]string{
+			"SERVICE_BUS_CONNECTION_STRING": "Endpoint=sb://x.servicebus.windows.net/;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=dGVzdA==",
+		},
+		"action":         "delete",
+		"sequenceNumber": 42,
+		"isDlq":          false,
+		"queueName":      "q1",
+	})
+
+	_, err := handleSingleMessageAction(raw)
+	if err == nil {
+		t.Fatal("expected active single-message action to be rejected")
+	}
+	if !strings.Contains(err.Error(), "only supported for dead-letter messages") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
