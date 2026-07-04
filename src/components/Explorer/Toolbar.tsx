@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useId } from "react";
 import { useTranslation } from "react-i18next";
 import { useAppStore, selectActiveConnection } from "../../store/appStore";
 import { useConnections } from "../../hooks/useConnections";
@@ -46,6 +46,7 @@ interface ToolbarButtonProps {
 function ToolbarButton({ label, icon, onClick, disabled, title, danger, primary, warn, violet, active }: ToolbarButtonProps) {
   return (
     <button
+      type="button"
       onClick={onClick}
       disabled={disabled}
       title={title}
@@ -99,7 +100,12 @@ function ConfirmModal({ title, message, danger, onConfirm, onCancel }: ConfirmMo
             <Icon name={danger ? "trash" : "move"} size={15} />
             {title}
           </h2>
-          <button onClick={onCancel} className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200">
+          <button
+            type="button"
+            onClick={onCancel}
+            aria-label={t("explorer.toolbar.cancel")}
+            className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200"
+          >
             <Icon name="close" size={16} />
           </button>
         </div>
@@ -110,12 +116,14 @@ function ConfirmModal({ title, message, danger, onConfirm, onCancel }: ConfirmMo
 
         <div className="flex justify-end gap-2 px-4 py-3 border-t border-zinc-200 dark:border-zinc-700">
           <button
+            type="button"
             onClick={onCancel}
             className="px-3 py-1.5 text-xs rounded border border-zinc-300 dark:border-zinc-600 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800"
           >
             {t("explorer.toolbar.cancel")}
           </button>
           <button
+            type="button"
             onClick={onConfirm}
             className={[
               "px-4 py-1.5 text-xs rounded text-white",
@@ -163,8 +171,11 @@ function MoreActionsDropdown({ onMove, onReceive, onReplay, onRepublish, onManag
   return (
     <div ref={containerRef} className="relative">
       <button
+        type="button"
         onClick={() => setOpen((o) => !o)}
         disabled={disabled}
+        aria-haspopup="menu"
+        aria-expanded={open}
         className="flex items-center gap-2 px-3.5 py-2 text-sm font-medium border rounded-lg transition-all duration-150 border-zinc-300 dark:border-zinc-600 text-azure-secondary dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-700 disabled:opacity-40 disabled:cursor-not-allowed"
         title={t("explorer.toolbar.moreActions")}
       >
@@ -174,9 +185,11 @@ function MoreActionsDropdown({ onMove, onReceive, onReplay, onRepublish, onManag
       </button>
 
       {open && (
-        <div className="absolute right-0 top-full mt-2 w-48 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 shadow-lg z-50 overflow-hidden animate-fade-in">
+        <div role="menu" className="absolute right-0 top-full mt-2 w-48 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 shadow-lg z-50 overflow-hidden animate-fade-in">
           <div className="py-1">
             <button
+              type="button"
+              role="menuitem"
               onClick={() => { onMove(); setOpen(false); }}
               disabled={disabled}
               title={t("explorer.toolbar.moveTitle")}
@@ -186,6 +199,8 @@ function MoreActionsDropdown({ onMove, onReceive, onReplay, onRepublish, onManag
               {t("explorer.toolbar.move")}
             </button>
             <button
+              type="button"
+              role="menuitem"
               onClick={() => { onReceive(); setOpen(false); }}
               disabled={disabled}
               title={t("explorer.toolbar.receiveTitle")}
@@ -196,6 +211,8 @@ function MoreActionsDropdown({ onMove, onReceive, onReplay, onRepublish, onManag
             </button>
             {canReplay && (
               <button
+                type="button"
+                role="menuitem"
                 onClick={() => { onReplay(); setOpen(false); }}
                 disabled={disabled}
                 title={t("explorer.toolbar.replayTitle")}
@@ -207,6 +224,8 @@ function MoreActionsDropdown({ onMove, onReceive, onReplay, onRepublish, onManag
             )}
             {canRepublish && (
               <button
+                type="button"
+                role="menuitem"
                 onClick={() => { onRepublish(); setOpen(false); }}
                 disabled={disabled}
                 title={t("explorer.toolbar.republishTitle")}
@@ -218,6 +237,8 @@ function MoreActionsDropdown({ onMove, onReceive, onReplay, onRepublish, onManag
             )}
             {canManageRules && (
               <button
+                type="button"
+                role="menuitem"
                 onClick={() => { onManageRules(); setOpen(false); }}
                 disabled={disabled}
                 title={t("explorer.toolbar.manageRulesTitle")}
@@ -246,11 +267,13 @@ interface ModeSelectorProps {
 function ModeSelector({ value, onChange }: ModeSelectorProps) {
   const { t } = useTranslation();
   return (
-    <div className="flex items-center border border-zinc-300 dark:border-zinc-600 rounded-lg overflow-hidden">
+    <div className="flex shrink-0 items-center border border-zinc-300 dark:border-zinc-600 rounded-lg overflow-hidden">
       {MODES.map((m) => (
         <button
+          type="button"
           key={m}
           onClick={() => onChange(m)}
+          aria-pressed={value === m}
           className={[
             "px-3 py-2 text-sm font-medium transition-colors",
             value === m
@@ -333,7 +356,10 @@ function ConnectionSelector() {
   return (
     <div ref={containerRef} className="relative">
       <button
+        type="button"
         onClick={() => setOpen((o) => !o)}
+        aria-haspopup="menu"
+        aria-expanded={open}
         className="flex items-center gap-1.5 text-xs px-2 py-1.5 rounded border border-zinc-300 dark:border-zinc-600 bg-transparent hover:bg-zinc-100 dark:hover:bg-zinc-700 focus:outline-none focus:ring-1 focus:ring-azure-primary dark:text-zinc-200 max-w-48 transition-colors"
       >
         {conn ? (
@@ -353,7 +379,7 @@ function ConnectionSelector() {
       </button>
 
       {open && (
-        <div className="absolute right-0 top-full mt-1 w-64 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 shadow-lg z-50 overflow-hidden">
+        <div role="menu" className="absolute right-0 top-full mt-1 w-64 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 shadow-lg z-50 overflow-hidden">
           {/* Search */}
           <div className="p-2 border-b border-zinc-100 dark:border-zinc-700">
             <div className="relative">
@@ -395,6 +421,8 @@ function ConnectionSelector() {
                   )}
                   {items.map((c) => (
                     <button
+                      type="button"
+                      role="menuitem"
                       key={c.id}
                       onClick={() => handleSelect(c.id)}
                       className={[
@@ -431,6 +459,7 @@ function ConnectionSelector() {
 
 export function Toolbar() {
   const { t } = useTranslation();
+  const countInputId = useId();
   const conn = useAppStore(selectActiveConnection);
   const {
     explorerSelection,
@@ -745,14 +774,15 @@ export function Toolbar() {
   })();
 
   return (
-    <header className="relative shrink-0 h-14 flex items-center px-4 gap-4 border-b border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900">
+    <header className="relative shrink-0 min-h-14 flex flex-wrap items-center px-4 py-2 gap-x-4 gap-y-2 border-b border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900">
       {/* Mode selector */}
       <ModeSelector value={peekMode} onChange={setPeekMode} />
 
       {/* Count input */}
-      <div className="flex items-center gap-2">
-        <span className="text-sm text-zinc-500 dark:text-zinc-400">{t("explorer.toolbar.countLabel")}</span>
+      <div className="flex shrink-0 items-center gap-2">
+        <label htmlFor={countInputId} className="text-sm text-zinc-500 dark:text-zinc-400">{t("explorer.toolbar.countLabel")}</label>
         <input
+          id={countInputId}
           type="number"
           value={peekCount}
           min={1}
@@ -766,7 +796,7 @@ export function Toolbar() {
       <div className="h-8 w-px bg-zinc-200 dark:bg-zinc-700" />
 
       {/* Action buttons */}
-      <div className="flex items-center gap-2">
+      <div className="flex shrink-0 items-center gap-2">
         <ToolbarButton
           label={t("explorer.toolbar.browse")}
           icon={
@@ -834,11 +864,13 @@ export function Toolbar() {
       <div className="flex-1" />
 
       {/* Connection selector */}
-      <div className="flex items-center gap-2">
+      <div className="flex shrink-0 items-center gap-2">
         <ConnectionSelector />
 
         <button
+          type="button"
           onClick={() => setIsSettingsModalOpen(true, "connections")}
+          aria-label={t("explorer.settingsModal.title")}
           className="p-2 rounded-lg border border-zinc-300 dark:border-zinc-600 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-700 transition-colors"
           title={t("explorer.settingsModal.title")}
         >

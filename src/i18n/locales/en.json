@@ -143,7 +143,9 @@
       "colType": "Type",
       "colOperation": "Operation",
       "colStatus": "Status",
-      "colError": "Error"
+      "colError": "Error",
+      "previousPage": "Previous event log page",
+      "nextPage": "Next event log page"
     },
     "sidebar": {
       "namespace": "Namespace",
@@ -175,7 +177,8 @@
       "dlqNotificationsDisabled": "DLQ desktop notifications disabled",
       "autoRefreshEnabled": "Auto-refresh enabled",
       "autoRefreshDisabled": "Auto-refresh disabled",
-      "autoRefreshInterval": "Refresh interval"
+      "autoRefreshInterval": "Refresh interval",
+      "resizeSidebar": "Resize sidebar"
     },
     "entityManagement": {
       "createEntity": "Create Entity",
@@ -229,6 +232,7 @@
       "body": "Body",
       "bodyEmpty": "(empty)",
       "resend": "Resend this message",
+      "resizePanel": "Resize message details panel",
       "typeQueue": "Queue",
       "typeSubscription": "Subscription"
     },
@@ -343,7 +347,12 @@
       "pendingDelete": "Deleting…",
       "pendingReplay": "Replaying…",
       "pendingMove": "Moving…",
-      "pendingOperation": "Working…"
+      "pendingOperation": "Working…",
+      "clearBodyFilter": "Clear body filter",
+      "firstPage": "First page",
+      "previousPage": "Previous page",
+      "nextPage": "Next page",
+      "lastPage": "Last page"
     },
     "sendModal": {
       "title": "Send Message",

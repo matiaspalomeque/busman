@@ -19,9 +19,9 @@ function SectionHeader({ label }: { label: string }) {
 
 function PropRow({ label, value }: { label: string; value: React.ReactNode }) {
   return (
-    <div className="flex items-baseline justify-between gap-4 px-4 py-1.5 border-b border-zinc-100 dark:border-zinc-800">
-      <span className="text-[11px] text-zinc-500 dark:text-zinc-400 shrink-0">{label}</span>
-      <span className="text-[11px] text-zinc-800 dark:text-zinc-200 text-right break-all">{value}</span>
+    <div className="grid grid-cols-[minmax(7rem,45%)_minmax(0,1fr)] items-baseline gap-4 px-4 py-1.5 border-b border-zinc-100 dark:border-zinc-800">
+      <span className="text-[11px] text-zinc-500 dark:text-zinc-400">{label}</span>
+      <span className="min-w-0 text-[11px] text-zinc-800 dark:text-zinc-200 text-right break-words selectable">{value}</span>
     </div>
   );
 }
@@ -142,8 +142,13 @@ function SubscriptionDetails({ data, t }: { data: SubscriptionProperties; t: (ke
 // ─── Loading skeleton ───────────────────────────────────────────────────────
 
 function DetailsSkeleton() {
+  const { t } = useTranslation();
   return (
-    <div className="animate-pulse px-4 py-3 space-y-3">
+    <div
+      role="status"
+      aria-label={t("explorer.entityDetails.loading")}
+      className="animate-pulse px-4 py-3 space-y-3"
+    >
       {Array.from({ length: 8 }, (_, i) => (
         <div key={i} className="flex justify-between gap-4">
           <div className="h-3 w-28 bg-zinc-200 dark:bg-zinc-700 rounded" />
@@ -200,8 +205,8 @@ export function EntityDetailsPanel() {
       {/* Header */}
       {entityName && (
         <div className="px-4 py-3 border-b border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900">
-          <div className="flex items-center gap-2">
-            <span className="text-sm font-medium text-zinc-800 dark:text-zinc-200 truncate">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <span className="min-w-0 text-sm font-medium text-zinc-800 dark:text-zinc-200 truncate" title={entityName}>
               {entityName}
             </span>
             {entityProperties && (
@@ -211,7 +216,7 @@ export function EntityDetailsPanel() {
             )}
           </div>
           {namespace && (
-            <div className="mt-1 text-xs text-zinc-500 dark:text-zinc-400 selectable">
+            <div className="mt-1 text-xs text-zinc-500 dark:text-zinc-400 selectable truncate" title={namespace}>
               <span className="font-medium">{t("explorer.properties.namespace")}:</span> {namespace}
             </div>
           )}
@@ -222,11 +227,12 @@ export function EntityDetailsPanel() {
       {entityPropertiesLoading ? (
         <DetailsSkeleton />
       ) : entityPropertiesError ? (
-        <div className="px-4 py-6 text-center">
+        <div role="alert" className="px-4 py-6 text-center">
           <p className="text-xs text-red-500 dark:text-red-400 mb-2">{t("explorer.entityDetails.error")}</p>
           <button
+            type="button"
             onClick={refreshEntityProperties}
-            className="text-xs text-azure-primary hover:underline"
+            className="text-xs text-azure-primary hover:underline focus:outline-none focus:ring-1 focus:ring-azure-primary rounded"
           >
             {t("explorer.entityDetails.retry")}
           </button>

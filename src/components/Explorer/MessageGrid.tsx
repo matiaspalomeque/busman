@@ -56,6 +56,7 @@ function FilterRow({ filters, visibleFilters, onChange }: FilterRowProps) {
               value={filters[key]}
               onChange={(e) => onChange(key, e.target.value)}
               placeholder={t("explorer.grid.filterPlaceholder")}
+              aria-label={`${t("explorer.grid.filterTitle")} ${key}`}
               className="w-full text-xs px-1.5 py-0.5 rounded border border-zinc-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 focus:outline-none focus:ring-1 focus:ring-azure-primary dark:text-zinc-200"
             />
           ) : null}
@@ -76,7 +77,7 @@ interface BodyFilterBarProps {
 function BodyFilterBar({ value, onChange, rightSlot }: BodyFilterBarProps) {
   const { t } = useTranslation();
   return (
-    <div className="flex items-center gap-2 px-3 py-2 border-b border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800/60">
+    <div className="flex flex-wrap items-center gap-2 px-3 py-2 border-b border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800/60">
       <span className="text-[10px] font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider whitespace-nowrap">
         {t("explorer.grid.bodyFilter")}
       </span>
@@ -88,12 +89,16 @@ function BodyFilterBar({ value, onChange, rightSlot }: BodyFilterBarProps) {
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={t("explorer.grid.searchBody")}
-        className="flex-1 text-xs px-2 py-1 rounded border border-zinc-200 dark:border-zinc-600 bg-white dark:bg-zinc-900 focus:outline-none focus:ring-1 focus:ring-azure-primary dark:text-zinc-200"
+        aria-label={t("explorer.grid.searchBody")}
+        className="min-w-[14rem] flex-1 text-xs px-2 py-1 rounded border border-zinc-200 dark:border-zinc-600 bg-white dark:bg-zinc-900 focus:outline-none focus:ring-1 focus:ring-azure-primary dark:text-zinc-200"
       />
       {value && (
         <button
+          type="button"
           onClick={() => onChange("")}
-          className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 text-xs"
+          aria-label={t("explorer.grid.clearBodyFilter")}
+          title={t("explorer.grid.clearBodyFilter")}
+          className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 text-xs focus:outline-none focus:ring-1 focus:ring-azure-primary rounded"
         >
           ✕
         </button>
@@ -134,7 +139,11 @@ function ColHeader({
     if (sortKey && onSort) onSort(sortKey);
   };
   return (
-    <th className="px-3 py-2.5 text-left text-xs font-medium text-zinc-500 dark:text-zinc-400 border-b border-zinc-200 dark:border-zinc-700">
+    <th
+      scope="col"
+      aria-sort={isSorted ? (sortDirection === "asc" ? "ascending" : "descending") : undefined}
+      className="px-3 py-2.5 text-left text-xs font-medium text-zinc-500 dark:text-zinc-400 border-b border-zinc-200 dark:border-zinc-700"
+    >
       <div className="flex items-center gap-1">
         <span
           className={`flex-1 ${sortable ? "cursor-pointer hover:text-zinc-700 dark:hover:text-zinc-300 select-none" : ""}`}
@@ -148,7 +157,8 @@ function ColHeader({
               e.stopPropagation();
               triggerSort();
             }}
-            className="p-0.5 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-400"
+            aria-label={`${t("explorer.grid.sortTitle")} ${label}`}
+            className="p-0.5 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-400 focus:outline-none focus:ring-1 focus:ring-azure-primary"
             title={t("explorer.grid.sortTitle")}
           >
             <Icon
@@ -168,9 +178,11 @@ function ColHeader({
               e.stopPropagation();
               onFilterToggle();
             }}
+            aria-pressed={filterActive}
+            aria-label={`${t("explorer.grid.filterTitle")} ${label}`}
             className={`p-0.5 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 ${
               filterActive ? "text-azure-primary" : "text-zinc-400"
-            }`}
+            } focus:outline-none focus:ring-1 focus:ring-azure-primary`}
             title={t("explorer.grid.filterTitle")}
           >
             <Icon name="search" size={10} />
@@ -535,9 +547,11 @@ export function MessageGrid() {
         rightSlot={
           peekMessages.length > 0 ? (
             <button
+              type="button"
               onClick={() => void handleExport()}
               title="Export all loaded messages to a JSON file"
-              className="ml-1 flex items-center gap-1 px-2 py-0.5 text-[10px] rounded border border-zinc-300 dark:border-zinc-600 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-700 transition-colors whitespace-nowrap"
+              aria-label={t("explorer.grid.exportJson")}
+              className="ml-1 flex items-center gap-1 px-2 py-0.5 text-[10px] rounded border border-zinc-300 dark:border-zinc-600 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-700 focus:outline-none focus:ring-1 focus:ring-azure-primary transition-colors whitespace-nowrap"
             >
               <svg width={11} height={11} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
                 <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
@@ -552,7 +566,7 @@ export function MessageGrid() {
 
       {/* Table */}
       <div className="flex-1 overflow-auto">
-        <table className="w-full text-xs border-collapse">
+        <table className="w-full min-w-[760px] text-xs border-collapse table-fixed">
           <thead className="sticky top-0 z-10 bg-zinc-50 dark:bg-zinc-800">
             <tr>
               <ColHeader label={t("explorer.grid.colIndex")} />
@@ -656,6 +670,7 @@ export function MessageGrid() {
           <select
             value={gridPageSize}
             onChange={(e) => setGridPageSize(Number(e.target.value))}
+            aria-label={t("explorer.grid.rowsPerPage")}
             className="text-xs px-2 py-1 rounded border border-zinc-300 dark:border-zinc-600 bg-transparent focus:outline-none focus:ring-1 focus:ring-azure-primary dark:text-zinc-300 appearance-none select-custom-arrow pr-7 min-w-[4rem]"
           >
             {[25, 50, 100, 250, 500].map((n) => (
@@ -681,16 +696,22 @@ export function MessageGrid() {
 
           <div className="flex items-center gap-1">
             <button
+              type="button"
               onClick={() => setGridPage(1)}
               disabled={safePage === 1}
-              className="px-1.5 py-0.5 rounded border border-zinc-300 dark:border-zinc-600 disabled:opacity-40 hover:bg-zinc-100 dark:hover:bg-zinc-700"
+              aria-label={t("explorer.grid.firstPage")}
+              title={t("explorer.grid.firstPage")}
+              className="px-1.5 py-0.5 rounded border border-zinc-300 dark:border-zinc-600 disabled:opacity-40 hover:bg-zinc-100 dark:hover:bg-zinc-700 focus:outline-none focus:ring-1 focus:ring-azure-primary"
             >
               ««
             </button>
             <button
+              type="button"
               onClick={() => setGridPage(safePage - 1)}
               disabled={safePage === 1}
-              className="px-1.5 py-0.5 rounded border border-zinc-300 dark:border-zinc-600 disabled:opacity-40 hover:bg-zinc-100 dark:hover:bg-zinc-700"
+              aria-label={t("explorer.grid.previousPage")}
+              title={t("explorer.grid.previousPage")}
+              className="px-1.5 py-0.5 rounded border border-zinc-300 dark:border-zinc-600 disabled:opacity-40 hover:bg-zinc-100 dark:hover:bg-zinc-700 focus:outline-none focus:ring-1 focus:ring-azure-primary"
             >
               ‹
             </button>
@@ -698,16 +719,22 @@ export function MessageGrid() {
               {safePage} / {totalPages}
             </span>
             <button
+              type="button"
               onClick={() => setGridPage(safePage + 1)}
               disabled={safePage === totalPages}
-              className="px-1.5 py-0.5 rounded border border-zinc-300 dark:border-zinc-600 disabled:opacity-40 hover:bg-zinc-100 dark:hover:bg-zinc-700"
+              aria-label={t("explorer.grid.nextPage")}
+              title={t("explorer.grid.nextPage")}
+              className="px-1.5 py-0.5 rounded border border-zinc-300 dark:border-zinc-600 disabled:opacity-40 hover:bg-zinc-100 dark:hover:bg-zinc-700 focus:outline-none focus:ring-1 focus:ring-azure-primary"
             >
               ›
             </button>
             <button
+              type="button"
               onClick={() => setGridPage(totalPages)}
               disabled={safePage === totalPages}
-              className="px-1.5 py-0.5 rounded border border-zinc-300 dark:border-zinc-600 disabled:opacity-40 hover:bg-zinc-100 dark:hover:bg-zinc-700"
+              aria-label={t("explorer.grid.lastPage")}
+              title={t("explorer.grid.lastPage")}
+              className="px-1.5 py-0.5 rounded border border-zinc-300 dark:border-zinc-600 disabled:opacity-40 hover:bg-zinc-100 dark:hover:bg-zinc-700 focus:outline-none focus:ring-1 focus:ring-azure-primary"
             >
               »»
             </button>
@@ -769,8 +796,16 @@ function MessageRow({ msg, index, isSelected, pendingOperation, onClick, onConte
     <tr
       onClick={onClick}
       onContextMenu={onContextMenu}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onClick();
+        }
+      }}
+      tabIndex={0}
+      aria-selected={isSelected}
       className={[
-        "cursor-pointer transition-colors",
+        "cursor-pointer transition-colors focus:outline-none focus:ring-2 focus:ring-inset focus:ring-azure-primary/50",
         isSelected
           ? "bg-azure-primary/10 dark:bg-azure-primary/15"
           : "hover:bg-zinc-50 dark:hover:bg-zinc-800/60",
@@ -782,19 +817,28 @@ function MessageRow({ msg, index, isSelected, pendingOperation, onClick, onConte
       <td className="px-3 py-2 text-zinc-600 dark:text-zinc-300 whitespace-nowrap tabular-nums">
         {formatTime(msg.enqueuedTimeUtc)}
       </td>
-      <td className="px-3 py-2 text-azure-secondary dark:text-zinc-300 font-mono truncate max-w-[200px]">
+      <td
+        className="px-3 py-2 text-azure-secondary dark:text-zinc-300 font-mono truncate"
+        title={msg.messageId ?? undefined}
+      >
         {msg.messageId ?? <span className="text-zinc-300 dark:text-zinc-600">—</span>}
       </td>
       <td className="px-3 py-2">
         {msg.deadLetterReason ? (
-          <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400">
+          <span
+            className="inline-flex max-w-full items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 truncate"
+            title={msg.deadLetterReason}
+          >
             {msg.deadLetterReason}
           </span>
         ) : (
           <span className="text-zinc-300 dark:text-zinc-600">—</span>
         )}
       </td>
-      <td className="px-3 py-2 text-zinc-500 dark:text-zinc-400 truncate max-w-[200px]">
+      <td
+        className="px-3 py-2 text-zinc-500 dark:text-zinc-400 truncate"
+        title={msg.deadLetterErrorDescription ?? undefined}
+      >
         {msg.deadLetterErrorDescription ?? (
           <span className="text-zinc-300 dark:text-zinc-600">—</span>
         )}

@@ -51,9 +51,11 @@ describe("Toolbar", () => {
 
     const moreButton = screen.getByRole("button", { name: /More/ }) as HTMLButtonElement;
     expect(moreButton.disabled).toBe(false);
+    expect(moreButton.getAttribute("aria-expanded")).toBe("false");
     fireEvent.click(moreButton);
+    expect(moreButton.getAttribute("aria-expanded")).toBe("true");
 
-    const manageRulesButton = screen.getByRole("button", { name: "Manage Rules" }) as HTMLButtonElement;
+    const manageRulesButton = screen.getByRole("menuitem", { name: "Manage Rules" }) as HTMLButtonElement;
     expect(manageRulesButton.disabled).toBe(false);
 
     fireEvent.click(manageRulesButton);

@@ -70,5 +70,8 @@ describe("MessageGrid", () => {
 
     fireEvent.click(screen.getByText("msg-43"));
     expect(useAppStore.getState().selectedMessage?.messageId).toBe("msg-43");
+
+    fireEvent.keyDown(screen.getByText("msg-43").closest("tr")!, { key: "Enter" });
+    expect(useAppStore.getState().selectedMessage).toBeNull();
   });
 });

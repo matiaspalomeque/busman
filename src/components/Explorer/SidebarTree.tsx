@@ -36,7 +36,9 @@ export function TreeSection({ label, collapsed, onToggle, children }: TreeSectio
   return (
     <div>
       <button
+        type="button"
         onClick={onToggle}
+        aria-expanded={!collapsed}
         className="flex items-center gap-1 w-full px-2 py-1 text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider hover:text-azure-dark dark:hover:text-azure-light"
       >
         <svg
@@ -103,10 +105,12 @@ function ThresholdPopover({ current, onSave, onClose }: ThresholdPopoverProps) {
         value={value}
         onChange={(e) => setValue(e.target.value)}
         onKeyDown={handleKeyDown}
+        aria-label={t("explorer.sidebar.dlqThresholdSet")}
         placeholder={t("explorer.sidebar.dlqThresholdPlaceholder")}
         className="w-16 text-xs px-1.5 py-1 rounded border border-zinc-200 dark:border-zinc-600 bg-transparent focus:outline-none focus:ring-1 focus:ring-azure-primary dark:text-zinc-200"
       />
       <button
+        type="button"
         onClick={() => {
           const n = Number(value);
           onSave(!isNaN(n) && n > 0 ? n : null);
@@ -118,6 +122,7 @@ function ThresholdPopover({ current, onSave, onClose }: ThresholdPopoverProps) {
       </button>
       {current != null && (
         <button
+          type="button"
           onClick={() => {
             onSave(null);
             onClose();
@@ -202,6 +207,7 @@ export const TreeItem = memo(function TreeItem({ label, itemTitle, icon, isSelec
       ].join(" ")}
     >
       <button
+        type="button"
         onClick={onClick}
         title={itemTitle ?? label}
         className={[
@@ -257,32 +263,39 @@ export const TreeItem = memo(function TreeItem({ label, itemTitle, icon, isSelec
       </button>
       {onRefreshCount != null && (
         <button
+          type="button"
           onClick={handleRefreshCount}
           title={t("explorer.sidebar.refreshCountTitle")}
+          aria-label={t("explorer.sidebar.refreshCountTitle")}
           disabled={refreshing}
-          className="shrink-0 p-0.5 rounded text-zinc-400 opacity-0 group-hover:opacity-100 hover:text-azure-primary transition-opacity disabled:opacity-40"
+          className="shrink-0 p-0.5 rounded text-zinc-400 opacity-0 group-hover:opacity-100 focus:opacity-100 hover:text-azure-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-azure-primary transition-opacity disabled:opacity-40"
         >
           <Icon name="refresh" size={11} className={refreshing ? "animate-spin" : undefined} />
         </button>
       )}
       {onDelete != null && (
         <button
+          type="button"
           onClick={(e) => { e.stopPropagation(); onDelete(); }}
           title={t("explorer.sidebar.deleteTitle")}
-          className="shrink-0 p-0.5 rounded text-zinc-400 opacity-0 group-hover:opacity-100 hover:text-red-500 transition-opacity"
+          aria-label={t("explorer.sidebar.deleteTitle")}
+          className="shrink-0 p-0.5 rounded text-zinc-400 opacity-0 group-hover:opacity-100 focus:opacity-100 hover:text-red-500 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-red-500 transition-opacity"
         >
           <Icon name="trash" size={11} />
         </button>
       )}
       {onSetThreshold != null && (
         <button
+          type="button"
           onClick={(e) => { e.stopPropagation(); setShowPopover((v) => !v); }}
           title={t("explorer.sidebar.dlqThresholdSet")}
+          aria-label={t("explorer.sidebar.dlqThresholdSet")}
+          aria-expanded={showPopover}
           className={[
             "shrink-0 p-0.5 rounded transition-opacity",
             threshold != null
               ? "text-amber-500 dark:text-amber-400 opacity-100"
-              : "text-zinc-400 opacity-0 group-hover:opacity-100 hover:text-amber-500",
+              : "text-zinc-400 opacity-0 group-hover:opacity-100 focus:opacity-100 hover:text-amber-500 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-amber-500",
           ].join(" ")}
         >
           <Icon name={threshold != null ? "bellFilled" : "bell"} size={11} />
@@ -290,13 +303,15 @@ export const TreeItem = memo(function TreeItem({ label, itemTitle, icon, isSelec
       )}
       {pinKey != null && (
         <button
+          type="button"
           onClick={(e) => { e.stopPropagation(); onTogglePin?.(); }}
           title={isPinned ? t("explorer.sidebar.unpin") : t("explorer.sidebar.pin")}
+          aria-label={isPinned ? t("explorer.sidebar.unpin") : t("explorer.sidebar.pin")}
           className={[
             "shrink-0 p-0.5 mr-1 rounded transition-opacity",
             isPinned
               ? "text-amber-400 opacity-100"
-              : "text-zinc-400 opacity-0 group-hover:opacity-100 hover:text-amber-400",
+              : "text-zinc-400 opacity-0 group-hover:opacity-100 focus:opacity-100 hover:text-amber-400 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-amber-400",
           ].join(" ")}
         >
           <Icon name={isPinned ? "starFilled" : "star"} size={11} />
@@ -336,8 +351,10 @@ export function TopicNode({ topic, subscriptions, subCounts, dlqThresholds, onSe
     <div>
       <div className="group flex items-center w-full rounded-sm hover:bg-zinc-100 dark:hover:bg-zinc-800">
         <button
+          type="button"
           onClick={() => setExpanded((e) => !e)}
           title={topic}
+          aria-expanded={expanded}
           className="flex items-center gap-1.5 flex-1 min-w-0 text-left text-xs py-1 pl-4 pr-1 text-azure-secondary dark:text-zinc-300 truncate"
         >
           <svg
@@ -357,9 +374,11 @@ export function TopicNode({ topic, subscriptions, subCounts, dlqThresholds, onSe
           <span className="truncate">{topic}</span>
         </button>
         <button
+          type="button"
           onClick={(e) => { e.stopPropagation(); setDeleteEntityTarget({ type: "topic", name: topic }); }}
           title={t("explorer.sidebar.deleteTitle")}
-          className="shrink-0 p-0.5 mr-1 rounded text-zinc-400 opacity-0 group-hover:opacity-100 hover:text-red-500 transition-opacity"
+          aria-label={t("explorer.sidebar.deleteTitle")}
+          className="shrink-0 p-0.5 mr-1 rounded text-zinc-400 opacity-0 group-hover:opacity-100 focus:opacity-100 hover:text-red-500 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-red-500 transition-opacity"
         >
           <Icon name="trash" size={11} />
         </button>

@@ -22,7 +22,7 @@ function PropRow({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div className="flex flex-col px-3 py-1.5 border-b border-zinc-100 dark:border-zinc-800">
       <span className="text-[10px] text-zinc-400 dark:text-zinc-500">{label}</span>
-      <span className="text-xs text-azure-dark dark:text-zinc-200 selectable break-all">
+      <span className="text-xs text-azure-dark dark:text-zinc-200 selectable break-words">
         {value}
       </span>
     </div>
@@ -57,12 +57,17 @@ export function PropertiesPanel() {
 
   return (
     <aside
+      aria-label={t("explorer.properties.messageDetail")}
       className="relative shrink-0 flex flex-col border-l border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 overflow-hidden"
       style={{ width: propertiesPanelWidth }}
     >
       {/* Drag handle — left edge */}
       <div
         onPointerDown={onPointerDown}
+        role="separator"
+        aria-orientation="vertical"
+        aria-label={t("explorer.properties.resizePanel")}
+        title={t("explorer.properties.resizePanel")}
         className="absolute top-0 left-0 h-full w-1.5 cursor-col-resize group z-10"
       >
         <div className="absolute inset-y-0 left-0 w-px bg-transparent group-hover:bg-azure-primary/40 group-active:bg-azure-primary/70 transition-colors" />
@@ -80,13 +85,15 @@ export function PropertiesPanel() {
         <button
           type="button"
           onClick={() => setSelectedMessage(null)}
-          className="shrink-0 rounded border border-zinc-200 dark:border-zinc-700 px-2 py-1 text-[11px] text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+          aria-label={t("explorer.properties.close")}
+          title={t("explorer.properties.close")}
+          className="shrink-0 rounded border border-zinc-200 dark:border-zinc-700 px-2 py-1 text-[11px] text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 focus:outline-none focus:ring-1 focus:ring-azure-primary transition-colors"
         >
           {t("explorer.properties.close")}
         </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto">
+      <div className="flex-1 overflow-y-auto min-h-0">
           <PropRow label={t("explorer.properties.messageId")} value={selectedMessage.messageId ?? "—"} />
           {selectedMessage.sequenceNumber != null && (
             <PropRow label={t("explorer.properties.sequenceNumber")} value={String(selectedMessage.sequenceNumber)} />
@@ -145,8 +152,9 @@ export function PropertiesPanel() {
           {/* Resend action */}
           <div className="px-3 pb-3">
             <button
+              type="button"
               onClick={handleResend}
-              className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs rounded border border-azure-primary text-azure-primary hover:bg-azure-primary/10 transition-colors"
+              className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs rounded border border-azure-primary text-azure-primary hover:bg-azure-primary/10 focus:outline-none focus:ring-1 focus:ring-azure-primary transition-colors"
             >
               {t("explorer.properties.resend")}
             </button>

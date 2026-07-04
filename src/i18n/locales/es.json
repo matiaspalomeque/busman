@@ -143,7 +143,9 @@
       "colType": "Tipo",
       "colOperation": "Operación",
       "colStatus": "Estado",
-      "colError": "Error"
+      "colError": "Error",
+      "previousPage": "Página anterior del registro",
+      "nextPage": "Página siguiente del registro"
     },
     "sidebar": {
       "namespace": "Namespace",
@@ -175,7 +177,8 @@
       "dlqNotificationsDisabled": "Notificaciones DLQ de escritorio deshabilitadas",
       "autoRefreshEnabled": "Auto-actualización habilitada",
       "autoRefreshDisabled": "Auto-actualización deshabilitada",
-      "autoRefreshInterval": "Intervalo de actualización"
+      "autoRefreshInterval": "Intervalo de actualización",
+      "resizeSidebar": "Redimensionar barra lateral"
     },
     "entityManagement": {
       "createEntity": "Crear Entidad",
@@ -229,6 +232,7 @@
       "body": "Cuerpo",
       "bodyEmpty": "(vacío)",
       "resend": "Reenviar este mensaje",
+      "resizePanel": "Redimensionar panel de detalle del mensaje",
       "typeQueue": "Cola",
       "typeSubscription": "Suscripción"
     },
@@ -343,7 +347,12 @@
       "pendingDelete": "Eliminando…",
       "pendingReplay": "Reproduciendo…",
       "pendingMove": "Moviendo…",
-      "pendingOperation": "Procesando…"
+      "pendingOperation": "Procesando…",
+      "clearBodyFilter": "Limpiar filtro del cuerpo",
+      "firstPage": "Primera página",
+      "previousPage": "Página anterior",
+      "nextPage": "Página siguiente",
+      "lastPage": "Última página"
     },
     "sendModal": {
       "title": "Enviar Mensaje",

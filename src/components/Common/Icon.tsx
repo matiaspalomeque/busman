@@ -306,6 +306,8 @@ export function Icon({ name, size = 16, className }: IconProps) {
       width={size}
       height={size}
       {...SVG_ATTRS}
+      aria-hidden="true"
+      focusable="false"
       className={className}
     >
       <Paths />

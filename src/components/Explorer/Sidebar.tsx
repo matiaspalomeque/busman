@@ -154,6 +154,7 @@ export function Sidebar() {
 
   return (
     <aside
+      aria-label={t("explorer.sidebar.entityTree")}
       className="flex flex-col border-r border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 overflow-hidden shrink-0 relative"
       style={{ width: sidebarWidth }}
     >
@@ -183,14 +184,17 @@ export function Sidebar() {
             type="text"
             value={treeFilter}
             onChange={(e) => setTreeFilter(e.target.value)}
+            aria-label={t("explorer.sidebar.filterPlaceholder")}
             placeholder={t("explorer.sidebar.filterPlaceholder")}
             className="w-full text-sm pl-8 pr-3 py-2 rounded-lg border border-zinc-200 dark:border-zinc-600 bg-transparent focus:outline-none focus:ring-2 focus:ring-azure-primary/50 placeholder-zinc-400 dark:placeholder-zinc-600 dark:text-zinc-200"
           />
         </div>
         {entities && (
           <button
+            type="button"
             onClick={() => setIsCreateEntityModalOpen(true)}
             title={t("explorer.sidebar.createEntityTitle")}
+            aria-label={t("explorer.sidebar.createEntityTitle")}
             className="shrink-0 p-2 rounded-lg text-zinc-400 hover:text-azure-primary hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
           >
             <Icon name="plus" size={15} />
@@ -336,13 +340,15 @@ export function Sidebar() {
       {/* Footer */}
       <div className="px-3 py-2.5 border-t border-zinc-200 dark:border-zinc-700">
         <div className="flex items-center justify-between">
-          <span className="text-[11px] text-zinc-400">
+          <span aria-live="polite" className="text-[11px] text-zinc-400">
             {entitiesLoading ? t("explorer.sidebar.refreshing") : t("explorer.sidebar.entityTree")}
           </span>
           <div className="flex items-center gap-1">
             <button
+              type="button"
               onClick={() => void refreshEntities()}
               disabled={entitiesLoading}
+              aria-label={t("explorer.sidebar.refreshTitle")}
               className="p-1.5 rounded-lg text-zinc-400 hover:text-azure-primary hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-40 transition-colors"
               title={t("explorer.sidebar.refreshTitle")}
             >
@@ -355,8 +361,11 @@ export function Sidebar() {
       {/* Drag handle */}
       <div
         onPointerDown={onPointerDown}
+        role="separator"
+        aria-orientation="vertical"
+        aria-label={t("explorer.sidebar.resizeSidebar")}
         className="absolute top-0 right-0 h-full w-1.5 cursor-col-resize group z-10"
-        title="Drag to resize"
+        title={t("explorer.sidebar.resizeSidebar")}
       >
         <div className="absolute inset-y-0 right-0 w-px bg-transparent group-hover:bg-azure-primary/40 group-active:bg-azure-primary/70 transition-colors" />
       </div>

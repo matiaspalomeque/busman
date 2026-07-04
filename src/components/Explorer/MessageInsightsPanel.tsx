@@ -176,7 +176,7 @@ function StatCard({
   return (
     <div
       className={[
-        "rounded-xl p-4 border flex flex-col gap-0.5",
+        "rounded-lg p-4 border flex flex-col gap-0.5 min-w-0",
         accent
           ? "bg-violet-50 dark:bg-violet-900/15 border-violet-200 dark:border-violet-800"
           : "bg-white dark:bg-zinc-800 border-zinc-200 dark:border-zinc-700",
@@ -185,7 +185,7 @@ function StatCard({
       <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-400 dark:text-zinc-500">
         {label}
       </span>
-      <span className={`text-3xl font-bold tabular-nums leading-tight ${valueClass}`}>{value}</span>
+      <span className={`text-2xl sm:text-3xl font-bold tabular-nums leading-tight ${valueClass}`}>{value}</span>
       {sub && <span className="text-[11px] text-zinc-400 dark:text-zinc-500 mt-0.5">{sub}</span>}
     </div>
   );
@@ -208,8 +208,8 @@ function BarRow({
   const barWidth = maxCount > 0 ? (count / maxCount) * 100 : 0;
   return (
     <div className="space-y-1.5">
-      <div className="flex items-center justify-between gap-3">
-        <span className="text-xs text-zinc-600 dark:text-zinc-300 truncate flex-1 font-mono" title={label}>
+      <div className="flex min-w-0 items-center justify-between gap-3">
+        <span className="min-w-0 text-xs text-zinc-600 dark:text-zinc-300 truncate flex-1 font-mono" title={label}>
           {label}
         </span>
         <span className="text-xs text-zinc-500 dark:text-zinc-400 tabular-nums shrink-0">
@@ -230,14 +230,14 @@ function FindingBadge({ text, kind }: { text: string; kind: keyof typeof FINDING
   return (
     <div className={`flex items-start gap-2.5 px-3 py-2.5 rounded-lg border text-xs leading-snug ${FINDING_STYLES[kind]}`}>
       <span className="shrink-0 font-bold mt-px">{FINDING_ICONS[kind]}</span>
-      <span>{text}</span>
+      <span className="min-w-0 break-words">{text}</span>
     </div>
   );
 }
 
 function Section({ title, sub, children }: { title: string; sub?: string; children: React.ReactNode }) {
   return (
-    <div className="bg-white dark:bg-zinc-800 rounded-xl border border-zinc-200 dark:border-zinc-700 overflow-hidden">
+    <section className="bg-white dark:bg-zinc-800 rounded-lg border border-zinc-200 dark:border-zinc-700 overflow-hidden">
       <div className="px-5 py-3.5 border-b border-zinc-100 dark:border-zinc-700/60">
         <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-400 dark:text-zinc-500">
           {title}
@@ -245,7 +245,7 @@ function Section({ title, sub, children }: { title: string; sub?: string; childr
         {sub && <span className="ml-2 text-[10px] text-zinc-400 dark:text-zinc-600">{sub}</span>}
       </div>
       <div className="p-5">{children}</div>
-    </div>
+    </section>
   );
 }
 
@@ -316,19 +316,21 @@ export function MessageInsightsPanel() {
   return (
     <div className="flex-1 min-w-0 flex flex-col overflow-hidden bg-zinc-50 dark:bg-zinc-950/40">
       {/* Header bar */}
-      <div className="shrink-0 flex items-center justify-between px-6 py-3 bg-white dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-700">
-        <div className="flex items-center gap-2.5">
+      <div className="shrink-0 flex flex-wrap items-center justify-between gap-2 px-6 py-3 bg-white dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-700">
+        <div className="flex min-w-0 items-center gap-2.5">
           <Icon name="chartBar" size={14} className="text-violet-500" />
-          <span className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">
+          <span className="min-w-0 text-sm font-semibold text-zinc-800 dark:text-zinc-100 truncate">
             {t("insights.title")}
           </span>
-          <span className="text-xs text-zinc-400 dark:text-zinc-500 border border-zinc-200 dark:border-zinc-700 rounded-full px-2 py-0.5">
+          <span className="shrink-0 text-xs text-zinc-400 dark:text-zinc-500 border border-zinc-200 dark:border-zinc-700 rounded-full px-2 py-0.5">
             {t("insights.analyzedCount", { count: ins.total })}
           </span>
         </div>
         <button
+          type="button"
           onClick={() => setIsInsightsPanelOpen(false)}
-          className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 transition-colors p-1 rounded"
+          aria-label={t("insights.close")}
+          className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 focus:outline-none focus:ring-1 focus:ring-azure-primary transition-colors p-1 rounded"
           title={t("insights.close")}
         >
           <Icon name="close" size={14} />
@@ -340,7 +342,7 @@ export function MessageInsightsPanel() {
         <div className="p-6 space-y-5 max-w-5xl mx-auto">
 
           {/* Stat cards */}
-          <div className="grid grid-cols-4 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
             <StatCard
               label={t("insights.totalMessages")}
               value={ins.total}
@@ -367,7 +369,7 @@ export function MessageInsightsPanel() {
           </div>
 
           {/* Error distribution + Findings */}
-          <div className="grid grid-cols-2 gap-5">
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
             <Section title={t("insights.errorDistribution")}>
               {ins.topReasons.length === 0 ? (
                 <p className="text-xs text-zinc-400 dark:text-zinc-500 italic">
@@ -407,7 +409,7 @@ export function MessageInsightsPanel() {
           </Section>
 
           {/* JSON schema + Content types */}
-          <div className="grid grid-cols-2 gap-5">
+          <div className="grid grid-cols-1 xl:grid-cols-2 gap-5">
             <Section
               title={t("insights.jsonSchema")}
               sub={ins.jsonBodyCount > 0 ? t("insights.jsonSchemaDesc", { count: ins.jsonBodyCount }) : undefined}

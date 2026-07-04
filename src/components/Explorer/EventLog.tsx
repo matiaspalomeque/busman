@@ -17,7 +17,10 @@ function StatusBadge({ status }: { status: EventLogEntry["status"] }) {
           : "bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400";
 
   return (
-    <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold ${styles}`}>
+    <span
+      title={status}
+      className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold ${styles}`}
+    >
       {status === "running"
         ? t("explorer.eventLog.statusRunning")
         : status === "success"
@@ -64,8 +67,11 @@ export function EventLog() {
       {/* Header bar */}
       <div className="flex items-center px-3 h-8 gap-2 shrink-0 border-b border-zinc-200 dark:border-zinc-700">
         <button
+          type="button"
           onClick={() => setCollapsed((c) => !c)}
-          className="flex items-center gap-1 text-xs font-semibold text-zinc-600 dark:text-zinc-300 hover:text-azure-primary transition-colors"
+          aria-expanded={!collapsed}
+          title={t("explorer.eventLog.title")}
+          className="flex items-center gap-1 text-xs font-semibold text-zinc-600 dark:text-zinc-300 hover:text-azure-primary focus:outline-none focus:ring-1 focus:ring-azure-primary rounded transition-colors"
         >
           <svg
             width={11}
@@ -90,7 +96,7 @@ export function EventLog() {
 
         {/* Running indicator */}
         {isRunning && (
-          <span className="flex items-center gap-1.5 ml-1">
+          <span className="flex items-center gap-1.5 ml-1" role="status">
             <span className="w-2.5 h-2.5 border-[1.5px] border-azure-primary border-t-transparent rounded-full animate-spin" />
             <span className="text-[10px] font-semibold text-azure-primary">
               {t("explorer.eventLog.statusRunning")}
@@ -110,7 +116,8 @@ export function EventLog() {
                   setPageSize(Number(e.target.value) as (typeof PAGE_SIZES)[number]);
                   setPage(1);
                 }}
-                className="text-[10px] w-12 px-1 py-0.5 rounded border border-zinc-300 dark:border-zinc-600 bg-transparent focus:outline-none dark:text-zinc-300 appearance-none select-custom-arrow pr-4"
+                aria-label={t("explorer.eventLog.rows")}
+                className="text-[10px] w-12 px-1 py-0.5 rounded border border-zinc-300 dark:border-zinc-600 bg-transparent focus:outline-none focus:ring-1 focus:ring-azure-primary dark:text-zinc-300 appearance-none select-custom-arrow pr-4"
               >
                 {PAGE_SIZES.map((n) => (
                   <option key={n} value={n}>
@@ -123,9 +130,12 @@ export function EventLog() {
             {/* Pagination */}
             <div className="flex items-center gap-1 text-[10px] text-zinc-400">
               <button
+                type="button"
                 onClick={() => setPage((p) => Math.max(1, p - 1))}
                 disabled={safePage === 1}
-                className="px-1 py-0.5 rounded border border-zinc-300 dark:border-zinc-600 disabled:opacity-40 hover:bg-zinc-100 dark:hover:bg-zinc-700"
+                aria-label={t("explorer.eventLog.previousPage")}
+                title={t("explorer.eventLog.previousPage")}
+                className="px-1 py-0.5 rounded border border-zinc-300 dark:border-zinc-600 disabled:opacity-40 hover:bg-zinc-100 dark:hover:bg-zinc-700 focus:outline-none focus:ring-1 focus:ring-azure-primary"
               >
                 ‹
               </button>
@@ -133,9 +143,12 @@ export function EventLog() {
                 {safePage}/{totalPages}
               </span>
               <button
+                type="button"
                 onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
                 disabled={safePage === totalPages}
-                className="px-1 py-0.5 rounded border border-zinc-300 dark:border-zinc-600 disabled:opacity-40 hover:bg-zinc-100 dark:hover:bg-zinc-700"
+                aria-label={t("explorer.eventLog.nextPage")}
+                title={t("explorer.eventLog.nextPage")}
+                className="px-1 py-0.5 rounded border border-zinc-300 dark:border-zinc-600 disabled:opacity-40 hover:bg-zinc-100 dark:hover:bg-zinc-700 focus:outline-none focus:ring-1 focus:ring-azure-primary"
               >
                 ›
               </button>
@@ -146,13 +159,13 @@ export function EventLog() {
 
       {/* Table */}
       {!collapsed && (
-        <div className="flex-1 overflow-y-auto">
+        <div className="flex-1 overflow-auto">
           {eventLog.length === 0 ? (
-            <div className="flex items-center justify-center h-full text-xs text-zinc-400 dark:text-zinc-500">
+            <div className="flex items-center justify-center h-full px-3 text-center text-xs text-zinc-400 dark:text-zinc-500">
               {t("explorer.eventLog.noOperations")}
             </div>
           ) : (
-            <table className="w-full text-[10px] border-collapse">
+            <table className="w-full min-w-[900px] text-[10px] border-collapse table-fixed">
               <thead className="sticky top-0 bg-zinc-100 dark:bg-zinc-800 z-10">
                 <tr>
                   {[
@@ -183,13 +196,13 @@ export function EventLog() {
                       {formatLogTime(entry.time)}
                     </td>
                     <td
-                      className="px-3 py-1 text-zinc-600 dark:text-zinc-300 truncate max-w-[180px]"
+                      className="px-3 py-1 text-zinc-600 dark:text-zinc-300 truncate"
                       title={entry.namespace}
                     >
                       {entry.namespace}
                     </td>
                     <td
-                      className="px-3 py-1 text-zinc-600 dark:text-zinc-300 truncate max-w-[140px]"
+                      className="px-3 py-1 text-zinc-600 dark:text-zinc-300 truncate"
                       title={entry.entity}
                     >
                       {entry.entity}
@@ -204,10 +217,10 @@ export function EventLog() {
                       <StatusBadge status={entry.status} />
                     </td>
                     <td
-                      className="px-3 py-1 text-red-500 dark:text-red-400 truncate max-w-[240px]"
+                      className="px-3 py-1 text-red-500 dark:text-red-400 truncate"
                       title={entry.errorMessage}
                     >
-                      {entry.errorMessage ?? ""}
+                      {entry.errorMessage ?? <span className="text-zinc-300 dark:text-zinc-600">—</span>}
                     </td>
                   </tr>
                 ))}
