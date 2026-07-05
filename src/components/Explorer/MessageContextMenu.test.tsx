@@ -90,7 +90,12 @@ describe("MessageContextMenu", () => {
       }),
     );
 
-    const msg = message("Dead Letter Queue: q1");
+    const msg: PeekedMessage = {
+      ...message("Dead Letter Queue: q1"),
+      sessionId: "session-42",
+      state: "deferred",
+      sourceSubQueue: "deadLetter",
+    };
     renderMenu(msg);
 
     fireEvent.click(screen.getByText("Replay to main queue"));
@@ -101,7 +106,15 @@ describe("MessageContextMenu", () => {
     expect(useAppStore.getState().pendingMessageOperations[key!]?.operation).toBe("ReplayMessage");
     expect(mocks.runOperation).toHaveBeenCalledWith(
       "single_message_action",
-      expect.objectContaining({ action: "replay", sequenceNumber: 42 }),
+      expect.objectContaining({
+        action: "replay",
+        sequenceNumber: 42,
+        messageId: "msg-42",
+        sessionId: "session-42",
+        state: "deferred",
+        source: "Dead Letter Queue: q1",
+        sourceSubQueue: "deadLetter",
+      }),
       { scope: "atomic", runId: "00000000-0000-0000-0000-000000000001" },
     );
 

@@ -7,7 +7,7 @@ import { getDisplayEntity } from "./toolbarActions";
 import { extractNamespace } from "../../utils/connection";
 import { exitCodeToStatus } from "../../utils/exitCode";
 import type { QueueMode } from "../../types";
-import { messageOperationKey } from "../../utils/messageOperation";
+import { addSingleMessageActionMetadata, isDeadLetterMessage, messageOperationKey } from "../../utils/messageOperation";
 
 const MODES: QueueMode[] = ["normal", "dlq", "both"];
 
@@ -38,7 +38,7 @@ export function MoveMessagesModal() {
   const { runOperation } = useScript();
 
   const isSingleMessage = singleMessageMoveTarget != null;
-  const isSingleMessageDlq = singleMessageMoveTarget?._source.startsWith("Dead Letter") ?? false;
+  const isSingleMessageDlq = singleMessageMoveTarget ? isDeadLetterMessage(singleMessageMoveTarget) : false;
   const singleMessageKey = singleMessageMoveTarget ? messageOperationKey(singleMessageMoveTarget) : null;
   const singleMessagePending = singleMessageKey ? pendingMessageOperations[singleMessageKey] != null : false;
   const isSubscriptionSource = !isSingleMessage && explorerSelection.kind === "subscription";
@@ -109,7 +109,7 @@ export function MoveMessagesModal() {
 
     if (isSingleMessage && singleMessageMoveTarget && singleMessageKey) {
       const msg = singleMessageMoveTarget;
-      const isDlq = msg._source.startsWith("Dead Letter");
+      const isDlq = isDeadLetterMessage(msg);
       const entityLabel = getDisplayEntity(explorerSelection) ?? sourceQueue.trim();
 
       addEventLogEntry({
@@ -134,6 +134,7 @@ export function MoveMessagesModal() {
         destQueue: destQueue.trim(),
         connectionId: conn.id,
       };
+      addSingleMessageActionMetadata(params, msg);
       if (explorerSelection.kind === "queue") {
         params.queueName = explorerSelection.queueName;
       } else if (explorerSelection.kind === "subscription") {

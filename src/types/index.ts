@@ -29,6 +29,11 @@ export interface ProgressUpdate {
 export interface PeekedMessage {
   messageId: string | null;
   sequenceNumber?: string | null;
+  sessionId?: string | null;
+  state?: string | null;
+  deliveryCount?: number | null;
+  lockedUntilUtc?: string | null;
+  sourceSubQueue?: "active" | "deadLetter" | "transferDeadLetter" | null;
   body: unknown;
   subject: string | null;
   contentType: string | null;

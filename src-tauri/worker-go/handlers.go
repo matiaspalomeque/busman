@@ -170,6 +170,37 @@ func derefString(s *string) any {
 	return *s
 }
 
+func derefTime(t *time.Time) any {
+	if t == nil {
+		return nil
+	}
+	return t.Format(time.RFC3339)
+}
+
+func messageStateLabel(state azservicebus.MessageState) string {
+	switch state {
+	case azservicebus.MessageStateActive:
+		return "active"
+	case azservicebus.MessageStateDeferred:
+		return "deferred"
+	case azservicebus.MessageStateScheduled:
+		return "scheduled"
+	default:
+		return strconv.FormatInt(int64(state), 10)
+	}
+}
+
+func sourceSubQueueLabel(sourceLabel string) string {
+	lower := strings.ToLower(sourceLabel)
+	if strings.Contains(lower, "transfer") {
+		return "transferDeadLetter"
+	}
+	if strings.Contains(lower, "dead letter") {
+		return "deadLetter"
+	}
+	return "active"
+}
+
 func traceParent(props map[string]any) any {
 	if props == nil {
 		return nil
@@ -201,7 +232,7 @@ func handleListEntities(raw json.RawMessage) (any, error) {
 		return nil, err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := operationContext(p.Env, 60000)
 	defer cancel()
 	queues := []string{}
 	topics := map[string][]string{}
@@ -1081,6 +1112,11 @@ func handleSearchMessages(raw json.RawMessage) (any, error) {
 					matchRecord := map[string]any{
 						"messageId":                  msg.MessageID,
 						"sequenceNumber":             msg.SequenceNumber,
+						"sessionId":                  derefString(msg.SessionID),
+						"state":                      messageStateLabel(msg.State),
+						"deliveryCount":              msg.DeliveryCount,
+						"lockedUntilUtc":             derefTime(msg.LockedUntil),
+						"sourceSubQueue":             sourceSubQueueLabel(queueType),
 						"body":                       bodyToJSON(msg.Body),
 						"subject":                    derefString(msg.Subject),
 						"contentType":                derefString(msg.ContentType),
@@ -1357,6 +1393,11 @@ func handlePeekMessages(raw json.RawMessage) (any, error) {
 				allMessages = append(allMessages, map[string]any{
 					"messageId":                  msg.MessageID,
 					"sequenceNumber":             msg.SequenceNumber,
+					"sessionId":                  derefString(msg.SessionID),
+					"state":                      messageStateLabel(msg.State),
+					"deliveryCount":              msg.DeliveryCount,
+					"lockedUntilUtc":             derefTime(msg.LockedUntil),
+					"sourceSubQueue":             sourceSubQueueLabel(sourceLabel),
 					"body":                       bodyToJSON(msg.Body),
 					"subject":                    derefString(msg.Subject),
 					"contentType":                derefString(msg.ContentType),
@@ -1581,12 +1622,212 @@ type singleMessageActionParams struct {
 	subscriptionSource
 	Action         string            `json:"action"` // "delete" | "move" | "replay"
 	SequenceNumber int64             `json:"sequenceNumber"`
+	MessageID      string            `json:"messageId"`
+	SessionID      *string           `json:"sessionId"`
+	State          string            `json:"state"`
+	Source         string            `json:"source"`
+	SourceSubQueue string            `json:"sourceSubQueue"`
 	IsDlq          bool              `json:"isDlq"`
 	QueueName      string            `json:"queueName"`
 	DestQueue      string            `json:"destQueue"`
 	DestTopic      string            `json:"destTopic"`
 	Env            map[string]string `json:"env"`
 	RunID          string            `json:"runId"`
+}
+
+type singleMessageReceiver interface {
+	ReceiveMessages(context.Context, int, *azservicebus.ReceiveMessagesOptions) ([]*azservicebus.ReceivedMessage, error)
+	ReceiveDeferredMessages(context.Context, []int64, *azservicebus.ReceiveDeferredMessagesOptions) ([]*azservicebus.ReceivedMessage, error)
+	CompleteMessage(context.Context, *azservicebus.ReceivedMessage, *azservicebus.CompleteMessageOptions) error
+	AbandonMessage(context.Context, *azservicebus.ReceivedMessage, *azservicebus.AbandonMessageOptions) error
+}
+
+func (p singleMessageActionParams) sourceSubQueue() azservicebus.SubQueue {
+	switch p.SourceSubQueue {
+	case "active":
+		return 0
+	case "deadLetter":
+		if !p.IsDlq {
+			return 0
+		}
+		return azservicebus.SubQueueDeadLetter
+	case "transferDeadLetter":
+		return azservicebus.SubQueueTransfer
+	}
+	if !p.IsDlq {
+		return 0
+	}
+	if strings.Contains(strings.ToLower(p.Source), "transfer") {
+		return azservicebus.SubQueueTransfer
+	}
+	return azservicebus.SubQueueDeadLetter
+}
+
+func entityNameWithSubQueue(name string, subQueue azservicebus.SubQueue) string {
+	if strings.Contains(name, "/$DeadLetterQueue") || strings.Contains(name, "/$Transfer/$DeadLetterQueue") {
+		return name
+	}
+	switch subQueue {
+	case azservicebus.SubQueueDeadLetter:
+		return name + "/$DeadLetterQueue"
+	case azservicebus.SubQueueTransfer:
+		return name + "/$Transfer/$DeadLetterQueue"
+	default:
+		return name
+	}
+}
+
+func (p singleMessageActionParams) receiverOptions() *azservicebus.ReceiverOptions {
+	subQueue := p.sourceSubQueue()
+	if subQueue == 0 {
+		return nil
+	}
+	return &azservicebus.ReceiverOptions{SubQueue: subQueue}
+}
+
+func (p singleMessageActionParams) destinationEntity() string {
+	if p.Action == "replay" {
+		if p.isSubscription() {
+			return p.DestTopic
+		}
+		return p.QueueName
+	}
+	return p.DestQueue
+}
+
+func (p singleMessageActionParams) acceptSessionReceiver(ctx context.Context, client *azservicebus.Client, sessionID string) (*azservicebus.SessionReceiver, error) {
+	subQueue := p.sourceSubQueue()
+	if p.isSubscription() {
+		subscriptionName := entityNameWithSubQueue(p.SubscriptionName, subQueue)
+		return client.AcceptSessionForSubscription(ctx, p.TopicName, subscriptionName, sessionID, nil)
+	}
+	queueName := entityNameWithSubQueue(p.QueueName, subQueue)
+	return client.AcceptSessionForQueue(ctx, queueName, sessionID, nil)
+}
+
+func (p singleMessageActionParams) targetSessionID(peeked *azservicebus.ReceivedMessage) (string, bool) {
+	if p.SessionID != nil {
+		return *p.SessionID, true
+	}
+	if peeked != nil && peeked.SessionID != nil {
+		return *peeked.SessionID, true
+	}
+	return "", false
+}
+
+func validateSingleMessageTarget(p singleMessageActionParams, msg *azservicebus.ReceivedMessage, phase string) error {
+	if msg.SequenceNumber == nil || *msg.SequenceNumber != p.SequenceNumber {
+		return fmt.Errorf("received unexpected message while %s sequence number %d", phase, p.SequenceNumber)
+	}
+	if p.MessageID != "" && msg.MessageID != p.MessageID {
+		return fmt.Errorf("sequence number %d now belongs to messageId %q, expected %q; refresh the peeked messages before retrying", p.SequenceNumber, msg.MessageID, p.MessageID)
+	}
+	if p.SessionID != nil {
+		if msg.SessionID == nil || *msg.SessionID != *p.SessionID {
+			got := "<nil>"
+			if msg.SessionID != nil {
+				got = *msg.SessionID
+			}
+			return fmt.Errorf("sequence number %d now belongs to sessionId %q, expected %q; refresh the peeked messages before retrying", p.SequenceNumber, got, *p.SessionID)
+		}
+	}
+	return nil
+}
+
+func cloneApplicationProperties(props map[string]any) map[string]any {
+	if len(props) == 0 {
+		return nil
+	}
+	out := make(map[string]any, len(props))
+	for k, v := range props {
+		out[k] = v
+	}
+	return out
+}
+
+func uniqueBusmanMessageID(original string) string {
+	suffix := fmt.Sprintf("busman-%d", time.Now().UnixNano())
+	if original == "" {
+		return suffix
+	}
+	const maxServiceBusMessageIDLength = 128
+	maxOriginalLen := maxServiceBusMessageIDLength - len(suffix) - 1
+	if maxOriginalLen <= 0 {
+		return suffix
+	}
+	if len(original) > maxOriginalLen {
+		original = original[:maxOriginalLen]
+	}
+	return original + "-" + suffix
+}
+
+func outboundMessageFromReceived(target *azservicebus.ReceivedMessage, regenerateMessageID bool) *azservicebus.Message {
+	appProps := cloneApplicationProperties(target.ApplicationProperties)
+	newMsg := &azservicebus.Message{
+		Body:                  target.Body,
+		ContentType:           target.ContentType,
+		CorrelationID:         target.CorrelationID,
+		Subject:               target.Subject,
+		PartitionKey:          target.PartitionKey,
+		ApplicationProperties: appProps,
+		To:                    target.To,
+		ReplyTo:               target.ReplyTo,
+		ReplyToSessionID:      target.ReplyToSessionID,
+		SessionID:             target.SessionID,
+		TimeToLive:            target.TimeToLive,
+	}
+	if target.MessageID == "" {
+		return newMsg
+	}
+	idCopy := target.MessageID
+	if regenerateMessageID {
+		if newMsg.ApplicationProperties == nil {
+			newMsg.ApplicationProperties = map[string]any{}
+		}
+		newMsg.ApplicationProperties["BusmanOriginalMessageId"] = target.MessageID
+		idCopy = uniqueBusmanMessageID(target.MessageID)
+	}
+	newMsg.MessageID = &idCopy
+	return newMsg
+}
+
+func destinationUsesDuplicateDetection(ctx context.Context, cs string, p singleMessageActionParams) (bool, error) {
+	adminClient, err := getAdminClient(cs)
+	if err != nil {
+		return false, err
+	}
+	if p.Action == "replay" && p.isSubscription() {
+		resp, err := adminClient.GetTopic(ctx, p.DestTopic, nil)
+		if err != nil {
+			return false, err
+		}
+		return resp.TopicProperties.RequiresDuplicateDetection != nil && *resp.TopicProperties.RequiresDuplicateDetection, nil
+	}
+	resp, err := adminClient.GetQueue(ctx, p.destinationEntity(), nil)
+	if err != nil {
+		return false, err
+	}
+	return resp.QueueProperties.RequiresDuplicateDetection != nil && *resp.QueueProperties.RequiresDuplicateDetection, nil
+}
+
+func singleMessageNotReceivableError(p singleMessageActionParams, entityLabel string, peeked *azservicebus.ReceivedMessage, scanned int) error {
+	details := []string{}
+	if peeked != nil {
+		details = append(details, "state="+messageStateLabel(peeked.State))
+		if peeked.MessageID != "" {
+			details = append(details, "messageId="+peeked.MessageID)
+		}
+		if peeked.SessionID != nil {
+			details = append(details, "sessionId="+*peeked.SessionID)
+		}
+		if peeked.LockedUntil != nil {
+			details = append(details, "lockedUntilUtc="+peeked.LockedUntil.Format(time.RFC3339))
+		}
+	}
+	if len(details) == 0 {
+		return fmt.Errorf("message with sequence number %d not found in %s after scanning %d messages", p.SequenceNumber, entityLabel, scanned)
+	}
+	return fmt.Errorf("message with sequence number %d exists in %s but is not currently receivable after scanning %d messages (%s). It may be locked by another receiver, deferred, scheduled, or behind the scan budget; refresh and retry after the lock expires", p.SequenceNumber, entityLabel, scanned, strings.Join(details, ", "))
 }
 
 func handleSingleMessageAction(raw json.RawMessage) (any, error) {
@@ -1633,7 +1874,7 @@ func handleSingleMessageAction(raw json.RawMessage) (any, error) {
 	}
 
 	startedAt := time.Now()
-	scanBudget := parseIntOrDefault(p.Env["SINGLE_MSG_SCAN_BUDGET"], 1000)
+	scanBudget := parseIntOrDefault(p.Env["SINGLE_MSG_SCAN_BUDGET"], 10000)
 	if scanBudget < 50 {
 		scanBudget = 50
 	}
@@ -1653,10 +1894,7 @@ func handleSingleMessageAction(raw json.RawMessage) (any, error) {
 	}
 	defer closeWithTimeout(client)
 
-	var receiverOpts *azservicebus.ReceiverOptions
-	if p.IsDlq {
-		receiverOpts = &azservicebus.ReceiverOptions{SubQueue: azservicebus.SubQueueDeadLetter}
-	}
+	receiverOpts := p.receiverOptions()
 	var receiver *azservicebus.Receiver
 	if p.isSubscription() {
 		receiver, err = client.NewReceiverForSubscription(p.TopicName, p.SubscriptionName, receiverOpts)
@@ -1669,21 +1907,28 @@ func handleSingleMessageAction(raw json.RawMessage) (any, error) {
 	defer closeWithTimeout(receiver)
 
 	var sender *azservicebus.Sender
+	regenerateMessageID := false
 	if p.Action == "move" || p.Action == "replay" {
-		destEntity := p.DestQueue
-		if p.Action == "replay" {
-			if p.isSubscription() {
-				destEntity = p.DestTopic
-			} else {
-				// DLQ replay sends back to the main queue.
-				destEntity = p.QueueName
-			}
-		}
+		destEntity := p.destinationEntity()
 		sender, err = client.NewSender(destEntity, nil)
 		if err != nil {
 			return nil, fmt.Errorf("sender error: %w", err)
 		}
 		defer closeWithTimeout(sender)
+
+		dupCtx, dupCancel := context.WithTimeout(context.Background(), time.Duration(maxWaitMs)*time.Millisecond)
+		dupEnabled, dupErr := destinationUsesDuplicateDetection(dupCtx, cs, p)
+		dupCancel()
+		if dupErr != nil {
+			emitOutput(p.RunID,
+				fmt.Sprintf("⚠ Could not inspect duplicate detection on destination %q; preserving MessageId. Error: %v", destEntity, dupErr),
+				true, elapsedSince(startedAt))
+		} else if dupEnabled {
+			regenerateMessageID = true
+			emitOutput(p.RunID,
+				fmt.Sprintf("ℹ Destination %q uses duplicate detection; replay will generate a new MessageId and store the original in BusmanOriginalMessageId.", destEntity),
+				false, elapsedSince(startedAt))
+		}
 	}
 
 	entityLabel := p.label(p.QueueName)
@@ -1691,10 +1936,136 @@ func handleSingleMessageAction(raw json.RawMessage) (any, error) {
 		entityLabel += " (DLQ)"
 	}
 	emitOutput(p.RunID,
-		fmt.Sprintf("🔍 Searching for message with sequence number %d in %s...", p.SequenceNumber, entityLabel),
+		fmt.Sprintf("🔍 Resolving message with sequence number %d in %s...", p.SequenceNumber, entityLabel),
 		false, elapsedSince(startedAt))
 
+	peekCtx, peekCancel := context.WithTimeout(context.Background(), time.Duration(maxWaitMs)*time.Millisecond)
+	peekedMessages, peekErr := receiver.PeekMessages(peekCtx, 1, &azservicebus.PeekMessagesOptions{FromSequenceNumber: &p.SequenceNumber})
+	peekCancel()
+	var peekedTarget *azservicebus.ReceivedMessage
+	if peekErr != nil {
+		emitOutput(p.RunID,
+			fmt.Sprintf("⚠ Could not peek sequence number %d before receiving: %v", p.SequenceNumber, peekErr),
+			true, elapsedSince(startedAt))
+	} else if len(peekedMessages) > 0 && peekedMessages[0].SequenceNumber != nil && *peekedMessages[0].SequenceNumber == p.SequenceNumber {
+		peekedTarget = peekedMessages[0]
+		if err := validateSingleMessageTarget(p, peekedTarget, "peeking"); err != nil {
+			return nil, err
+		}
+		emitOutput(p.RunID,
+			fmt.Sprintf("👀 Found target by peek: state=%s, deliveryCount=%d", messageStateLabel(peekedTarget.State), peekedTarget.DeliveryCount),
+			false, elapsedSince(startedAt))
+	} else if len(peekedMessages) > 0 && peekedMessages[0].SequenceNumber != nil {
+		return nil, fmt.Errorf("message with sequence number %d was not found in %s; next available sequence is %d", p.SequenceNumber, entityLabel, *peekedMessages[0].SequenceNumber)
+	} else {
+		return nil, fmt.Errorf("message with sequence number %d was not found in %s", p.SequenceNumber, entityLabel)
+	}
+
+	completeTarget := func(actionReceiver singleMessageReceiver, target *azservicebus.ReceivedMessage) error {
+		completeCtx, completeCancel := operationContext(p.Env, maxWaitMs)
+		err := actionReceiver.CompleteMessage(completeCtx, target, nil)
+		completeCancel()
+		if err != nil {
+			return fmt.Errorf("complete message error: %w", err)
+		}
+		return nil
+	}
+	abandonTarget := func(actionReceiver singleMessageReceiver, target *azservicebus.ReceivedMessage) {
+		abandonCtx, abandonCancel := operationContext(p.Env, maxWaitMs)
+		_ = actionReceiver.AbandonMessage(abandonCtx, target, nil)
+		abandonCancel()
+	}
+	handleTarget := func(actionReceiver singleMessageReceiver, target *azservicebus.ReceivedMessage) error {
+		if err := validateSingleMessageTarget(p, target, "receiving"); err != nil {
+			abandonTarget(actionReceiver, target)
+			return err
+		}
+		switch p.Action {
+		case "delete":
+			return completeTarget(actionReceiver, target)
+		case "move", "replay":
+			newMsg := outboundMessageFromReceived(target, regenerateMessageID)
+			sendCtx, sendCancel := operationContext(p.Env, maxWaitMs)
+			err := sender.SendMessage(sendCtx, newMsg, nil)
+			sendCancel()
+			if err != nil {
+				abandonTarget(actionReceiver, target)
+				return fmt.Errorf("send message error: %w", err)
+			}
+			return completeTarget(actionReceiver, target)
+		default:
+			return fmt.Errorf("unknown action %q", p.Action)
+		}
+	}
+
+	receiveDeferredTarget := func(actionReceiver singleMessageReceiver) error {
+		emitOutput(p.RunID,
+			fmt.Sprintf("↩ Receiving deferred message %d directly by sequence number...", p.SequenceNumber),
+			false, elapsedSince(startedAt))
+		deferCtx, deferCancel := operationContext(p.Env, maxWaitMs)
+		deferred, deferErr := actionReceiver.ReceiveDeferredMessages(deferCtx, []int64{p.SequenceNumber}, nil)
+		deferCancel()
+		if deferErr != nil {
+			return fmt.Errorf("receive deferred message error: %w", deferErr)
+		}
+		if len(deferred) == 0 {
+			return singleMessageNotReceivableError(p, entityLabel, peekedTarget, 0)
+		}
+		if err := handleTarget(actionReceiver, deferred[0]); err != nil {
+			return err
+		}
+		emitOutput(p.RunID,
+			fmt.Sprintf("✅ %s completed for deferred message %d in %.2fs", p.Action, p.SequenceNumber, time.Since(startedAt).Seconds()),
+			false, elapsedSince(startedAt))
+		return nil
+	}
+
+	if peekedTarget != nil {
+		switch peekedTarget.State {
+		case azservicebus.MessageStateDeferred:
+			if sessionID, ok := p.targetSessionID(peekedTarget); ok {
+				emitOutput(p.RunID,
+					fmt.Sprintf("🔐 Accepting session %q for deferred message %d...", sessionID, p.SequenceNumber),
+					false, elapsedSince(startedAt))
+				sessionCtx, sessionCancel := operationContext(p.Env, maxWaitMs)
+				sessionReceiver, sessionErr := p.acceptSessionReceiver(sessionCtx, client, sessionID)
+				sessionCancel()
+				if sessionErr != nil {
+					return nil, fmt.Errorf("accept session %q error: %w", sessionID, sessionErr)
+				}
+				defer closeWithTimeout(sessionReceiver)
+				if err := receiveDeferredTarget(sessionReceiver); err != nil {
+					return nil, err
+				}
+				return map[string]int64{"sequenceNumber": p.SequenceNumber}, nil
+			}
+			if err := receiveDeferredTarget(receiver); err != nil {
+				return nil, err
+			}
+			return map[string]int64{"sequenceNumber": p.SequenceNumber}, nil
+		case azservicebus.MessageStateScheduled:
+			return nil, fmt.Errorf("message with sequence number %d is scheduled in %s and cannot be settled until it becomes active", p.SequenceNumber, entityLabel)
+		}
+	}
+
+	actionReceiver := singleMessageReceiver(receiver)
+	if sessionID, ok := p.targetSessionID(peekedTarget); ok {
+		emitOutput(p.RunID,
+			fmt.Sprintf("🔐 Accepting session %q for active message %d...", sessionID, p.SequenceNumber),
+			false, elapsedSince(startedAt))
+		sessionCtx, sessionCancel := operationContext(p.Env, maxWaitMs)
+		sessionReceiver, sessionErr := p.acceptSessionReceiver(sessionCtx, client, sessionID)
+		sessionCancel()
+		if sessionErr != nil {
+			return nil, fmt.Errorf("accept session %q error: %w", sessionID, sessionErr)
+		}
+		defer closeWithTimeout(sessionReceiver)
+		actionReceiver = sessionReceiver
+	}
+
 	scanned := 0
+	idleRetries := parseIntOrDefault(p.Env["SINGLE_MSG_IDLE_RETRIES"], 3)
+	idleAttempts := 0
 	for scanned < scanBudget {
 		remaining := scanBudget - scanned
 		fetch := batchSize
@@ -1703,18 +2074,30 @@ func handleSingleMessageAction(raw json.RawMessage) (any, error) {
 		}
 
 		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(maxWaitMs)*time.Millisecond)
-		msgs, recvErr := receiver.ReceiveMessages(ctx, fetch, nil)
+		msgs, recvErr := actionReceiver.ReceiveMessages(ctx, fetch, nil)
 		cancel()
 
 		if recvErr != nil && len(msgs) == 0 {
 			if errors.Is(recvErr, context.DeadlineExceeded) || errors.Is(recvErr, context.Canceled) {
-				return nil, fmt.Errorf("message with sequence number %d not found in %s", p.SequenceNumber, entityLabel)
+				if peekedTarget != nil && idleAttempts < idleRetries {
+					idleAttempts++
+					emitProgress(p.RunID,
+						fmt.Sprintf("Target exists but was not receivable yet; retry %d/%d...", idleAttempts, idleRetries),
+						elapsedSince(startedAt))
+					continue
+				}
+				return nil, singleMessageNotReceivableError(p, entityLabel, peekedTarget, scanned)
 			}
 			return nil, fmt.Errorf("receive error: %w", recvErr)
 		}
 		if len(msgs) == 0 {
-			return nil, fmt.Errorf("message with sequence number %d not found in %s", p.SequenceNumber, entityLabel)
+			if peekedTarget != nil && idleAttempts < idleRetries {
+				idleAttempts++
+				continue
+			}
+			return nil, singleMessageNotReceivableError(p, entityLabel, peekedTarget, scanned)
 		}
+		idleAttempts = 0
 
 		var target *azservicebus.ReceivedMessage
 		others := make([]*azservicebus.ReceivedMessage, 0, len(msgs))
@@ -1738,7 +2121,7 @@ func handleSingleMessageAction(raw json.RawMessage) (any, error) {
 					defer func() { <-sem }()
 					abandonCtx, abandonCancel := operationContext(p.Env, maxWaitMs)
 					defer abandonCancel()
-					if err := receiver.AbandonMessage(abandonCtx, msg, nil); err != nil {
+					if err := actionReceiver.AbandonMessage(abandonCtx, msg, nil); err != nil {
 						errCh <- fmt.Errorf("abandon non-target message error: %w", err)
 					}
 				}(o)
@@ -1751,45 +2134,8 @@ func handleSingleMessageAction(raw json.RawMessage) (any, error) {
 		}
 
 		if target != nil {
-			switch p.Action {
-			case "delete":
-				completeCtx, completeCancel := operationContext(p.Env, maxWaitMs)
-				defer completeCancel()
-				if err := receiver.CompleteMessage(completeCtx, target, nil); err != nil {
-					return nil, fmt.Errorf("complete message error: %w", err)
-				}
-			case "move", "replay":
-				newMsg := &azservicebus.Message{
-					Body:                  target.Body,
-					ContentType:           target.ContentType,
-					CorrelationID:         target.CorrelationID,
-					Subject:               target.Subject,
-					PartitionKey:          target.PartitionKey,
-					ApplicationProperties: target.ApplicationProperties,
-					To:                    target.To,
-					ReplyTo:               target.ReplyTo,
-					ReplyToSessionID:      target.ReplyToSessionID,
-					SessionID:             target.SessionID,
-					TimeToLive:            target.TimeToLive,
-				}
-				if target.MessageID != "" {
-					idCopy := target.MessageID
-					newMsg.MessageID = &idCopy
-				}
-				sendCtx, sendCancel := operationContext(p.Env, maxWaitMs)
-				if err := sender.SendMessage(sendCtx, newMsg, nil); err != nil {
-					sendCancel()
-					abandonCtx, abandonCancel := operationContext(p.Env, maxWaitMs)
-					_ = receiver.AbandonMessage(abandonCtx, target, nil)
-					abandonCancel()
-					return nil, fmt.Errorf("send message error: %w", err)
-				}
-				sendCancel()
-				completeCtx, completeCancel := operationContext(p.Env, maxWaitMs)
-				defer completeCancel()
-				if err := receiver.CompleteMessage(completeCtx, target, nil); err != nil {
-					return nil, fmt.Errorf("complete message error: %w", err)
-				}
+			if err := handleTarget(actionReceiver, target); err != nil {
+				return nil, err
 			}
 			emitOutput(p.RunID,
 				fmt.Sprintf("✅ %s completed for message %d in %.2fs", p.Action, p.SequenceNumber, time.Since(startedAt).Seconds()),
@@ -1805,5 +2151,5 @@ func handleSingleMessageAction(raw json.RawMessage) (any, error) {
 		}
 	}
 
-	return nil, fmt.Errorf("message with sequence number %d not found after scanning %d messages (budget exhausted)", p.SequenceNumber, scanned)
+	return nil, singleMessageNotReceivableError(p, entityLabel, peekedTarget, scanned)
 }

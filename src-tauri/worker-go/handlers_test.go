@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Azure/azure-sdk-for-go/sdk/messaging/azservicebus"
 	"github.com/Azure/azure-sdk-for-go/sdk/messaging/azservicebus/admin"
 )
 
@@ -300,6 +301,105 @@ func TestHandleSingleMessageActionRejectsActiveMessages(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "only supported for dead-letter messages") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestSingleMessageSourceSubQueueSelection(t *testing.T) {
+	tests := []struct {
+		name string
+		p    singleMessageActionParams
+		want azservicebus.SubQueue
+	}{
+		{
+			name: "stable active enum",
+			p:    singleMessageActionParams{IsDlq: false, SourceSubQueue: "active"},
+			want: 0,
+		},
+		{
+			name: "stable dead letter enum",
+			p:    singleMessageActionParams{IsDlq: true, SourceSubQueue: "deadLetter"},
+			want: azservicebus.SubQueueDeadLetter,
+		},
+		{
+			name: "stable transfer dead letter enum",
+			p:    singleMessageActionParams{IsDlq: true, SourceSubQueue: "transferDeadLetter"},
+			want: azservicebus.SubQueueTransfer,
+		},
+		{
+			name: "legacy display label fallback",
+			p:    singleMessageActionParams{IsDlq: true, Source: "Transfer Dead Letter Queue: q1"},
+			want: azservicebus.SubQueueTransfer,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.p.sourceSubQueue(); got != tt.want {
+				t.Fatalf("expected %v, got %v", tt.want, got)
+			}
+		})
+	}
+}
+
+func TestEntityNameWithSubQueue(t *testing.T) {
+	if got := entityNameWithSubQueue("orders", azservicebus.SubQueueDeadLetter); got != "orders/$DeadLetterQueue" {
+		t.Fatalf("unexpected dead-letter path: %q", got)
+	}
+	if got := entityNameWithSubQueue("orders", azservicebus.SubQueueTransfer); got != "orders/$Transfer/$DeadLetterQueue" {
+		t.Fatalf("unexpected transfer DLQ path: %q", got)
+	}
+	if got := entityNameWithSubQueue("orders/$DeadLetterQueue", azservicebus.SubQueueDeadLetter); got != "orders/$DeadLetterQueue" {
+		t.Fatalf("should not double-append subqueue path: %q", got)
+	}
+}
+
+func TestOutboundMessageFromReceivedRegeneratesMessageID(t *testing.T) {
+	msgID := "original-message-id"
+	seq := int64(42)
+	sessionID := "session-a"
+	received := &azservicebus.ReceivedMessage{
+		MessageID:             msgID,
+		SequenceNumber:        &seq,
+		SessionID:             &sessionID,
+		ApplicationProperties: map[string]any{"tenant": "blue"},
+	}
+
+	out := outboundMessageFromReceived(received, true)
+	if out.MessageID == nil {
+		t.Fatal("expected regenerated message ID")
+	}
+	if *out.MessageID == msgID {
+		t.Fatal("expected regenerated message ID to differ from original")
+	}
+	if out.ApplicationProperties["BusmanOriginalMessageId"] != msgID {
+		t.Fatalf("expected original message ID metadata, got %#v", out.ApplicationProperties)
+	}
+	if received.ApplicationProperties["BusmanOriginalMessageId"] != nil {
+		t.Fatal("expected source application properties to remain unchanged")
+	}
+}
+
+func TestValidateSingleMessageTargetGuardsMessageIdentity(t *testing.T) {
+	seq := int64(42)
+	sessionID := "session-a"
+	msg := &azservicebus.ReceivedMessage{
+		MessageID:      "msg-42",
+		SequenceNumber: &seq,
+		SessionID:      &sessionID,
+	}
+
+	if err := validateSingleMessageTarget(singleMessageActionParams{
+		SequenceNumber: 42,
+		MessageID:      "msg-42",
+		SessionID:      &sessionID,
+	}, msg, "test"); err != nil {
+		t.Fatalf("expected target to validate, got %v", err)
+	}
+	if err := validateSingleMessageTarget(singleMessageActionParams{
+		SequenceNumber: 42,
+		MessageID:      "other",
+	}, msg, "test"); err == nil || !strings.Contains(err.Error(), "expected") {
+		t.Fatalf("expected messageId mismatch error, got %v", err)
 	}
 }
 

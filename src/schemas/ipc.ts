@@ -8,6 +8,11 @@ export const PeekedMessageSchema = z.object({
   sequenceNumber: z.union([z.string(), z.number()]).nullable().optional().transform((value) =>
     value == null ? value : String(value)
   ),
+  sessionId: z.string().nullable().optional(),
+  state: z.string().nullable().optional(),
+  deliveryCount: z.number().nullable().optional(),
+  lockedUntilUtc: z.string().nullable().optional(),
+  sourceSubQueue: z.enum(["active", "deadLetter", "transferDeadLetter"]).nullable().optional(),
   body: z.unknown(),
   subject: z.string().nullable(),
   contentType: z.string().nullable(),

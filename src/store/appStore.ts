@@ -11,7 +11,7 @@ import type {
   ProgressUpdate,
   SendMessageDraft,
 } from "../types";
-import { messageOperationKey, type MessageOperation } from "../utils/messageOperation";
+import { isDeadLetterMessage, messageOperationKey, type MessageOperation } from "../utils/messageOperation";
 
 /** Internal key separator for subscription store entries: "topic\0subscription". */
 export const SUBSCRIPTION_KEY_SEP = "\0";
@@ -227,7 +227,7 @@ function computeMaxSeqNums(messages: PeekedMessage[]): { normal: number | null; 
     if (msg.sequenceNumber == null) continue;
     const n = Number(msg.sequenceNumber);
     if (isNaN(n)) continue;
-    if (msg._source.startsWith("Dead Letter")) {
+    if (isDeadLetterMessage(msg)) {
       if (dlq === null || n > dlq) dlq = n;
     } else {
       if (normal === null || n > normal) normal = n;

@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { useAppStore } from "../../store/appStore";
 import { Icon } from "../Common/Icon";
 import type { PeekedMessage } from "../../types";
+import { isDeadLetterMessage } from "../../utils/messageOperation";
 
 // ─── Analysis (single pass) ───────────────────────────────────────────────────
 
@@ -28,7 +29,7 @@ function computeInsights(messages: PeekedMessage[]) {
 
   for (const m of messages) {
     // DLQ / normal split + reason frequency
-    if (m._source.startsWith("Dead Letter")) {
+    if (isDeadLetterMessage(m)) {
       dlqCount++;
       const r = m.deadLetterReason ?? "(unknown)";
       reasonMap[r] = (reasonMap[r] ?? 0) + 1;

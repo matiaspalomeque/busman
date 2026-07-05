@@ -214,6 +214,9 @@ export function Sidebar() {
         {!entitiesLoading && entitiesError && (
           <div className="px-3 py-3 space-y-1.5">
             <p className="text-xs text-amber-600 dark:text-amber-400">{t("explorer.sidebar.loadError")}</p>
+            <p className="text-[11px] leading-snug text-zinc-500 dark:text-zinc-400 break-words">
+              {entitiesError}
+            </p>
             <button
               onClick={() => void refreshEntities()}
               className="text-xs text-azure-primary hover:underline"

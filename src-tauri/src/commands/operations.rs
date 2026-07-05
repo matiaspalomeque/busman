@@ -318,6 +318,16 @@ pub struct SingleMessageActionArgs {
     pub action: String,
     #[serde(rename = "sequenceNumber")]
     pub sequence_number: i64,
+    #[serde(rename = "messageId", default)]
+    pub message_id: Option<String>,
+    #[serde(rename = "sessionId", default)]
+    pub session_id: Option<String>,
+    #[serde(default)]
+    pub state: Option<String>,
+    #[serde(default)]
+    pub source: Option<String>,
+    #[serde(rename = "sourceSubQueue", default)]
+    pub source_sub_queue: Option<String>,
     #[serde(rename = "isDlq")]
     pub is_dlq: bool,
     #[serde(rename = "queueName", default)]
@@ -348,6 +358,11 @@ pub async fn single_message_action(
         json!({
             "action": args.action,
             "sequenceNumber": args.sequence_number,
+            "messageId": args.message_id.unwrap_or_default(),
+            "sessionId": args.session_id,
+            "state": args.state.unwrap_or_default(),
+            "source": args.source.unwrap_or_default(),
+            "sourceSubQueue": args.source_sub_queue.unwrap_or_default(),
             "isDlq": args.is_dlq,
             "queueName": args.queue_name.unwrap_or_default(),
             "topicName": args.topic_name.unwrap_or_default(),

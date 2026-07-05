@@ -9,6 +9,7 @@ import {
   ListSubscriptionRulesResultSchema,
   ManageSubscriptionRuleSchema,
 } from "./ipc";
+import type { PeekedMessage } from "../types";
 
 describe("IPC schemas", () => {
   describe("ListEntitiesResultSchema", () => {
@@ -108,6 +109,43 @@ describe("IPC schemas", () => {
       const result = PeekResultSchema.parse(data);
       expect(result.messages).toHaveLength(1);
       expect(result.filename).toBe("messages.json");
+    });
+
+    it("accepts optional metadata needed for single-message actions", () => {
+      const result = PeekResultSchema.parse({
+        messages: [
+          {
+            messageId: "msg-1",
+            sequenceNumber: 42,
+            body: { key: "value" },
+            subject: null,
+            contentType: "application/json",
+            correlationId: null,
+            partitionKey: null,
+            sessionId: "session-a",
+            state: "deferred",
+            deliveryCount: 2,
+            lockedUntilUtc: "2025-01-01T00:01:00Z",
+            sourceSubQueue: "deadLetter",
+            traceParent: null,
+            applicationProperties: null,
+            enqueuedTimeUtc: "2025-01-01T00:00:00Z",
+            expiresAtUtc: null,
+            _source: "Dead Letter Queue: q1",
+          },
+        ],
+        filename: "messages.json",
+        savedAt: "2025-01-01T00:00:00Z",
+      });
+
+      const msg: PeekedMessage = result.messages[0];
+      expect(msg.sequenceNumber).toBe("42");
+      expect(msg.messageId).toBe("msg-1");
+      expect(msg.sessionId).toBe("session-a");
+      expect(msg.state).toBe("deferred");
+      expect(msg.deliveryCount).toBe(2);
+      expect(msg.lockedUntilUtc).toBe("2025-01-01T00:01:00Z");
+      expect(msg.sourceSubQueue).toBe("deadLetter");
     });
 
     it("accepts empty messages array", () => {

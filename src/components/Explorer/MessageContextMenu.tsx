@@ -12,7 +12,12 @@ import {
   openResend,
   openMoveSingle,
 } from "./messageActions";
-import { messageOperationKey, type MessageOperation } from "../../utils/messageOperation";
+import {
+  addSingleMessageActionMetadata,
+  isDeadLetterMessage,
+  messageOperationKey,
+  type MessageOperation,
+} from "../../utils/messageOperation";
 
 type ConfirmAction = "delete" | "replay";
 
@@ -43,7 +48,7 @@ export function MessageContextMenu() {
   };
 
   const msg = messageContextMenu?.msg;
-  const isDlq = msg ? msg._source.startsWith("Dead Letter") : false;
+  const isDlq = msg ? isDeadLetterMessage(msg) : false;
 
   // Dismiss on click outside
   useEffect(() => {
@@ -118,6 +123,7 @@ export function MessageContextMenu() {
       isDlq: isDlq,
       connectionId: conn.id,
     };
+    addSingleMessageActionMetadata(params, targetMsg);
     if (explorerSelection.kind === "queue") {
       params.queueName = explorerSelection.queueName;
       if (action === "replay") params.destQueue = explorerSelection.queueName;
