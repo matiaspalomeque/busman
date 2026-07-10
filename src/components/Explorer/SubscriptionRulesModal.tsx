@@ -8,6 +8,7 @@ import type { SubscriptionRule } from "../../types";
 import { buildRuleDraft, draftToManageRule, summarizeSubscriptionRule } from "../../utils/subscriptionRules";
 import type { RuleDraft } from "../../utils/subscriptionRules";
 import { Icon } from "../Common/Icon";
+import { logHandledError } from "../../utils/logging";
 
 const NEW_RULE_KEY = "__new__";
 
@@ -91,6 +92,11 @@ export function SubscriptionRulesModal() {
       setSelectedKey(nextKey);
       syncDraftFromSelection(nextKey, result.rules);
     } catch (error) {
+      logHandledError("Failed to load subscription rules", error, {
+        connectionId: conn.id,
+        topicName: explorerSelection.topicName,
+        subscriptionName: explorerSelection.subscriptionName,
+      });
       setLoadError(String(error));
       setRules([]);
       setSelectedKey(null);
@@ -137,6 +143,13 @@ export function SubscriptionRulesModal() {
       });
       await loadRules(parsed.name);
     } catch (error) {
+      logHandledError("Failed to save subscription rule", error, {
+        connectionId: conn.id,
+        topicName: explorerSelection.topicName,
+        subscriptionName: explorerSelection.subscriptionName,
+        ruleName: draft.name,
+        isNewRule,
+      });
       setMutationError(formatMutationError(error));
     } finally {
       setSaving(false);
@@ -160,6 +173,12 @@ export function SubscriptionRulesModal() {
       });
       await loadRules(null);
     } catch (error) {
+      logHandledError("Failed to delete subscription rule", error, {
+        connectionId: conn.id,
+        topicName: explorerSelection.topicName,
+        subscriptionName: explorerSelection.subscriptionName,
+        ruleName: currentRule.name,
+      });
       setMutationError(formatMutationError(error));
     } finally {
       setDeleting(false);

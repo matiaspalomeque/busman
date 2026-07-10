@@ -3,6 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 import { useCallback, useEffect, useRef } from "react";
 import { useAppStore } from "../store/appStore";
 import type { ScriptOutputEvent, ScriptProgressEvent, ScriptDoneEvent } from "../types";
+import { logHandledError } from "../utils/logging";
 
 const SCRIPT_DONE_TIMEOUT_MS = 30 * 60 * 1000;
 
@@ -88,6 +89,7 @@ export function useScript() {
           });
         } catch (e: unknown) {
           const errMsg = String(e);
+          logHandledError(`Operation command failed: ${command}`, e, { command, runId, scope });
           appendOutputLine(`Error: ${errMsg}`, true, 0);
           lastStderrLine = errMsg;
           // If backend returns an error before emitting script-done,
@@ -104,6 +106,7 @@ export function useScript() {
         };
       } catch (e: unknown) {
         const errMsg = String(e);
+        logHandledError(`Operation failed before completion: ${command}`, e, { command, runId, scope });
         appendOutputLine(`Error: ${errMsg}`, true, 0);
         return { exitCode: -1, errorMessage: errMsg };
       } finally {
@@ -128,7 +131,8 @@ export function useScript() {
     if (!isRunningRef.current || !runId) return;
     try {
       await invoke("stop_current_operation", { runId });
-    } catch {
+    } catch (error) {
+      logHandledError("Failed to stop current operation", error, { runId });
       // Non-fatal: the UI will still settle when script-done arrives (or won't if kill failed).
     }
   }, [storeRunId]);

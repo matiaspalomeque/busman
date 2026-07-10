@@ -4,6 +4,7 @@ import { useCallback } from "react";
 import { useAppStore } from "../store/appStore";
 import { ConnectionsConfigSchema, safeInvoke } from "../schemas/ipc";
 import type { Connection, ConnectionsConfig } from "../types";
+import { logHandledError } from "../utils/logging";
 
 export function useConnections() {
   const { setConnections, setActiveConnectionId } = useAppStore();
@@ -65,7 +66,12 @@ export function useConnections() {
       defaultPath: "connections.busman",
     });
     if (!path) return;
-    await invoke("export_connections", { path, password });
+    try {
+      await invoke("export_connections", { path, password });
+    } catch (error) {
+      logHandledError("Failed to export connections", error, { path });
+      throw error;
+    }
   }, []);
 
   const importConnections = useCallback(

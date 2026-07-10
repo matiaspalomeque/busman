@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useConnections } from "../../hooks/useConnections";
+import { logHandledError } from "../../utils/logging";
 
 interface Props {
   onClose: () => void;
@@ -31,6 +32,7 @@ export function ExportConnectionsModal({ onClose }: Props) {
       await exportConnections(password);
       setSuccess(true);
     } catch (err) {
+      logHandledError("Failed to export connections from modal", err);
       setError(String(err));
     } finally {
       setExporting(false);

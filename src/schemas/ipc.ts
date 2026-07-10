@@ -1,7 +1,18 @@
 import { z } from "zod";
 import { invoke } from "@tauri-apps/api/core";
+import { logHandledError } from "../utils/logging";
 
 // ─── IPC response schemas ───────────────────────────────────────────────────
+
+function summarizeIpcResponse(value: unknown): Record<string, unknown> {
+  if (Array.isArray(value)) {
+    return { type: "array", length: value.length };
+  }
+  if (value !== null && typeof value === "object") {
+    return { type: "object", keys: Object.keys(value).slice(0, 25) };
+  }
+  return { type: value === null ? "null" : typeof value };
+}
 
 export const PeekedMessageSchema = z.object({
   messageId: z.string().nullable(),
@@ -243,9 +254,21 @@ export async function safeInvoke<T>(
   schema: z.ZodType<T>,
   args?: Record<string, unknown>
 ): Promise<T> {
-  const raw = args === undefined ? await invoke(command) : await invoke(command, args);
+  let raw: unknown;
+  try {
+    raw = args === undefined ? await invoke(command) : await invoke(command, args);
+  } catch (error) {
+    logHandledError(`Tauri command failed: ${command}`, error, { command, args });
+    throw error;
+  }
+
   const result = schema.safeParse(raw);
   if (!result.success) {
+    logHandledError(`Tauri command returned invalid response: ${command}`, result.error, {
+      command,
+      args,
+      responseSummary: summarizeIpcResponse(raw),
+    });
     console.error(
       `[safeInvoke] ${command}: response validation failed`,
       result.error.issues

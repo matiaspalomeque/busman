@@ -4,7 +4,7 @@ pub mod error;
 mod models;
 mod store;
 
-use commands::{connections::*, entities::*, files::*, operations::*};
+use commands::{connections::*, entities::*, files::*, logging::*, operations::*};
 use tauri::menu::{Menu, MenuItemBuilder, HELP_SUBMENU_ID};
 use tauri::{Emitter, Manager};
 
@@ -111,6 +111,7 @@ pub fn run() {
             set_active_connection,
             export_connections,
             import_connections,
+            log_frontend_event,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

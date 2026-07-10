@@ -11,6 +11,7 @@ import type {
   ProgressUpdate,
   SendMessageDraft,
 } from "../types";
+import { logHandledError } from "../utils/logging";
 import { isDeadLetterMessage, messageOperationKey, type MessageOperation } from "../utils/messageOperation";
 
 /** Internal key separator for subscription store entries: "topic\0subscription". */
@@ -672,6 +673,16 @@ export const useAppStore = create<AppState>()(
         if (entry) {
           entry.status = status;
           if (errorMessage) entry.errorMessage = errorMessage;
+          if (status === "error") {
+            logHandledError(`Operation failed: ${entry.operation}`, errorMessage ?? "Unknown error", {
+              eventLogId: id,
+              namespace: entry.namespace,
+              entity: entry.entity,
+              entityType: entry.entityType,
+              operation: entry.operation,
+              time: entry.time,
+            });
+          }
         }
       }),
 

@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { useAppStore, SUBSCRIPTION_KEY_SEP } from "../store/appStore";
+import { logHandledWarning } from "../utils/logging";
 
 /**
  * Monitors DLQ counts against configured thresholds and sends desktop
@@ -72,8 +73,9 @@ export function useDlqAlerts() {
           });
           notifiedRef.current.add(b.key);
         }
-      } catch {
-        // Notification plugin not available — silently skip
+      } catch (error) {
+        logHandledWarning("DLQ notification failed", { error: String(error), breachCount: breaches.length });
+        // Notification plugin not available — skip without interrupting the app
       }
     })();
   }, [queueCounts, subscriptionCounts, dlqThresholds, dlqNotificationsEnabled]);

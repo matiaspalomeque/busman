@@ -8,6 +8,7 @@ import { safeColor } from "../../utils/color";
 import { ExportConnectionsModal } from "../Connections/ExportConnectionsModal";
 import { ImportConnectionsModal } from "../Connections/ImportConnectionsModal";
 import type { Connection } from "../../types";
+import { logHandledError } from "../../utils/logging";
 
 type FormMode = { kind: "add" } | { kind: "edit"; connection: Connection };
 
@@ -61,6 +62,7 @@ function ConnectionForm({ initial, onSave, onCancel }: ConnectionFormProps) {
       setTestResult({ ok: true, queueCount: result.queueCount, topicCount: result.topicCount });
     } catch (err) {
       const msg = String(err);
+      logHandledError("Connection test failed", err, { connectionName: name || initial?.name });
       setTestResult({ ok: false, error: msg.length > 200 ? `${msg.slice(0, 200)}…` : msg });
     } finally {
       setTesting(false);
@@ -84,6 +86,7 @@ function ConnectionForm({ initial, onSave, onCancel }: ConnectionFormProps) {
         environmentColor: environmentColor || undefined,
       });
     } catch (err) {
+      logHandledError("Failed to save connection", err, { connectionName: name });
       setError(String(err));
     } finally {
       setSaving(false);

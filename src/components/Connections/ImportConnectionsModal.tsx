@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useConnections } from "../../hooks/useConnections";
+import { logHandledError } from "../../utils/logging";
 
 interface Props {
   onClose: () => void;
@@ -25,6 +26,7 @@ export function ImportConnectionsModal({ onClose }: Props) {
       setImported(count);
     } catch (err) {
       const msg = String(err);
+      logHandledError("Failed to import connections", err, { merge });
       setError(
         msg.includes("Invalid password") || msg.includes("corrupted")
           ? t("connections.importModal.wrongPassword")

@@ -7,11 +7,32 @@ import { Explorer } from "./components/Explorer";
 import { WorkerNotFoundBanner } from "./components/Common/WorkerNotFoundBanner";
 import { useConnections } from "./hooks/useConnections";
 import { useAppStore } from "./store/appStore";
+import { logHandledError } from "./utils/logging";
 import i18n from "./i18n/index";
 
 export function App() {
   const { loadConnections } = useConnections();
   const { workerAvailable, setWorkerAvailable, isDark, setIsDark, language, setLanguage, setIsAboutModalOpen } = useAppStore();
+
+  useEffect(() => {
+    const onError = (event: ErrorEvent) => {
+      logHandledError("Unhandled frontend error", event.error ?? event.message, {
+        filename: event.filename,
+        lineno: event.lineno,
+        colno: event.colno,
+      });
+    };
+    const onUnhandledRejection = (event: PromiseRejectionEvent) => {
+      logHandledError("Unhandled frontend promise rejection", event.reason);
+    };
+
+    window.addEventListener("error", onError);
+    window.addEventListener("unhandledrejection", onUnhandledRejection);
+    return () => {
+      window.removeEventListener("error", onError);
+      window.removeEventListener("unhandledrejection", onUnhandledRejection);
+    };
+  }, []);
 
   // Initialise theme and language from localStorage / system preference.
   useEffect(() => {
@@ -56,6 +77,7 @@ export function App() {
           okLabel: i18n.t("updater.ok"),
         });
       } catch (error) {
+        logHandledError("Failed to check for updates", error);
         console.error("Failed to check for updates", error);
       }
     };
@@ -68,18 +90,29 @@ export function App() {
     setLanguage(storedLang ?? "en");
 
     // Check worker availability and ensure it responds.
-    invoke<boolean>("check_worker").then((available) => {
-      setWorkerAvailable(available);
-      if (available) {
-        invoke("ensure_scripts_ready").catch(console.error);
-      }
-    });
+    invoke<boolean>("check_worker")
+      .then((available) => {
+        setWorkerAvailable(available);
+        if (available) {
+          invoke("ensure_scripts_ready").catch((error) => {
+            logHandledError("Failed to ensure worker scripts are ready", error);
+            console.error(error);
+          });
+        }
+      })
+      .catch((error) => {
+        logHandledError("Failed to check worker availability", error);
+        setWorkerAvailable(false);
+      });
 
     // Check for a newer app release.
     void checkForUpdates();
 
     // Load persisted connections.
-    loadConnections().catch((err) => console.error("Failed to load connections:", err));
+    loadConnections().catch((err) => {
+      logHandledError("Failed to load connections", err);
+      console.error("Failed to load connections:", err);
+    });
   }, [setIsDark, setWorkerAvailable, loadConnections, setLanguage]);
 
   // Sync the document class and localStorage whenever isDark changes.

@@ -7,6 +7,7 @@ import type { PeekedMessage } from "../../types";
 import { EntityDetailsPanel } from "./EntityDetailsPanel";
 import { Icon } from "../Common/Icon";
 import { messageOperationKey, type MessageOperation } from "../../utils/messageOperation";
+import { logHandledError } from "../../utils/logging";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -275,7 +276,8 @@ function OperationProgressPanel() {
     if (!runId) return;
     try {
       await invoke("stop_current_operation", { runId });
-    } catch {
+    } catch (error) {
+      logHandledError("Failed to cancel running operation", error, { runId });
       // Non-fatal
     }
   };
@@ -460,6 +462,11 @@ export function MessageGrid() {
     try {
       await invoke("write_json_file", { path, content: JSON.stringify(peekMessages, null, 2) });
     } catch (err) {
+      logHandledError("Failed to export messages", err, {
+        path,
+        messageCount: peekMessages.length,
+        selection: explorerSelection,
+      });
       setLastBrowseError(`Export failed: ${String(err)}`);
     }
   };
