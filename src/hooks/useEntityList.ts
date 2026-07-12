@@ -5,13 +5,11 @@ import {
   ListEntitiesResultSchema,
   QueueCountResultSchema,
   SubscriptionCountResultSchema,
-  TopicSubscriptionCountsResultSchema,
+  EntityCountsResultSchema,
 } from "../schemas/ipc";
 import type { z } from "zod";
 
 type ListEntitiesResult = z.infer<typeof ListEntitiesResultSchema>;
-
-const FLUSH_MS = 1000;
 
 export function useEntityList() {
   const conn = useAppStore(selectActiveConnection);
@@ -31,69 +29,30 @@ export function useEntityList() {
   const fetchingConnRef = useRef<string | null>(null);
 
   const fetchCounts = useCallback(
-    (result: ListEntitiesResult, connId: string, opts?: { singleFlush?: boolean }) => {
+    (result: ListEntitiesResult, connId: string) => {
       const isStale = () => selectActiveConnection(useAppStore.getState())?.id !== connId;
-
-      // Local buffers — flushed to store in one batched update every FLUSH_MS
-      const queueBuf: { name: string; active: number; dlq: number }[] = [];
-      const subBuf: { topic: string; subscription: string; active: number; dlq: number }[] = [];
-
-      const flush = () => {
-        if ((queueBuf.length === 0 && subBuf.length === 0) || isStale()) return;
-        batchSetCounts(queueBuf.splice(0), subBuf.splice(0));
-      };
-
       const topicNames = Object.keys(result.topics);
       const totalEntities = result.queues.length + topicNames.length;
       if (totalEntities === 0) return false;
-      let completed = 0;
+      if (useAppStore.getState().entityCountsLoading > 0) return false;
 
-      // Progressive flushing for initial load (shows counts as they arrive).
-      // Single-flush mode for auto-refresh (one store update when all counts are in).
-      const intervalId = !opts?.singleFlush && totalEntities > 0
-        ? setInterval(() => { if (isStale()) cleanup(); else flush(); }, FLUSH_MS)
-        : null;
-
-      const cleanup = () => {
-        if (intervalId !== null) clearInterval(intervalId);
-      };
-
-      const onDone = () => {
-        if (!opts?.singleFlush && !isStale()) decrementCountsLoading();
-        if (++completed >= totalEntities) {
-          cleanup();
-          flush(); // final flush for any results not yet emitted
-          if (opts?.singleFlush && !isStale()) decrementCountsLoading();
-        }
-      };
-
-      // In singleFlush mode, only increment by 1 (and decrement once at the end)
-      // to avoid N individual store writes for the loading counter.
-      incrementCountsLoading(opts?.singleFlush ? 1 : totalEntities);
-
-      for (const queueName of result.queues) {
-        safeInvoke("get_queue_count", QueueCountResultSchema, {
-          args: { connectionId: connId, queueName },
+      incrementCountsLoading();
+      void safeInvoke("get_entity_counts", EntityCountsResultSchema, {
+        args: { connectionId: connId, queueNames: result.queues, topicNames },
+      })
+        .then((counts) => {
+          if (isStale()) return;
+          batchSetCounts(counts.queues, counts.subscriptions);
+          for (const failure of counts.errors) {
+            console.warn(`[fetchCounts] ${failure.kind} ${failure.name} failed: ${failure.error}`);
+          }
         })
-          .then((r) => { if (!isStale()) queueBuf.push({ name: r.name, active: r.active, dlq: r.dlq }); })
-          .catch((err) => { console.warn(`[fetchCounts] get_queue_count(${queueName}) failed:`, err); })
-          .finally(onDone);
-      }
-
-      for (const topicName of topicNames) {
-        safeInvoke("get_topic_subscription_counts", TopicSubscriptionCountsResultSchema, {
-          args: { connectionId: connId, topicName },
+        .catch((err) => {
+          console.warn("[fetchCounts] batch refresh failed:", err);
         })
-          .then((r) => {
-            if (!isStale()) {
-              for (const s of r.subscriptions) {
-                subBuf.push({ topic: s.topic, subscription: s.subscription, active: s.active, dlq: s.dlq });
-              }
-            }
-          })
-          .catch((err) => { console.warn(`[fetchCounts] get_topic_subscription_counts(${topicName}) failed:`, err); })
-          .finally(onDone);
-      }
+        .finally(() => {
+          if (!isStale()) decrementCountsLoading();
+        });
 
       return true;
     },
@@ -139,7 +98,7 @@ export function useEntityList() {
     const connId = selectActiveConnection(state)?.id;
     if (!connId || !state.entities) return false;
 
-    return fetchCounts(state.entities, connId, { singleFlush: true });
+    return fetchCounts(state.entities, connId);
   }, [fetchCounts]);
 
   type RefreshTarget =

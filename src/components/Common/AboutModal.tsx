@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import logo from "../../assets/logo.png";
+import logo from "../../../src-tauri/icons/128x128@2x.png";
 import { version as APP_VERSION } from "../../../package.json";
 import { useEscapeKey } from "../../hooks/useEscapeKey";
 

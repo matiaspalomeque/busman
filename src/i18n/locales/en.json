@@ -62,7 +62,10 @@
   },
   "worker": {
     "unavailable": "⚠ Service Bus worker unavailable.",
-    "details": "Operations cannot run because the bundled worker sidecar is missing."
+    "details": "Operations cannot run because the bundled worker sidecar is missing or did not start.",
+    "retry": "Retry worker",
+    "retrying": "Retrying…",
+    "manageConnections": "Manage connections"
   },
   "about": {
     "title": "About Busman",
@@ -333,10 +336,15 @@
       "filterPlaceholder": "Filter…",
       "rowsPerPage": "Rows per page",
       "emptySelectEntity": "Select an entity from the sidebar, then click Browse.",
+      "emptySelectEntityHint": "Choose a queue or subscription to inspect messages and properties.",
+      "emptyNoConnection": "Connect Busman to Azure Service Bus",
+      "emptyNoConnectionHint": "Add a connection profile, test it, and select it to start browsing entities.",
       "emptyNoBrowse": "Click Browse to load and preview messages before receiving or replaying.",
       "emptyNoMessages": "No messages found. This queue appears to be empty.",
       "emptyNoMatch": "No messages match the current filters.",
       "emptyHint": "Try adjusting filters or browse more messages",
+      "addConnection": "Add your first connection",
+      "manageConnections": "Manage connections",
       "zeroMessages": "0 messages",
       "messageRange": "{{start}}–{{end}} of {{total}}",
       "filteredFrom": "(filtered from {{total}})",
@@ -461,6 +469,8 @@
       },
       "done": "Done",
       "theme": "Theme",
+      "lightTheme": "Use light theme",
+      "darkTheme": "Use dark theme",
       "language": "Language",
       "enabled": "Enabled",
       "interval": "Interval",

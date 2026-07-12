@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { useCallback } from "react";
 import { useAppStore } from "../store/appStore";
-import { ConnectionsConfigSchema, safeInvoke } from "../schemas/ipc";
+import { ConnectionSchema, ConnectionsConfigSchema, safeInvoke } from "../schemas/ipc";
 import type { Connection, ConnectionsConfig } from "../types";
 import { logHandledError } from "../utils/logging";
 
@@ -23,6 +23,10 @@ export function useConnections() {
     // Do not auto-select a persisted connection on startup.
     setActiveConnectionId(null);
   }, [setConnections, setActiveConnectionId]);
+
+  const getConnectionForEdit = useCallback(async (id: string) => {
+    return safeInvoke("get_connection_for_edit", ConnectionSchema, { id });
+  }, []);
 
   const saveConnection = useCallback(
     async (connection: Partial<Connection> & { name: string; connectionString: string }) => {
@@ -94,5 +98,13 @@ export function useConnections() {
     [setConnections, setActiveConnectionId]
   );
 
-  return { loadConnections, saveConnection, deleteConnection, setActive, exportConnections, importConnections };
+  return {
+    loadConnections,
+    getConnectionForEdit,
+    saveConnection,
+    deleteConnection,
+    setActive,
+    exportConnections,
+    importConnections,
+  };
 }

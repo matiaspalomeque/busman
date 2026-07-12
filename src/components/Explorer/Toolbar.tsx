@@ -485,6 +485,7 @@ export function Toolbar() {
     setLastBrowseError,
   } = useAppStore();
   const { runOperation } = useScript();
+  const atomicOperationCount = useAppStore((state) => Object.keys(state.pendingMessageOperations).length);
 
   const [peekMode, setPeekMode] = useState<QueueMode>("dlq");
   const [peekCount, setPeekCount] = useState(100);
@@ -511,7 +512,7 @@ export function Toolbar() {
   const canRepublish = canRepublishSelection(explorerSelection);
   const canManageRules = canManageRulesSelection(explorerSelection);
 
-  const busy = browsing || loadingMore || isRunning;
+  const busy = browsing || loadingMore || isRunning || atomicOperationCount > 0;
 
   // ── Browse / Peek ──────────────────────────────────────────────────────────
   const handleBrowse = async () => {
@@ -843,7 +844,7 @@ export function Toolbar() {
           label={t("explorer.toolbar.send")}
           icon={<Icon name="send" size={14} />}
           onClick={() => setIsSendModalOpen(!isSendModalOpen)}
-          disabled={!hasSelection}
+          disabled={!hasSelection || busy}
           title={hasSelection ? t("explorer.toolbar.sendTitle") : t("explorer.toolbar.sendTitleDisabled")}
         />
 

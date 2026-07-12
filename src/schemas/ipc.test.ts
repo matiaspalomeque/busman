@@ -5,6 +5,7 @@ import {
   QueueCountResultSchema,
   SubscriptionCountResultSchema,
   TopicSubscriptionCountsResultSchema,
+  EntityCountsResultSchema,
   ConnectionsConfigSchema,
   ListSubscriptionRulesResultSchema,
   ManageSubscriptionRuleSchema,
@@ -82,6 +83,26 @@ describe("IPC schemas", () => {
           subscriptions: [{ topic: "t1", active: 5, dlq: 0 }],
         })
       ).toThrow();
+    });
+  });
+
+  describe("EntityCountsResultSchema", () => {
+    it("accepts partial count results with per-entity errors", () => {
+      const result = EntityCountsResultSchema.parse({
+        queues: [{ name: "orders", active: 10, dlq: 2 }],
+        subscriptions: [{ topic: "billing", subscription: "worker", active: 3, dlq: 1 }],
+        errors: [{ kind: "topic", name: "archived", error: "timed out" }],
+      });
+      expect(result.queues).toHaveLength(1);
+      expect(result.errors[0].name).toBe("archived");
+    });
+
+    it("rejects unknown count error kinds", () => {
+      expect(() => EntityCountsResultSchema.parse({
+        queues: [],
+        subscriptions: [],
+        errors: [{ kind: "subscription", name: "bad", error: "failed" }],
+      })).toThrow();
     });
   });
 

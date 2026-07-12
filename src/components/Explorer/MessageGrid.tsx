@@ -396,6 +396,34 @@ function EmptyState({ message, icon = "search" }: { message: string; icon?: "sea
   );
 }
 
+function FirstRunState({ hasConnections, onManageConnections }: { hasConnections: boolean; onManageConnections: () => void }) {
+  const { t } = useTranslation();
+  return (
+    <div className="flex flex-1 items-center justify-center px-6 py-10 text-center">
+      <div className="flex max-w-sm flex-col items-center gap-4">
+        <div className="flex h-16 w-16 items-center justify-center rounded-full bg-azure-primary/10 text-azure-primary">
+          <Icon name="server" size={30} />
+        </div>
+        <div className="space-y-1">
+          <h2 className="text-base font-semibold text-zinc-800 dark:text-zinc-100">
+            {hasConnections ? t("explorer.grid.emptySelectEntity") : t("explorer.grid.emptyNoConnection")}
+          </h2>
+          <p className="text-sm text-zinc-600 dark:text-zinc-300">
+            {hasConnections ? t("explorer.grid.emptySelectEntityHint") : t("explorer.grid.emptyNoConnectionHint")}
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={onManageConnections}
+          className="min-h-11 rounded-lg bg-azure-primary px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-azure-600 focus:outline-none focus:ring-2 focus:ring-azure-primary focus:ring-offset-2 dark:focus:ring-offset-zinc-900"
+        >
+          {hasConnections ? t("explorer.grid.manageConnections") : t("explorer.grid.addConnection")}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ─── MessageGrid ──────────────────────────────────────────────────────────────
 
 export function MessageGrid() {
@@ -418,6 +446,8 @@ export function MessageGrid() {
     pendingMessageOperations,
     lastBrowseError,
     setLastBrowseError,
+    connections,
+    setIsSettingsModalOpen,
   } = useAppStore();
 
   // Track which column filter inputs are visible
@@ -540,7 +570,12 @@ export function MessageGrid() {
         </div>
       )}
 
-      {showEntityDetails ? (
+      {!hasSelection ? (
+        <FirstRunState
+          hasConnections={connections.length > 0}
+          onManageConnections={() => setIsSettingsModalOpen(true, "connections")}
+        />
+      ) : showEntityDetails ? (
         <EntityDetailsPanel />
       ) : browsing ? (
         <OperationProgressPanel />
@@ -573,7 +608,7 @@ export function MessageGrid() {
 
       {/* Table */}
       <div className="flex-1 overflow-auto">
-        <table className="w-full min-w-[760px] text-xs border-collapse table-fixed">
+        <table className="w-full min-w-[640px] text-xs border-collapse table-fixed">
           <thead className="sticky top-0 z-10 bg-zinc-50 dark:bg-zinc-800">
             <tr>
               <ColHeader label={t("explorer.grid.colIndex")} />

@@ -227,7 +227,7 @@ export function Sidebar() {
         )}
 
         {!entitiesLoading && !entities && !entitiesError && (
-          <div className="px-3 py-3 text-xs text-zinc-400">
+          <div className="px-3 py-3 text-xs text-zinc-600 dark:text-zinc-300">
             {t("explorer.sidebar.selectConnection")}
           </div>
         )}
@@ -343,7 +343,7 @@ export function Sidebar() {
       {/* Footer */}
       <div className="px-3 py-2.5 border-t border-zinc-200 dark:border-zinc-700">
         <div className="flex items-center justify-between">
-          <span aria-live="polite" className="text-[11px] text-zinc-400">
+          <span aria-live="polite" className="text-[11px] text-zinc-600 dark:text-zinc-300">
             {entitiesLoading ? t("explorer.sidebar.refreshing") : t("explorer.sidebar.entityTree")}
           </span>
           <div className="flex items-center gap-1">

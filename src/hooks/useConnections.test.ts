@@ -54,6 +54,27 @@ describe("useConnections", () => {
     });
   });
 
+  describe("getConnectionForEdit", () => {
+    it("fetches the full connection only for the explicit edit flow", async () => {
+      const editable = {
+        ...CONN_A,
+        connectionString:
+          "Endpoint=sb://alpha.servicebus.windows.net/;SharedAccessKeyName=Root;SharedAccessKey=secret",
+      };
+      mockInvoke.mockResolvedValueOnce(editable);
+
+      const { result } = renderHook(() => useConnections());
+      let connection!: typeof editable;
+      await act(async () => {
+        connection = await result.current.getConnectionForEdit("a");
+      });
+
+      expect(mockInvoke).toHaveBeenCalledWith("get_connection_for_edit", { id: "a" });
+      expect(connection.connectionString).toContain("SharedAccessKey=secret");
+      expect(useAppStore.getState().connections).toEqual([]);
+    });
+  });
+
   describe("saveConnection", () => {
     it("invokes save_connection and syncs the connections list", async () => {
       mockInvoke.mockResolvedValueOnce(makeConfig([CONN_A, CONN_B]));

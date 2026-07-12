@@ -252,10 +252,12 @@ function buildConnectionGroups(items: Connection[]) {
 export function ConnectionsPanel() {
   const { t } = useTranslation();
   const { connections, activeConnectionId } = useAppStore();
-  const { saveConnection, deleteConnection, setActive } = useConnections();
+  const { saveConnection, deleteConnection, setActive, getConnectionForEdit } = useConnections();
 
   const [formMode, setFormMode] = useState<FormMode | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
+  const [loadingEdit, setLoadingEdit] = useState<string | null>(null);
+  const [editError, setEditError] = useState("");
   const [showExport, setShowExport] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [search, setSearch] = useState("");
@@ -273,6 +275,22 @@ export function ConnectionsPanel() {
       await deleteConnection(id);
     } finally {
       setDeleting(null);
+    }
+  };
+
+  const handleEdit = async (connection: Connection) => {
+    setLoadingEdit(connection.id);
+    setEditError("");
+    try {
+      const fullConnection = await getConnectionForEdit(connection.id);
+      setFormMode({ kind: "edit", connection: fullConnection });
+    } catch (error) {
+      logHandledError("Failed to load connection for editing", error, {
+        connectionId: connection.id,
+      });
+      setEditError(String(error));
+    } finally {
+      setLoadingEdit(null);
     }
   };
 
@@ -331,11 +349,16 @@ export function ConnectionsPanel() {
               {t("explorer.connectionsModal.use")}
             </button>
             <button
-              onClick={() => setFormMode({ kind: "edit", connection: c })}
-              className="p-1 rounded text-zinc-400 hover:text-azure-primary hover:bg-zinc-100 dark:hover:bg-zinc-800"
+              onClick={() => void handleEdit(c)}
+              disabled={loadingEdit === c.id}
+              className="p-1 rounded text-zinc-400 hover:text-azure-primary hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-40"
               title={t("explorer.connectionsModal.editTitle")}
             >
-              <Icon name="settings" size={13} />
+              {loadingEdit === c.id ? (
+                <span className="block h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" />
+              ) : (
+                <Icon name="settings" size={13} />
+              )}
             </button>
             <button
               onClick={() => void handleDelete(c.id)}
@@ -386,7 +409,8 @@ export function ConnectionsPanel() {
       )}
 
       {/* Connection list */}
-      <div className="flex-1 overflow-y-auto px-5 py-4 space-y-2">
+      <div className="flex-1 overflow-y-auto overscroll-contain px-5 py-4 space-y-2">
+        {editError && <p className="text-xs text-red-500 dark:text-red-400">{editError}</p>}
         {connections.length === 0 && !formMode && (
           <p className="text-xs text-zinc-400 dark:text-zinc-500 py-2">
             {t("explorer.connectionsModal.noConnections")}

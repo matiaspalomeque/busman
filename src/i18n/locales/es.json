@@ -62,7 +62,10 @@
   },
   "worker": {
     "unavailable": "⚠ Worker de Service Bus no disponible.",
-    "details": "Las operaciones no pueden ejecutarse porque el worker sidecar integrado no se encuentra."
+    "details": "Las operaciones no pueden ejecutarse porque el worker integrado no se encuentra o no pudo iniciar.",
+    "retry": "Reintentar worker",
+    "retrying": "Reintentando…",
+    "manageConnections": "Administrar conexiones"
   },
   "about": {
     "title": "Acerca de Busman",
@@ -333,10 +336,15 @@
       "filterPlaceholder": "Filtrar…",
       "rowsPerPage": "Filas por página",
       "emptySelectEntity": "Seleccioná una entidad del panel lateral y hacé clic en Explorar.",
+      "emptySelectEntityHint": "Elegí una cola o suscripción para inspeccionar mensajes y propiedades.",
+      "emptyNoConnection": "Conectá Busman con Azure Service Bus",
+      "emptyNoConnectionHint": "Agregá una conexión, probala y seleccionala para empezar a explorar entidades.",
       "emptyNoBrowse": "Hacé clic en Explorar para cargar y previsualizar mensajes antes de recibir o reproducir.",
       "emptyNoMessages": "No se encontraron mensajes. La cola parece estar vacía.",
       "emptyNoMatch": "Ningún mensaje coincide con los filtros actuales.",
       "emptyHint": "Intentá ajustar los filtros o explorar más mensajes",
+      "addConnection": "Agregá tu primera conexión",
+      "manageConnections": "Administrar conexiones",
       "zeroMessages": "0 mensajes",
       "messageRange": "{{start}}–{{end}} de {{total}}",
       "filteredFrom": "(filtrado de {{total}})",
@@ -461,6 +469,8 @@
       },
       "done": "Listo",
       "theme": "Tema",
+      "lightTheme": "Usar tema claro",
+      "darkTheme": "Usar tema oscuro",
       "language": "Idioma",
       "enabled": "Habilitado",
       "interval": "Intervalo",

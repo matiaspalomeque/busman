@@ -67,6 +67,16 @@ export const TopicSubscriptionCountsResultSchema = z.object({
   subscriptions: z.array(SubscriptionCountResultSchema),
 });
 
+export const EntityCountsResultSchema = z.object({
+  queues: z.array(QueueCountResultSchema),
+  subscriptions: z.array(SubscriptionCountResultSchema),
+  errors: z.array(z.object({
+    kind: z.enum(["queue", "topic"]),
+    name: z.string(),
+    error: z.string(),
+  })),
+});
+
 const JsonPrimitiveSchema = z.union([z.string(), z.number(), z.boolean()]);
 
 export const JsonPrimitiveMapSchema = z.record(z.string(), JsonPrimitiveSchema);
@@ -223,17 +233,17 @@ export const SubscriptionPropertiesSchema = z.object({
   transferDeadLetterMessageCount: z.number(),
 });
 
+export const ConnectionSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  connectionString: z.string(),
+  env: z.record(z.string(), z.string()).default({}),
+  environment: z.string().optional(),
+  environmentColor: z.string().optional(),
+});
+
 export const ConnectionsConfigSchema = z.object({
-  connections: z.array(
-    z.object({
-      id: z.string(),
-      name: z.string(),
-      connectionString: z.string(),
-      env: z.record(z.string(), z.string()).default({}),
-      environment: z.string().optional(),
-      environmentColor: z.string().optional(),
-    })
-  ),
+  connections: z.array(ConnectionSchema),
   activeConnectionId: z.string().nullable(),
 }).refine(
   (config) =>

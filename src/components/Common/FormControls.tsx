@@ -2,6 +2,7 @@ export interface ButtonGroupOption<T extends string | number> {
   value: T;
   label: string | React.ReactNode;
   title?: string;
+  ariaLabel?: string;
 }
 
 export function ToggleSwitch({
@@ -17,20 +18,19 @@ export function ToggleSwitch({
     <button
       type="button"
       onClick={onToggle}
-      className={[
-        "relative h-[18px] w-8 rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-azure-primary/40 focus:ring-offset-1 dark:focus:ring-offset-zinc-900",
-        enabled ? "bg-azure-primary" : "bg-zinc-300 dark:bg-zinc-600",
-      ].join(" ")}
+      className="flex h-11 w-11 items-center justify-center rounded-md focus:outline-none focus:ring-2 focus:ring-azure-primary/50 focus:ring-offset-1 dark:focus:ring-offset-zinc-900"
       role="switch"
       aria-checked={enabled}
       aria-label={ariaLabel}
     >
-      <span
-        className={[
-          "absolute top-0.5 left-0.5 w-3.5 h-3.5 rounded-full bg-white shadow transition-transform",
-          enabled ? "translate-x-3.5" : "",
-        ].join(" ")}
-      />
+      <span className={["relative h-5 w-9 rounded-full transition-colors", enabled ? "bg-azure-primary" : "bg-zinc-300 dark:bg-zinc-600"].join(" ")}>
+        <span
+          className={[
+            "absolute left-0.5 top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform",
+            enabled ? "translate-x-4" : "",
+          ].join(" ")}
+        />
+      </span>
     </button>
   );
 }
@@ -50,6 +50,8 @@ export function ButtonGroup<T extends string | number>({
 }) {
   return (
     <div
+      role="group"
+      aria-disabled={disabled || undefined}
       className={[
         "flex items-center border border-zinc-300 dark:border-zinc-600 rounded overflow-hidden",
         disabled ? "opacity-40 pointer-events-none" : "",
@@ -59,6 +61,7 @@ export function ButtonGroup<T extends string | number>({
       {options.map((opt) => (
         <button
           type="button"
+          disabled={disabled}
           key={String(opt.value)}
           onClick={() => {
             if (opt.value !== value) onChange(opt.value);
@@ -70,6 +73,7 @@ export function ButtonGroup<T extends string | number>({
               : "text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-700",
           ].join(" ")}
           aria-pressed={value === opt.value}
+          aria-label={opt.ariaLabel}
           title={opt.title}
         >
           {opt.label}

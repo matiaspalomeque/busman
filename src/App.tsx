@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { ask, message } from "@tauri-apps/plugin-dialog";
@@ -7,12 +7,40 @@ import { Explorer } from "./components/Explorer";
 import { WorkerNotFoundBanner } from "./components/Common/WorkerNotFoundBanner";
 import { useConnections } from "./hooks/useConnections";
 import { useAppStore } from "./store/appStore";
-import { logHandledError } from "./utils/logging";
+import { isTauriRuntime, logHandledError } from "./utils/logging";
 import i18n from "./i18n/index";
 
 export function App() {
   const { loadConnections } = useConnections();
-  const { workerAvailable, setWorkerAvailable, isDark, setIsDark, language, setLanguage, setIsAboutModalOpen } = useAppStore();
+  const {
+    workerAvailable,
+    setWorkerAvailable,
+    isDark,
+    setIsDark,
+    language,
+    setLanguage,
+    setIsAboutModalOpen,
+    setIsSettingsModalOpen,
+  } = useAppStore();
+  const [workerRetrying, setWorkerRetrying] = useState(false);
+
+  const checkWorkerAvailability = useCallback(async () => {
+    setWorkerRetrying(true);
+    try {
+      const available = await invoke<boolean>("check_worker");
+      if (!available) {
+        setWorkerAvailable(false);
+        return;
+      }
+      await invoke("ensure_scripts_ready");
+      setWorkerAvailable(true);
+    } catch (error) {
+      logHandledError("Failed to initialize Service Bus worker", error);
+      setWorkerAvailable(false);
+    } finally {
+      setWorkerRetrying(false);
+    }
+  }, [setWorkerAvailable]);
 
   useEffect(() => {
     const onError = (event: ErrorEvent) => {
@@ -89,31 +117,23 @@ export function App() {
     const storedLang = localStorage.getItem("language") as "en" | "es" | null;
     setLanguage(storedLang ?? "en");
 
-    // Check worker availability and ensure it responds.
-    invoke<boolean>("check_worker")
-      .then((available) => {
-        setWorkerAvailable(available);
-        if (available) {
-          invoke("ensure_scripts_ready").catch((error) => {
-            logHandledError("Failed to ensure worker scripts are ready", error);
-            console.error(error);
-          });
-        }
-      })
-      .catch((error) => {
-        logHandledError("Failed to check worker availability", error);
-        setWorkerAvailable(false);
-      });
+    if (isTauriRuntime()) {
+      void checkWorkerAvailability();
+    } else {
+      setWorkerAvailable(false);
+    }
 
     // Check for a newer app release.
     void checkForUpdates();
 
     // Load persisted connections.
-    loadConnections().catch((err) => {
-      logHandledError("Failed to load connections", err);
-      console.error("Failed to load connections:", err);
-    });
-  }, [setIsDark, setWorkerAvailable, loadConnections, setLanguage]);
+    if (isTauriRuntime()) {
+      loadConnections().catch((err) => {
+        logHandledError("Failed to load connections", err);
+        console.error("Failed to load connections:", err);
+      });
+    }
+  }, [setIsDark, loadConnections, setLanguage, checkWorkerAvailability]);
 
   // Sync the document class and localStorage whenever isDark changes.
   useEffect(() => {
@@ -134,6 +154,7 @@ export function App() {
 
   // Listen for the "About Busman" macOS menu item.
   useEffect(() => {
+    if (!isTauriRuntime()) return;
     const promise = listen("menu-about", () => {
       setIsAboutModalOpen(true);
     });
@@ -143,8 +164,14 @@ export function App() {
   }, [setIsAboutModalOpen]);
 
   return (
-    <div className="h-screen overflow-hidden bg-azure-light dark:bg-azure-dark text-azure-dark dark:text-azure-light">
-      {workerAvailable === false && <WorkerNotFoundBanner />}
+    <div className="flex h-screen flex-col overflow-hidden bg-azure-light text-azure-dark dark:bg-azure-dark dark:text-azure-light">
+      {workerAvailable === false && (
+        <WorkerNotFoundBanner
+          retrying={workerRetrying}
+          onRetry={() => void checkWorkerAvailability()}
+          onManageConnections={() => setIsSettingsModalOpen(true, "connections")}
+        />
+      )}
       <Explorer />
     </div>
   );

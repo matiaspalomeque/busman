@@ -6,6 +6,9 @@ on:
       - "v*.*.*"
 
 jobs:
+  verify:
+    uses: ./.github/workflows/verify.yml
+
   changelog:
     runs-on: ubuntu-latest
     permissions:
@@ -39,7 +42,7 @@ jobs:
           echo "EOF_CHANGELOG" >> "$GITHUB_OUTPUT"
 
   publish-tauri:
-    needs: changelog
+    needs: [verify, changelog]
     strategy:
       fail-fast: false
       matrix:
@@ -60,7 +63,7 @@ jobs:
 
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version: 1.3.14
 
       - uses: actions/setup-go@v5
         with:
@@ -127,7 +130,7 @@ jobs:
       - name: Install bun
         uses: oven-sh/setup-bun@v2
         with:
-          bun-version: latest
+          bun-version: 1.3.14
 
       - name: Download latest.json from release
         env:

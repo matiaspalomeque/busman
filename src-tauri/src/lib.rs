@@ -88,6 +88,7 @@ pub fn run() {
             get_queue_count,
             get_subscription_count,
             get_topic_subscription_counts,
+            get_entity_counts,
             list_subscription_rules,
             get_queue_properties,
             get_topic_properties,
@@ -106,6 +107,7 @@ pub fn run() {
             delete_subscription_rule,
             // Connection commands
             load_connections,
+            get_connection_for_edit,
             save_connection,
             delete_connection,
             set_active_connection,

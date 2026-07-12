@@ -33,7 +33,11 @@ export function useScript() {
       options?: { scope?: "atomic" | "bulk"; runId?: string }
     ): Promise<{ exitCode: number; errorMessage?: string }> => {
       const scope = options?.scope ?? "bulk";
-      if (useAppStore.getState().isRunning) throw new Error("An operation is already running");
+      const operationState = useAppStore.getState();
+      if (operationState.isRunning) throw new Error("An operation is already running");
+      if (scope === "bulk" && Object.keys(operationState.pendingMessageOperations).length > 0) {
+        throw new Error("Wait for message operations to finish before starting a bulk operation");
+      }
 
       const runId =
         options?.runId ??
@@ -122,7 +126,8 @@ export function useScript() {
     [setRunning, appendOutputLine, setProgress, clearOutput]
   );
 
-  // Kill the in-flight worker. The Rust layer emits script-done with exit code 130.
+  // Ask the worker to cancel only the active run. The operation command emits
+  // script-done with exit code 130 after the worker acknowledges cancellation.
   const stop = useCallback(async () => {
     // The store's runId tracks the current bulk operation so any hook instance
     // (e.g. Toolbar) can stop

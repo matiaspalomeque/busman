@@ -1,34 +1,25 @@
 use super::worker::{
-    call_worker, downloads_dir, emit_done, kill_process_by_pid, redact_secrets,
-    resolve_sidecar_path, scripts_dir, stop_worker, worker_sidecar_name, worker_state, WORKER_PID,
+    call_worker, downloads_dir, emit_done, redact_secrets, resolve_sidecar_path, scripts_dir,
+    worker_sidecar_name, WORKER_CANCELLED_PREFIX,
 };
 use crate::models::ScriptOutputLine;
 use crate::store;
 use serde::Deserialize;
 use serde_json::{json, Value};
-use std::{
-    sync::atomic::Ordering,
-    time::{Duration, Instant},
-};
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
 
 // ─── Worker lifecycle commands ──────────────────────────────────────────────
 
 #[tauri::command]
-pub async fn stop_current_operation(app: AppHandle, run_id: Option<String>) -> Result<(), String> {
-    let pid = WORKER_PID.load(Ordering::Acquire);
-    let _ = kill_process_by_pid(pid);
-
-    if let Some(run_id) = run_id {
-        emit_done(&app, &run_id, 130, 0);
-    }
-
-    // Use try_lock to avoid blocking if another command holds the mutex.
-    // The kill_process_by_pid above already terminated the worker; this just cleans up state.
-    if let Ok(mut state) = worker_state().try_lock() {
-        stop_worker(&mut state).await;
-    }
-
+pub async fn stop_current_operation(app: AppHandle, run_id: String) -> Result<(), String> {
+    call_worker(
+        &app,
+        "cancelRun",
+        json!({ "runId": &run_id }),
+        Some(Duration::from_secs(12)),
+    )
+    .await?;
     Ok(())
 }
 
@@ -91,6 +82,10 @@ async fn run_worker_operation(
             Ok(())
         }
         Err(err) => {
+            if err.starts_with(WORKER_CANCELLED_PREFIX) {
+                emit_done(app, run_id, 130, started.elapsed().as_millis() as u64);
+                return Ok(());
+            }
             let _ = app.emit(
                 &format!("script-output:{run_id}"),
                 ScriptOutputLine {
@@ -296,8 +291,13 @@ pub async fn peek_messages(app: AppHandle, args: PeekArgs) -> Result<PeekResult,
             Ok(result)
         }
         Err(err) => {
-            emit_done(&app, &run_id, -1, started.elapsed().as_millis() as u64);
-            Err(redact_secrets(&err))
+            if err.starts_with(WORKER_CANCELLED_PREFIX) {
+                emit_done(&app, &run_id, 130, started.elapsed().as_millis() as u64);
+                Err("Operation cancelled.".to_string())
+            } else {
+                emit_done(&app, &run_id, -1, started.elapsed().as_millis() as u64);
+                Err(redact_secrets(&err))
+            }
         }
     }
 }

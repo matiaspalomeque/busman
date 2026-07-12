@@ -8,11 +8,13 @@ import type { IconName } from "../Common/Icon";
 import { ButtonGroup, ToggleSwitch } from "../Common/FormControls";
 import type { ButtonGroupOption } from "../Common/FormControls";
 import { ConnectionsPanel } from "./ConnectionsPanel";
+import { useEscapeKey } from "../../hooks/useEscapeKey";
+import { useDialogFocus } from "../../hooks/useDialogFocus";
 
 // ─── Section constants ────────────────────────────────────────────────────────
 
 const SECTION_HEADING =
-  "text-[10px] font-semibold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider mb-1.5";
+  "text-[10px] font-semibold text-zinc-600 dark:text-zinc-300 uppercase tracking-wider mb-1.5";
 const SECTION_CARD =
   "rounded border border-zinc-200 dark:border-zinc-700 p-2 space-y-2";
 const ROW = "flex items-center justify-between";
@@ -28,11 +30,6 @@ const TABS: { id: SettingsTab; labelKey: string; icon: IconName }[] = [
 ];
 
 // ─── Button group options ─────────────────────────────────────────────────────
-
-const THEME_OPTIONS: ButtonGroupOption<"light" | "dark">[] = [
-  { value: "light", label: <Icon name="sun" size={12} /> },
-  { value: "dark", label: <Icon name="moon" size={12} /> },
-];
 
 const LANG_OPTIONS: ButtonGroupOption<"en" | "es">[] = [
   { value: "en", label: "English" },
@@ -50,6 +47,10 @@ const INTERVAL_OPTIONS: ButtonGroupOption<15 | 30 | 60>[] = [
 function AppearancePanel() {
   const { t } = useTranslation();
   const { isDark, toggleDark, language, setLanguage } = useAppStore();
+  const themeOptions: ButtonGroupOption<"light" | "dark">[] = [
+    { value: "light", label: <Icon name="sun" size={12} />, ariaLabel: t("explorer.settingsModal.lightTheme") },
+    { value: "dark", label: <Icon name="moon" size={12} />, ariaLabel: t("explorer.settingsModal.darkTheme") },
+  ];
 
   return (
     <div className="px-5 py-4 space-y-3">
@@ -59,7 +60,7 @@ function AppearancePanel() {
           <div className={ROW}>
             <span className={LABEL}>{t("explorer.settingsModal.theme")}</span>
             <ButtonGroup
-              options={THEME_OPTIONS}
+              options={themeOptions}
               value={isDark ? "dark" : "light"}
               onChange={(v) => {
                 if ((v === "dark") !== isDark) toggleDark();
@@ -168,8 +169,25 @@ export function SettingsModal() {
   const { t } = useTranslation();
   const { settingsTab, setSettingsTab, setIsSettingsModalOpen, setIsAboutModalOpen } = useAppStore();
   const overlayRef = useRef<HTMLDivElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
 
   const close = () => setIsSettingsModalOpen(false);
+  useEscapeKey(close);
+  useDialogFocus(dialogRef);
+
+  const handleTabKeyDown = (event: React.KeyboardEvent, index: number) => {
+    if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
+    event.preventDefault();
+    const nextIndex = event.key === "Home"
+      ? 0
+      : event.key === "End"
+        ? TABS.length - 1
+        : event.key === "ArrowDown"
+          ? (index + 1) % TABS.length
+          : (index - 1 + TABS.length) % TABS.length;
+    setSettingsTab(TABS[nextIndex].id);
+    document.getElementById(`settings-tab-${TABS[nextIndex].id}`)?.focus();
+  };
 
   return (
     <div
@@ -178,19 +196,25 @@ export function SettingsModal() {
       onClick={(e) => {
         if (e.target === overlayRef.current) close();
       }}
-      onKeyDown={(e) => {
-        if (e.key === "Escape") close();
-      }}
     >
-      <div className="bg-white dark:bg-zinc-900 rounded-lg shadow-2xl border border-zinc-200 dark:border-zinc-700 w-full max-w-3xl h-[85vh] flex flex-col">
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="settings-modal-title"
+        tabIndex={-1}
+        className="bg-white dark:bg-zinc-900 rounded-lg shadow-2xl border border-zinc-200 dark:border-zinc-700 w-full max-w-3xl h-[85vh] flex flex-col overflow-hidden"
+      >
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-3.5 border-b border-zinc-200 dark:border-zinc-700 shrink-0">
-          <h2 className="text-sm font-semibold text-azure-dark dark:text-azure-light flex items-center gap-2">
+          <h2 id="settings-modal-title" className="text-sm font-semibold text-azure-dark dark:text-azure-light flex items-center gap-2">
             <Icon name="settings" size={14} className="text-azure-primary" />
             {t("explorer.settingsModal.title")}
           </h2>
           <button
+            type="button"
             onClick={close}
+            aria-label={t("connections.close")}
             className="p-1 rounded text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800"
           >
             <Icon name="close" size={15} />
@@ -205,12 +229,17 @@ export function SettingsModal() {
             aria-label={t("explorer.settingsModal.title")}
             className="w-44 border-r border-zinc-200 dark:border-zinc-700 py-2 shrink-0"
           >
-            {TABS.map((tab) => (
+            {TABS.map((tab, index) => (
               <button
                 key={tab.id}
+                id={`settings-tab-${tab.id}`}
                 role="tab"
                 aria-selected={settingsTab === tab.id}
+                aria-controls="settings-tab-panel"
+                tabIndex={settingsTab === tab.id ? 0 : -1}
+                data-dialog-initial-focus={settingsTab === tab.id ? "true" : undefined}
                 onClick={() => setSettingsTab(tab.id)}
+                onKeyDown={(event) => handleTabKeyDown(event, index)}
                 className={[
                   "w-full flex items-center gap-2 px-4 py-2 text-xs text-left transition-colors",
                   settingsTab === tab.id
@@ -226,7 +255,9 @@ export function SettingsModal() {
 
           {/* Tab panel */}
           <div
+            id="settings-tab-panel"
             role="tabpanel"
+            aria-labelledby={`settings-tab-${settingsTab}`}
             className="flex-1 flex flex-col min-h-0"
           >
             {settingsTab === "connections" && <ConnectionsPanel />}

@@ -223,6 +223,20 @@ describe("useScript", () => {
     });
   });
 
+  it("rejects bulk operations while atomic message work is pending", async () => {
+    useAppStore.getState().startMessageOperation("deadLetter\0message-1", {
+      runId: "atomic-1",
+      operation: "ReplayMessage",
+      startedAt: new Date().toISOString(),
+    });
+    const { result } = renderHook(() => useScript());
+
+    await expect(result.current.runOperation("move_messages", {})).rejects.toThrow(
+      "Wait for message operations to finish",
+    );
+    expect(mockInvoke).not.toHaveBeenCalled();
+  });
+
   it("stop() invokes stop_current_operation with the active runId", async () => {
     mockInvoke.mockResolvedValue(undefined); // operation invoke + stop invoke
 

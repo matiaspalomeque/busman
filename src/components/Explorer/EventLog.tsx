@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useAppStore } from "../../store/appStore";
 import type { EventLogEntry } from "../../types";
@@ -49,9 +49,17 @@ export function EventLog() {
   const { t } = useTranslation();
   const { eventLog, isRunning } = useAppStore();
 
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(() => eventLog.length === 0);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState<(typeof PAGE_SIZES)[number]>(25);
+  const previousEntryCount = useRef(eventLog.length);
+
+  useEffect(() => {
+    if (previousEntryCount.current === 0 && eventLog.length > 0) {
+      setCollapsed(false);
+    }
+    previousEntryCount.current = eventLog.length;
+  }, [eventLog.length]);
 
   const totalPages = Math.max(1, Math.ceil(eventLog.length / pageSize));
   const safePage = Math.min(page, totalPages);
@@ -109,7 +117,7 @@ export function EventLog() {
             <div className="flex-1" />
             {/* Page size selector */}
             <div className="flex items-center gap-1.5">
-              <span className="text-[10px] text-zinc-400">{t("explorer.eventLog.rows")}</span>
+              <span className="text-[10px] text-zinc-600 dark:text-zinc-300">{t("explorer.eventLog.rows")}</span>
               <select
                 value={pageSize}
                 onChange={(e) => {
@@ -128,7 +136,7 @@ export function EventLog() {
             </div>
 
             {/* Pagination */}
-            <div className="flex items-center gap-1 text-[10px] text-zinc-400">
+            <div className="flex items-center gap-1 text-[10px] text-zinc-600 dark:text-zinc-300">
               <button
                 type="button"
                 onClick={() => setPage((p) => Math.max(1, p - 1))}
@@ -161,7 +169,7 @@ export function EventLog() {
       {!collapsed && (
         <div className="flex-1 overflow-auto">
           {eventLog.length === 0 ? (
-            <div className="flex items-center justify-center h-full px-3 text-center text-xs text-zinc-400 dark:text-zinc-500">
+            <div className="flex items-center justify-center h-full px-3 text-center text-xs text-zinc-600 dark:text-zinc-300">
               {t("explorer.eventLog.noOperations")}
             </div>
           ) : (

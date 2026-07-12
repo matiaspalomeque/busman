@@ -2,7 +2,7 @@ use crate::error::BusmanError;
 use crate::models::ConnectionsConfig;
 use std::collections::HashMap;
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tauri::Manager;
 
 /// Returns path to: {app_data_dir}/connections.json
@@ -15,21 +15,88 @@ pub fn config_path(app: &tauri::AppHandle) -> Result<PathBuf, String> {
 
 pub fn load(app: &tauri::AppHandle) -> Result<ConnectionsConfig, String> {
     let path = config_path(app)?;
+    load_from_path(&path)
+}
+
+fn load_from_path(path: &Path) -> Result<ConnectionsConfig, String> {
     if !path.exists() {
+        let backup = backup_config_path(path);
+        if backup.exists() {
+            let config = read_config_file(&backup)?;
+            restore_primary_from_backup(path, &backup)?;
+            log::warn!(
+                "Recovered missing connection config from backup: {}",
+                path.display()
+            );
+            return Ok(config);
+        }
         return Ok(ConnectionsConfig::default());
     }
-    match read_config_file(&path) {
+    match read_config_file(path) {
         Ok(config) => Ok(config),
         Err(primary_err) => {
-            let backup = backup_config_path(&path);
+            let backup = backup_config_path(path);
             if backup.exists() {
                 if let Ok(config) = read_config_file(&backup) {
+                    restore_primary_from_backup(path, &backup)?;
+                    log::warn!(
+                        "Recovered invalid connection config from backup: {}",
+                        path.display()
+                    );
                     return Ok(config);
                 }
             }
             Err(primary_err)
         }
     }
+}
+
+fn restore_primary_from_backup(path: &Path, backup: &Path) -> Result<(), String> {
+    let corrupt_path = path.with_extension(format!(
+        "{}.corrupt-{}",
+        path.extension()
+            .and_then(|ext| ext.to_str())
+            .unwrap_or("json"),
+        chrono::Utc::now().format("%Y%m%d%H%M%S")
+    ));
+    let _ = std::fs::copy(path, &corrupt_path);
+
+    let tmp_path = temp_config_path(path);
+    std::fs::copy(backup, &tmp_path)
+        .map_err(|e| format!("Failed to stage backup config for recovery: {e}"))?;
+    let file = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(&tmp_path)
+        .map_err(|e| format!("Failed to open recovered config for sync: {e}"))?;
+    file.sync_all()
+        .map_err(|e| format!("Failed to sync recovered config: {e}"))?;
+
+    #[cfg(target_os = "windows")]
+    {
+        if path.exists() {
+            std::fs::remove_file(path)
+                .map_err(|e| format!("Failed to remove invalid config during recovery: {e}"))?;
+        }
+        std::fs::rename(&tmp_path, path)
+            .map_err(|e| format!("Failed to restore config backup: {e}"))?;
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        std::fs::rename(&tmp_path, path)
+            .map_err(|e| format!("Failed to restore config backup: {e}"))?;
+    }
+
+    #[cfg(unix)]
+    {
+        use std::fs::Permissions;
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(path, Permissions::from_mode(0o600))
+            .map_err(|e| format!("Failed to secure recovered config: {e}"))?;
+    }
+    sync_parent_dir(path);
+    Ok(())
 }
 
 pub fn save(app: &tauri::AppHandle, config: &ConnectionsConfig) -> Result<(), String> {
@@ -79,12 +146,12 @@ pub fn save(app: &tauri::AppHandle, config: &ConnectionsConfig) -> Result<(), St
     Ok(())
 }
 
-fn read_config_file(path: &PathBuf) -> Result<ConnectionsConfig, String> {
+fn read_config_file(path: &Path) -> Result<ConnectionsConfig, String> {
     let raw = std::fs::read_to_string(path).map_err(|e| format!("Failed to read config: {e}"))?;
     serde_json::from_str(&raw).map_err(|e| format!("Failed to parse config: {e}"))
 }
 
-fn temp_config_path(path: &PathBuf) -> PathBuf {
+fn temp_config_path(path: &Path) -> PathBuf {
     path.with_extension(format!(
         "{}.tmp",
         path.extension()
@@ -93,7 +160,7 @@ fn temp_config_path(path: &PathBuf) -> PathBuf {
     ))
 }
 
-fn backup_config_path(path: &PathBuf) -> PathBuf {
+fn backup_config_path(path: &Path) -> PathBuf {
     path.with_extension(format!(
         "{}.bak",
         path.extension()
@@ -103,14 +170,14 @@ fn backup_config_path(path: &PathBuf) -> PathBuf {
 }
 
 #[cfg(not(target_os = "windows"))]
-fn replace_config_file(tmp_path: &PathBuf, path: &PathBuf) -> Result<(), String> {
+fn replace_config_file(tmp_path: &Path, path: &Path) -> Result<(), String> {
     std::fs::rename(tmp_path, path).map_err(|e| format!("Failed to replace config: {e}"))?;
     sync_parent_dir(path);
     Ok(())
 }
 
 #[cfg(target_os = "windows")]
-fn replace_config_file(tmp_path: &PathBuf, path: &PathBuf) -> Result<(), String> {
+fn replace_config_file(tmp_path: &Path, path: &Path) -> Result<(), String> {
     let backup_path = backup_config_path(path);
     if path.exists() {
         let _ = std::fs::remove_file(&backup_path);
@@ -123,12 +190,12 @@ fn replace_config_file(tmp_path: &PathBuf, path: &PathBuf) -> Result<(), String>
         }
         return Err(format!("Failed to replace config: {err}"));
     }
-    let _ = std::fs::remove_file(backup_path);
+    // Keep the staged previous version as the recovery backup.
     sync_parent_dir(path);
     Ok(())
 }
 
-fn sync_parent_dir(path: &PathBuf) {
+fn sync_parent_dir(path: &Path) {
     if let Some(parent) = path.parent() {
         if let Ok(dir) = std::fs::File::open(parent) {
             let _ = dir.sync_all();
@@ -156,4 +223,75 @@ pub fn resolve_connection_env(
         conn.connection_string.clone(),
     );
     Ok(env)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::Connection;
+
+    fn test_dir(name: &str) -> PathBuf {
+        std::env::temp_dir().join(format!("busman-store-{name}-{}", std::process::id()))
+    }
+
+    #[test]
+    fn restores_valid_backup_when_primary_is_corrupt() {
+        let dir = test_dir("recovery");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("connections.json");
+        let backup = backup_config_path(&path);
+        std::fs::write(&path, "{broken").unwrap();
+        let expected = ConnectionsConfig {
+            connections: vec![Connection {
+                id: "conn-1".to_string(),
+                name: "Recovered".to_string(),
+                connection_string: "Endpoint=sb://example/".to_string(),
+                env: HashMap::new(),
+                environment: None,
+                environment_color: None,
+            }],
+            active_connection_id: Some("conn-1".to_string()),
+        };
+        std::fs::write(&backup, serde_json::to_vec(&expected).unwrap()).unwrap();
+
+        let recovered = load_from_path(&path).unwrap();
+
+        assert_eq!(recovered.connections.len(), 1);
+        assert_eq!(recovered.connections[0].name, "Recovered");
+        assert!(read_config_file(&path).is_ok());
+        assert!(std::fs::read_dir(&dir)
+            .unwrap()
+            .flatten()
+            .any(|entry| entry.file_name().to_string_lossy().contains("corrupt")));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn restores_backup_when_primary_is_missing() {
+        let dir = test_dir("missing-primary");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("connections.json");
+        let backup = backup_config_path(&path);
+        let expected = ConnectionsConfig {
+            connections: vec![Connection {
+                id: "conn-1".to_string(),
+                name: "Recovered".to_string(),
+                connection_string: "Endpoint=sb://example/".to_string(),
+                env: HashMap::new(),
+                environment: None,
+                environment_color: None,
+            }],
+            active_connection_id: Some("conn-1".to_string()),
+        };
+        std::fs::write(&backup, serde_json::to_vec(&expected).unwrap()).unwrap();
+
+        let recovered = load_from_path(&path).unwrap();
+
+        assert_eq!(recovered.connections.len(), 1);
+        assert!(path.exists());
+        assert!(read_config_file(&path).is_ok());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
 }

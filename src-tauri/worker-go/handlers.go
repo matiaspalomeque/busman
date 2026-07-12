@@ -93,6 +93,9 @@ func parseIntOrDefault(s string, def int) int {
 
 func boundedIntFromEnv(env map[string]string, key string, def int, max int) int {
 	v := parseIntOrDefault(env[key], def)
+	if v < 1 {
+		return 1
+	}
 	if v > max {
 		return max
 	}
@@ -142,6 +145,10 @@ func timeoutMsFromEnv(env map[string]string, key string, def int) int {
 
 func operationContext(env map[string]string, defMs int) (context.Context, context.CancelFunc) {
 	return context.WithTimeout(context.Background(), time.Duration(timeoutMsFromEnv(env, "OPERATION_TIMEOUT_IN_MS", defMs))*time.Millisecond)
+}
+
+func cancellableOperationContext(parent context.Context, env map[string]string, defMs int) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(parent, time.Duration(timeoutMsFromEnv(env, "OPERATION_TIMEOUT_IN_MS", defMs))*time.Millisecond)
 }
 
 func closeWithTimeout(resource interface{ Close(context.Context) error }) {
@@ -424,6 +431,134 @@ func handleGetTopicSubscriptionCounts(raw json.RawMessage) (any, error) {
 	return topicSubscriptionCountsResult{Topic: p.TopicName, Subscriptions: subs}, nil
 }
 
+type entityCountsParams struct {
+	Env        map[string]string `json:"env"`
+	QueueNames []string          `json:"queueNames"`
+	TopicNames []string          `json:"topicNames"`
+}
+
+type entityCountError struct {
+	Kind  string `json:"kind"`
+	Name  string `json:"name"`
+	Error string `json:"error"`
+}
+
+type entityCountsResult struct {
+	Queues        []queueCountResult        `json:"queues"`
+	Subscriptions []subscriptionCountResult `json:"subscriptions"`
+	Errors        []entityCountError        `json:"errors"`
+}
+
+func handleGetEntityCounts(raw json.RawMessage) (any, error) {
+	var p entityCountsParams
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return nil, fmt.Errorf("invalid params: %w", err)
+	}
+	cs, err := requireConnectionString(p.Env)
+	if err != nil {
+		return nil, err
+	}
+	for _, name := range p.QueueNames {
+		if err := validateEntityName(name, "Queue"); err != nil {
+			return nil, err
+		}
+	}
+	for _, name := range p.TopicNames {
+		if err := validateEntityName(name, "Topic"); err != nil {
+			return nil, err
+		}
+	}
+
+	adminClient, err := getAdminClient(cs)
+	if err != nil {
+		return nil, err
+	}
+
+	type countJobResult struct {
+		queue         *queueCountResult
+		subscriptions []subscriptionCountResult
+		failure       *entityCountError
+	}
+	jobCount := len(p.QueueNames) + len(p.TopicNames)
+	results := make(chan countJobResult, jobCount)
+	sem := make(chan struct{}, 6)
+	var countWg sync.WaitGroup
+
+	for _, queueName := range p.QueueNames {
+		queueName := queueName
+		countWg.Add(1)
+		go func() {
+			defer countWg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+			defer cancel()
+			resp, err := adminClient.GetQueueRuntimeProperties(ctx, queueName, nil)
+			if err != nil {
+				results <- countJobResult{failure: &entityCountError{Kind: "queue", Name: queueName, Error: err.Error()}}
+				return
+			}
+			result := queueCountResult{Name: queueName}
+			if resp != nil {
+				result.Active = int64(resp.ActiveMessageCount)
+				result.DLQ = int64(resp.DeadLetterMessageCount)
+			}
+			results <- countJobResult{queue: &result}
+		}()
+	}
+
+	for _, topicName := range p.TopicNames {
+		topicName := topicName
+		countWg.Add(1)
+		go func() {
+			defer countWg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+			defer cancel()
+			pager := adminClient.NewListSubscriptionsRuntimePropertiesPager(topicName, nil)
+			subs := []subscriptionCountResult{}
+			for pager.More() {
+				page, err := pager.NextPage(ctx)
+				if err != nil {
+					results <- countJobResult{failure: &entityCountError{Kind: "topic", Name: topicName, Error: err.Error()}}
+					return
+				}
+				for _, sub := range page.SubscriptionRuntimeProperties {
+					subs = append(subs, subscriptionCountResult{
+						Topic:        topicName,
+						Subscription: sub.SubscriptionName,
+						Active:       int64(sub.ActiveMessageCount),
+						DLQ:          int64(sub.DeadLetterMessageCount),
+					})
+				}
+			}
+			results <- countJobResult{subscriptions: subs}
+		}()
+	}
+
+	go func() {
+		countWg.Wait()
+		close(results)
+	}()
+
+	result := entityCountsResult{
+		Queues:        []queueCountResult{},
+		Subscriptions: []subscriptionCountResult{},
+		Errors:        []entityCountError{},
+	}
+	for job := range results {
+		if job.queue != nil {
+			result.Queues = append(result.Queues, *job.queue)
+		}
+		result.Subscriptions = append(result.Subscriptions, job.subscriptions...)
+		if job.failure != nil {
+			result.Errors = append(result.Errors, *job.failure)
+		}
+	}
+	return result, nil
+}
+
 // ─── Shared subscription source helpers ──────────────────────────────────────
 
 type subscriptionSource struct {
@@ -452,7 +587,7 @@ type emptyMessagesParams struct {
 	subscriptionSource
 }
 
-func handleEmptyMessages(raw json.RawMessage) (any, error) {
+func handleEmptyMessages(requestCtx context.Context, raw json.RawMessage) (any, error) {
 	var p emptyMessagesParams
 	if err := json.Unmarshal(raw, &p); err != nil {
 		return nil, fmt.Errorf("invalid params: %w", err)
@@ -486,6 +621,9 @@ func handleEmptyMessages(raw json.RawMessage) (any, error) {
 		emptyProgressIntervalMs = 50
 	}
 	completeConcurrency := parseIntOrDefault(p.Env["COMPLETE_CONCURRENCY"], 8)
+	if completeConcurrency < 1 {
+		completeConcurrency = 1
+	}
 	if completeConcurrency > 32 {
 		completeConcurrency = 32
 	}
@@ -513,16 +651,19 @@ func handleEmptyMessages(raw json.RawMessage) (any, error) {
 			if totalDeleted > 0 {
 				receiveWaitMs = drainWaitMs
 			}
-			ctx, cancel := context.WithTimeout(context.Background(), time.Duration(receiveWaitMs)*time.Millisecond)
+			ctx, cancel := context.WithTimeout(requestCtx, time.Duration(receiveWaitMs)*time.Millisecond)
 			messages, recvErr := receiver.ReceiveMessages(ctx, batchSize, nil)
 			cancel()
 
 			if recvErr != nil && len(messages) == 0 {
+				if requestCtx.Err() != nil {
+					return totalDeleted, requestCtx.Err()
+				}
 				if errors.Is(recvErr, context.DeadlineExceeded) || errors.Is(recvErr, context.Canceled) {
 					emitOutput(p.RunID, "✨ No more messages found in "+queueType+".", false, elapsedSince(startedAt))
 					break
 				}
-				return 0, fmt.Errorf("receive error: %w", recvErr)
+				return totalDeleted, fmt.Errorf("receive error: %w", recvErr)
 			}
 			if len(messages) == 0 {
 				emitOutput(p.RunID, "✨ No more messages found in "+queueType+".", false, elapsedSince(startedAt))
@@ -533,26 +674,31 @@ func handleEmptyMessages(raw json.RawMessage) (any, error) {
 			sem := make(chan struct{}, completeConcurrency)
 			var wg sync.WaitGroup
 			errCh := make(chan error, len(messages))
+			completedCh := make(chan struct{}, len(messages))
 			for _, msg := range messages {
 				wg.Add(1)
 				go func(m *azservicebus.ReceivedMessage) {
 					defer wg.Done()
 					sem <- struct{}{}
 					defer func() { <-sem }()
-					completeCtx, completeCancel := operationContext(p.Env, maxWaitMs)
+					completeCtx, completeCancel := cancellableOperationContext(requestCtx, p.Env, maxWaitMs)
 					defer completeCancel()
 					if err := receiver.CompleteMessage(completeCtx, m, nil); err != nil {
 						errCh <- fmt.Errorf("complete message error: %w", err)
+						return
 					}
+					completedCh <- struct{}{}
 				}(msg)
 			}
 			wg.Wait()
 			close(errCh)
-			if err := <-errCh; err != nil {
-				return 0, err
+			close(completedCh)
+			for range completedCh {
+				totalDeleted++
 			}
-
-			totalDeleted += len(messages)
+			if err := <-errCh; err != nil {
+				return totalDeleted, err
+			}
 
 			stageMs := time.Since(stageStart).Milliseconds()
 			overallRate := calculateRate(totalDeleted, stageMs)
@@ -603,6 +749,11 @@ func handleEmptyMessages(raw json.RawMessage) (any, error) {
 		}
 		deleted, err := runOne(receiver, label)
 		if err != nil {
+			if deleted > 0 {
+				emitOutput(p.RunID,
+					fmt.Sprintf("⚠ Operation stopped after %d messages were confirmed deleted.", deleted),
+					true, elapsedSince(startedAt))
+			}
 			return nil, err
 		}
 		grandTotal = deleted
@@ -644,7 +795,12 @@ func handleEmptyMessages(raw json.RawMessage) (any, error) {
 			grandTotal += r.deleted
 		}
 		if firstErr != nil {
-			return nil, firstErr
+			if grandTotal > 0 {
+				emitOutput(p.RunID,
+					fmt.Sprintf("⚠ Operation stopped after %d messages were confirmed deleted.", grandTotal),
+					true, elapsedSince(startedAt))
+			}
+			return nil, fmt.Errorf("empty operation stopped after deleting %d messages: %w", grandTotal, firstErr)
 		}
 	}
 
@@ -682,7 +838,7 @@ func resolveDrainReceiveWaitMs(env map[string]string, maxWaitMs int) int {
 	return drainWaitMs
 }
 
-func handleMoveMessages(raw json.RawMessage) (any, error) {
+func handleMoveMessages(requestCtx context.Context, raw json.RawMessage) (any, error) {
 	var p moveMessagesParams
 	if err := json.Unmarshal(raw, &p); err != nil {
 		return nil, fmt.Errorf("invalid params: %w", err)
@@ -722,6 +878,9 @@ func handleMoveMessages(raw json.RawMessage) (any, error) {
 		moveProgressIntervalMs = 50
 	}
 	completeConcurrency := parseIntOrDefault(p.Env["COMPLETE_CONCURRENCY"], 8)
+	if completeConcurrency < 1 {
+		completeConcurrency = 1
+	}
 	if completeConcurrency > 32 {
 		completeConcurrency = 32
 	}
@@ -752,16 +911,19 @@ func handleMoveMessages(raw json.RawMessage) (any, error) {
 			if totalMoved > 0 {
 				receiveWaitMs = drainWaitMs
 			}
-			ctx, cancel := context.WithTimeout(context.Background(), time.Duration(receiveWaitMs)*time.Millisecond)
+			ctx, cancel := context.WithTimeout(requestCtx, time.Duration(receiveWaitMs)*time.Millisecond)
 			messages, recvErr := receiver.ReceiveMessages(ctx, batchSize, nil)
 			cancel()
 
 			if recvErr != nil && len(messages) == 0 {
+				if requestCtx.Err() != nil {
+					return totalMoved, requestCtx.Err()
+				}
 				if errors.Is(recvErr, context.DeadlineExceeded) || errors.Is(recvErr, context.Canceled) {
 					emitOutput(p.RunID, "✨ No more messages found in "+queueType+".", false, elapsedSince(startedAt))
 					break
 				}
-				return 0, fmt.Errorf("receive error: %w", recvErr)
+				return totalMoved, fmt.Errorf("receive error: %w", recvErr)
 			}
 			if len(messages) == 0 {
 				emitOutput(p.RunID, "✨ No more messages found in "+queueType+".", false, elapsedSince(startedAt))
@@ -771,45 +933,59 @@ func handleMoveMessages(raw json.RawMessage) (any, error) {
 			sendAndCompleteBatch := func(
 				outboundBatch *azservicebus.MessageBatch,
 				sourceMessages []*azservicebus.ReceivedMessage,
-			) error {
+			) (int, error) {
 				if outboundBatch.NumMessages() == 0 {
-					return nil
+					return 0, nil
 				}
-				sendCtx, sendCancel := operationContext(p.Env, maxWaitMs)
+				sendCtx, sendCancel := cancellableOperationContext(requestCtx, p.Env, maxWaitMs)
 				defer sendCancel()
 				if err := sender.SendMessageBatch(sendCtx, outboundBatch, nil); err != nil {
-					return fmt.Errorf("send message batch error: %w", err)
+					return 0, fmt.Errorf("send message batch error: %w", err)
 				}
 				// Complete source messages in parallel with bounded concurrency.
 				sem := make(chan struct{}, completeConcurrency)
 				var wg sync.WaitGroup
 				errCh := make(chan error, len(sourceMessages))
+				completedCh := make(chan struct{}, len(sourceMessages))
 				for _, srcMsg := range sourceMessages {
 					wg.Add(1)
 					go func(msg *azservicebus.ReceivedMessage) {
 						defer wg.Done()
 						sem <- struct{}{}
 						defer func() { <-sem }()
-						completeCtx, completeCancel := operationContext(p.Env, maxWaitMs)
+						completeCtx, completeCancel := cancellableOperationContext(requestCtx, p.Env, maxWaitMs)
 						defer completeCancel()
 						if err := receiver.CompleteMessage(completeCtx, msg, nil); err != nil {
 							errCh <- fmt.Errorf("complete message error: %w", err)
+							return
 						}
+						completedCh <- struct{}{}
 					}(srcMsg)
 				}
 				wg.Wait()
 				close(errCh)
-				if err := <-errCh; err != nil {
-					return err
+				close(completedCh)
+				confirmed := 0
+				for range completedCh {
+					confirmed++
 				}
-				return nil
+				if err := <-errCh; err != nil {
+					failure := fmt.Errorf(
+						"destination accepted %d messages but source settlement failed; duplicate delivery is possible: %w",
+						outboundBatch.NumMessages(),
+						err,
+					)
+					emitOutput(p.RunID, "⚠ "+failure.Error(), true, elapsedSince(startedAt))
+					return confirmed, failure
+				}
+				return confirmed, nil
 			}
 
-			batchCtx, batchCancel := operationContext(p.Env, maxWaitMs)
+			batchCtx, batchCancel := cancellableOperationContext(requestCtx, p.Env, maxWaitMs)
 			outboundBatch, err := sender.NewMessageBatch(batchCtx, nil)
 			batchCancel()
 			if err != nil {
-				return 0, fmt.Errorf("create message batch error: %w", err)
+				return totalMoved, fmt.Errorf("create message batch error: %w", err)
 			}
 			sourceMessagesForBatch := make([]*azservicebus.ReceivedMessage, 0, len(messages))
 
@@ -837,17 +1013,19 @@ func handleMoveMessages(raw json.RawMessage) (any, error) {
 					if errors.Is(addErr, azservicebus.ErrMessageTooLarge) {
 						// Flush the current batch and retry adding the large message in a fresh batch.
 						if outboundBatch.NumMessages() == 0 {
-							return 0, fmt.Errorf("send message error: message %q is too large for Service Bus batch", msg.MessageID)
+							return totalMoved, fmt.Errorf("send message error: message %q is too large for Service Bus batch", msg.MessageID)
 						}
-						if err := sendAndCompleteBatch(outboundBatch, sourceMessagesForBatch); err != nil {
-							return 0, err
+						confirmed, err := sendAndCompleteBatch(outboundBatch, sourceMessagesForBatch)
+						totalMoved += confirmed
+						if err != nil {
+							return totalMoved, fmt.Errorf("move stopped after %d confirmed messages: %w", totalMoved, err)
 						}
 
-						batchCtx, batchCancel := operationContext(p.Env, maxWaitMs)
+						batchCtx, batchCancel := cancellableOperationContext(requestCtx, p.Env, maxWaitMs)
 						outboundBatch, err = sender.NewMessageBatch(batchCtx, nil)
 						batchCancel()
 						if err != nil {
-							return 0, fmt.Errorf("create message batch error: %w", err)
+							return totalMoved, fmt.Errorf("create message batch error: %w", err)
 						}
 						sourceMessagesForBatch = sourceMessagesForBatch[:0]
 
@@ -855,18 +1033,19 @@ func handleMoveMessages(raw json.RawMessage) (any, error) {
 					}
 					if addErr != nil {
 						if errors.Is(addErr, azservicebus.ErrMessageTooLarge) {
-							return 0, fmt.Errorf("send message error: message %q is too large for Service Bus batch", msg.MessageID)
+							return totalMoved, fmt.Errorf("send message error: message %q is too large for Service Bus batch", msg.MessageID)
 						}
-						return 0, fmt.Errorf("add message to batch error: %w", addErr)
+						return totalMoved, fmt.Errorf("add message to batch error: %w", addErr)
 					}
 				}
 				sourceMessagesForBatch = append(sourceMessagesForBatch, msg)
 			}
 
-			if err := sendAndCompleteBatch(outboundBatch, sourceMessagesForBatch); err != nil {
-				return 0, err
+			confirmed, err := sendAndCompleteBatch(outboundBatch, sourceMessagesForBatch)
+			totalMoved += confirmed
+			if err != nil {
+				return totalMoved, fmt.Errorf("move stopped after %d confirmed messages: %w", totalMoved, err)
 			}
-			totalMoved += len(messages)
 
 			stageMs := time.Since(stageStart).Milliseconds()
 			overallRate := calculateRate(totalMoved, stageMs)
@@ -917,6 +1096,11 @@ func handleMoveMessages(raw json.RawMessage) (any, error) {
 		}
 		moved, err := runOne(receiver, label)
 		if err != nil {
+			if moved > 0 {
+				emitOutput(p.RunID,
+					fmt.Sprintf("⚠ Operation stopped after %d messages were confirmed moved.", moved),
+					true, elapsedSince(startedAt))
+			}
 			return nil, err
 		}
 		grandTotal = moved
@@ -958,7 +1142,12 @@ func handleMoveMessages(raw json.RawMessage) (any, error) {
 			grandTotal += r.moved
 		}
 		if firstErr != nil {
-			return nil, firstErr
+			if grandTotal > 0 {
+				emitOutput(p.RunID,
+					fmt.Sprintf("⚠ Operation stopped after %d messages were confirmed moved.", grandTotal),
+					true, elapsedSince(startedAt))
+			}
+			return nil, fmt.Errorf("move operation partially completed: %d messages confirmed moved: %w", grandTotal, firstErr)
 		}
 	}
 
@@ -972,7 +1161,7 @@ type republishSubscriptionDlqParams struct {
 	RunID            string            `json:"runId"`
 }
 
-func handleRepublishSubscriptionDlq(raw json.RawMessage) (any, error) {
+func handleRepublishSubscriptionDlq(requestCtx context.Context, raw json.RawMessage) (any, error) {
 	var p republishSubscriptionDlqParams
 	if err := json.Unmarshal(raw, &p); err != nil {
 		return nil, fmt.Errorf("invalid params: %w", err)
@@ -997,7 +1186,7 @@ func handleRepublishSubscriptionDlq(raw json.RawMessage) (any, error) {
 	if err != nil {
 		return nil, fmt.Errorf("marshal republish params: %w", err)
 	}
-	return handleMoveMessages(moveRaw)
+	return handleMoveMessages(requestCtx, moveRaw)
 }
 
 // ─── 5. searchMessages ───────────────────────────────────────────────────────
@@ -1011,7 +1200,7 @@ type searchMessagesParams struct {
 	RunID        string            `json:"runId"`
 }
 
-func handleSearchMessages(raw json.RawMessage) (any, error) {
+func handleSearchMessages(requestCtx context.Context, raw json.RawMessage) (any, error) {
 	var p searchMessagesParams
 	if err := json.Unmarshal(raw, &p); err != nil {
 		return nil, fmt.Errorf("invalid params: %w", err)
@@ -1085,7 +1274,7 @@ func handleSearchMessages(raw json.RawMessage) (any, error) {
 			if fromSequenceNumber != nil {
 				opts = &azservicebus.PeekMessagesOptions{FromSequenceNumber: fromSequenceNumber}
 			}
-			peekCtx, peekCancel := context.WithTimeout(context.Background(), time.Duration(maxWaitMs)*time.Millisecond)
+			peekCtx, peekCancel := context.WithTimeout(requestCtx, time.Duration(maxWaitMs)*time.Millisecond)
 			messages, err := receiver.PeekMessages(peekCtx, batchSize, opts)
 			peekCancel()
 			if err != nil {
@@ -1235,7 +1424,7 @@ type peekMessagesParams struct {
 	DownloadsDir string            `json:"downloadsDir"`
 }
 
-func handlePeekMessages(raw json.RawMessage) (any, error) {
+func handlePeekMessages(requestCtx context.Context, raw json.RawMessage) (any, error) {
 	var p peekMessagesParams
 	if err := json.Unmarshal(raw, &p); err != nil {
 		return nil, fmt.Errorf("invalid params: %w", err)
@@ -1379,7 +1568,7 @@ func handlePeekMessages(raw json.RawMessage) (any, error) {
 			if fromSeqNum != nil {
 				opts = &azservicebus.PeekMessagesOptions{FromSequenceNumber: fromSeqNum}
 			}
-			peekCtx, peekCancel := context.WithTimeout(context.Background(), time.Duration(maxWaitMs)*time.Millisecond)
+			peekCtx, peekCancel := context.WithTimeout(requestCtx, time.Duration(maxWaitMs)*time.Millisecond)
 			messages, err := receiver.PeekMessages(peekCtx, fetchCount, opts)
 			peekCancel()
 			if err != nil {
@@ -1830,7 +2019,7 @@ func singleMessageNotReceivableError(p singleMessageActionParams, entityLabel st
 	return fmt.Errorf("message with sequence number %d exists in %s but is not currently receivable after scanning %d messages (%s). It may be locked by another receiver, deferred, scheduled, or behind the scan budget; refresh and retry after the lock expires", p.SequenceNumber, entityLabel, scanned, strings.Join(details, ", "))
 }
 
-func handleSingleMessageAction(raw json.RawMessage) (any, error) {
+func handleSingleMessageAction(requestCtx context.Context, raw json.RawMessage) (any, error) {
 	var p singleMessageActionParams
 	if err := json.Unmarshal(raw, &p); err != nil {
 		return nil, fmt.Errorf("invalid params: %w", err)
@@ -1884,6 +2073,9 @@ func handleSingleMessageAction(raw json.RawMessage) (any, error) {
 	}
 	maxWaitMs := parseIntOrDefault(p.Env["MAX_WAIT_TIME_IN_MS"], 5000)
 	completeConcurrency := parseIntOrDefault(p.Env["COMPLETE_CONCURRENCY"], 8)
+	if completeConcurrency < 1 {
+		completeConcurrency = 1
+	}
 	if completeConcurrency > 32 {
 		completeConcurrency = 32
 	}
@@ -1916,7 +2108,7 @@ func handleSingleMessageAction(raw json.RawMessage) (any, error) {
 		}
 		defer closeWithTimeout(sender)
 
-		dupCtx, dupCancel := context.WithTimeout(context.Background(), time.Duration(maxWaitMs)*time.Millisecond)
+		dupCtx, dupCancel := context.WithTimeout(requestCtx, time.Duration(maxWaitMs)*time.Millisecond)
 		dupEnabled, dupErr := destinationUsesDuplicateDetection(dupCtx, cs, p)
 		dupCancel()
 		if dupErr != nil {
@@ -1939,7 +2131,7 @@ func handleSingleMessageAction(raw json.RawMessage) (any, error) {
 		fmt.Sprintf("🔍 Resolving message with sequence number %d in %s...", p.SequenceNumber, entityLabel),
 		false, elapsedSince(startedAt))
 
-	peekCtx, peekCancel := context.WithTimeout(context.Background(), time.Duration(maxWaitMs)*time.Millisecond)
+	peekCtx, peekCancel := context.WithTimeout(requestCtx, time.Duration(maxWaitMs)*time.Millisecond)
 	peekedMessages, peekErr := receiver.PeekMessages(peekCtx, 1, &azservicebus.PeekMessagesOptions{FromSequenceNumber: &p.SequenceNumber})
 	peekCancel()
 	var peekedTarget *azservicebus.ReceivedMessage
@@ -1962,7 +2154,7 @@ func handleSingleMessageAction(raw json.RawMessage) (any, error) {
 	}
 
 	completeTarget := func(actionReceiver singleMessageReceiver, target *azservicebus.ReceivedMessage) error {
-		completeCtx, completeCancel := operationContext(p.Env, maxWaitMs)
+		completeCtx, completeCancel := cancellableOperationContext(requestCtx, p.Env, maxWaitMs)
 		err := actionReceiver.CompleteMessage(completeCtx, target, nil)
 		completeCancel()
 		if err != nil {
@@ -1971,7 +2163,7 @@ func handleSingleMessageAction(raw json.RawMessage) (any, error) {
 		return nil
 	}
 	abandonTarget := func(actionReceiver singleMessageReceiver, target *azservicebus.ReceivedMessage) {
-		abandonCtx, abandonCancel := operationContext(p.Env, maxWaitMs)
+		abandonCtx, abandonCancel := cancellableOperationContext(requestCtx, p.Env, maxWaitMs)
 		_ = actionReceiver.AbandonMessage(abandonCtx, target, nil)
 		abandonCancel()
 	}
@@ -1985,14 +2177,19 @@ func handleSingleMessageAction(raw json.RawMessage) (any, error) {
 			return completeTarget(actionReceiver, target)
 		case "move", "replay":
 			newMsg := outboundMessageFromReceived(target, regenerateMessageID)
-			sendCtx, sendCancel := operationContext(p.Env, maxWaitMs)
+			sendCtx, sendCancel := cancellableOperationContext(requestCtx, p.Env, maxWaitMs)
 			err := sender.SendMessage(sendCtx, newMsg, nil)
 			sendCancel()
 			if err != nil {
 				abandonTarget(actionReceiver, target)
 				return fmt.Errorf("send message error: %w", err)
 			}
-			return completeTarget(actionReceiver, target)
+			if err := completeTarget(actionReceiver, target); err != nil {
+				failure := fmt.Errorf("destination accepted the message but source settlement failed; duplicate delivery is possible: %w", err)
+				emitOutput(p.RunID, "⚠ "+failure.Error(), true, elapsedSince(startedAt))
+				return failure
+			}
+			return nil
 		default:
 			return fmt.Errorf("unknown action %q", p.Action)
 		}
@@ -2002,7 +2199,7 @@ func handleSingleMessageAction(raw json.RawMessage) (any, error) {
 		emitOutput(p.RunID,
 			fmt.Sprintf("↩ Receiving deferred message %d directly by sequence number...", p.SequenceNumber),
 			false, elapsedSince(startedAt))
-		deferCtx, deferCancel := operationContext(p.Env, maxWaitMs)
+		deferCtx, deferCancel := cancellableOperationContext(requestCtx, p.Env, maxWaitMs)
 		deferred, deferErr := actionReceiver.ReceiveDeferredMessages(deferCtx, []int64{p.SequenceNumber}, nil)
 		deferCancel()
 		if deferErr != nil {
@@ -2027,7 +2224,7 @@ func handleSingleMessageAction(raw json.RawMessage) (any, error) {
 				emitOutput(p.RunID,
 					fmt.Sprintf("🔐 Accepting session %q for deferred message %d...", sessionID, p.SequenceNumber),
 					false, elapsedSince(startedAt))
-				sessionCtx, sessionCancel := operationContext(p.Env, maxWaitMs)
+				sessionCtx, sessionCancel := cancellableOperationContext(requestCtx, p.Env, maxWaitMs)
 				sessionReceiver, sessionErr := p.acceptSessionReceiver(sessionCtx, client, sessionID)
 				sessionCancel()
 				if sessionErr != nil {
@@ -2053,7 +2250,7 @@ func handleSingleMessageAction(raw json.RawMessage) (any, error) {
 		emitOutput(p.RunID,
 			fmt.Sprintf("🔐 Accepting session %q for active message %d...", sessionID, p.SequenceNumber),
 			false, elapsedSince(startedAt))
-		sessionCtx, sessionCancel := operationContext(p.Env, maxWaitMs)
+		sessionCtx, sessionCancel := cancellableOperationContext(requestCtx, p.Env, maxWaitMs)
 		sessionReceiver, sessionErr := p.acceptSessionReceiver(sessionCtx, client, sessionID)
 		sessionCancel()
 		if sessionErr != nil {
@@ -2073,11 +2270,14 @@ func handleSingleMessageAction(raw json.RawMessage) (any, error) {
 			fetch = remaining
 		}
 
-		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(maxWaitMs)*time.Millisecond)
+		ctx, cancel := context.WithTimeout(requestCtx, time.Duration(maxWaitMs)*time.Millisecond)
 		msgs, recvErr := actionReceiver.ReceiveMessages(ctx, fetch, nil)
 		cancel()
 
 		if recvErr != nil && len(msgs) == 0 {
+			if requestCtx.Err() != nil {
+				return nil, requestCtx.Err()
+			}
 			if errors.Is(recvErr, context.DeadlineExceeded) || errors.Is(recvErr, context.Canceled) {
 				if peekedTarget != nil && idleAttempts < idleRetries {
 					idleAttempts++
@@ -2119,7 +2319,7 @@ func handleSingleMessageAction(raw json.RawMessage) (any, error) {
 				go func(msg *azservicebus.ReceivedMessage) {
 					defer wg.Done()
 					defer func() { <-sem }()
-					abandonCtx, abandonCancel := operationContext(p.Env, maxWaitMs)
+					abandonCtx, abandonCancel := cancellableOperationContext(requestCtx, p.Env, maxWaitMs)
 					defer abandonCancel()
 					if err := actionReceiver.AbandonMessage(abandonCtx, msg, nil); err != nil {
 						errCh <- fmt.Errorf("abandon non-target message error: %w", err)

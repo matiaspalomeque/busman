@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -8,6 +9,15 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/messaging/azservicebus"
 	"github.com/Azure/azure-sdk-for-go/sdk/messaging/azservicebus/admin"
 )
+
+func TestBoundedIntFromEnvClampsUnsafeValues(t *testing.T) {
+	if got := boundedIntFromEnv(map[string]string{"COUNT": "0"}, "COUNT", 50, 100); got != 50 {
+		t.Fatalf("zero value = %d, want safe default 50", got)
+	}
+	if got := boundedIntFromEnv(map[string]string{"COUNT": "500"}, "COUNT", 50, 100); got != 100 {
+		t.Fatalf("large value = %d, want 100", got)
+	}
+}
 
 func TestValidateMoveSourceDest(t *testing.T) {
 	tests := []struct {
@@ -273,7 +283,7 @@ func TestHandleRepublishSubscriptionDlqValidation(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			raw, _ := json.Marshal(tt.params)
-			_, err := handleRepublishSubscriptionDlq(raw)
+			_, err := handleRepublishSubscriptionDlq(context.Background(), raw)
 			if tt.wantErr && err == nil {
 				t.Fatal("expected error, got nil")
 			}
@@ -295,7 +305,7 @@ func TestHandleSingleMessageActionRejectsActiveMessages(t *testing.T) {
 		"queueName":      "q1",
 	})
 
-	_, err := handleSingleMessageAction(raw)
+	_, err := handleSingleMessageAction(context.Background(), raw)
 	if err == nil {
 		t.Fatal("expected active single-message action to be rejected")
 	}

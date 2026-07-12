@@ -20,6 +20,9 @@ use tokio::{
 };
 use uuid::Uuid;
 
+const WORKER_PROTOCOL_VERSION: u8 = 1;
+pub(crate) const WORKER_CANCELLED_PREFIX: &str = "[worker:cancelled] ";
+
 pub(crate) static WORKER_PID: AtomicU32 = AtomicU32::new(0);
 static WORKER_STATE: OnceLock<Mutex<Option<ActiveWorker>>> = OnceLock::new();
 
@@ -39,6 +42,7 @@ pub(crate) struct ActiveWorker {
 
 #[derive(Serialize)]
 struct WorkerRequest<'a> {
+    version: u8,
     id: &'a str,
     method: &'a str,
     params: Value,
@@ -49,6 +53,7 @@ struct WorkerRequest<'a> {
 enum WorkerMessage {
     #[serde(rename = "event")]
     Event {
+        version: Option<u8>,
         #[serde(rename = "runId")]
         run_id: Option<String>,
         kind: String,
@@ -63,23 +68,28 @@ enum WorkerMessage {
     },
     #[serde(rename = "response")]
     Response {
+        version: Option<u8>,
         id: String,
         ok: bool,
         result: Option<Value>,
         error: Option<String>,
+        code: Option<String>,
     },
 }
 
 pub(crate) enum WorkerCallError {
     Transport(String),
-    Worker(String),
+    Worker {
+        code: Option<String>,
+        message: String,
+    },
 }
 
 impl From<WorkerCallError> for crate::error::BusmanError {
     fn from(err: WorkerCallError) -> Self {
         match err {
             WorkerCallError::Transport(msg) => Self::Internal(msg),
-            WorkerCallError::Worker(msg) => Self::Worker(msg),
+            WorkerCallError::Worker { message, .. } => Self::Worker(message),
         }
     }
 }
@@ -390,6 +400,7 @@ async fn reader_loop(app: AppHandle, mut stdout: BufReader<ChildStdout>, pending
 
         match parsed {
             WorkerMessage::Event {
+                version,
                 run_id,
                 kind,
                 line,
@@ -398,6 +409,14 @@ async fn reader_loop(app: AppHandle, mut stdout: BufReader<ChildStdout>, pending
                 is_stderr,
                 elapsed_ms,
             } => {
+                if version != Some(WORKER_PROTOCOL_VERSION) {
+                    log::error!(
+                        "Worker protocol mismatch: app expects v{}, worker sent {:?}",
+                        WORKER_PROTOCOL_VERSION,
+                        version
+                    );
+                    continue;
+                }
                 if let Some(run_id) = run_id {
                     // Rate-limit progress events to reduce frontend re-render pressure.
                     if kind == "progress" {
@@ -422,19 +441,27 @@ async fn reader_loop(app: AppHandle, mut stdout: BufReader<ChildStdout>, pending
                 }
             }
             WorkerMessage::Response {
+                version,
                 id,
                 ok,
                 result,
                 error,
+                code,
             } => {
                 let sender = pending.lock().unwrap().remove(&id);
                 if let Some(sender) = sender {
-                    let response = if ok {
+                    let response = if version != Some(WORKER_PROTOCOL_VERSION) {
+                        Err(WorkerCallError::Transport(format!(
+                            "Worker protocol mismatch: app expects v{}, worker sent {:?}",
+                            WORKER_PROTOCOL_VERSION, version
+                        )))
+                    } else if ok {
                         Ok(result.unwrap_or(Value::Null))
                     } else {
-                        Err(WorkerCallError::Worker(
-                            error.unwrap_or_else(|| "Unknown worker error".to_string()),
-                        ))
+                        Err(WorkerCallError::Worker {
+                            code,
+                            message: error.unwrap_or_else(|| "Unknown worker error".to_string()),
+                        })
                     };
                     let _ = sender.send(response);
                 }
@@ -499,6 +526,7 @@ pub(crate) async fn call_worker(
 ) -> Result<Value, String> {
     let request_id = Uuid::new_v4().to_string();
     let request = WorkerRequest {
+        version: WORKER_PROTOCOL_VERSION,
         id: &request_id,
         method,
         params,
@@ -583,47 +611,18 @@ pub(crate) async fn call_worker(
 
     match result {
         Ok(value) => Ok(value),
-        Err(WorkerCallError::Worker(message)) => Err(message),
+        Err(WorkerCallError::Worker { code, message }) => {
+            if code.as_deref() == Some("cancelled") {
+                Err(format!("{WORKER_CANCELLED_PREFIX}{message}"))
+            } else {
+                Err(message)
+            }
+        }
         Err(WorkerCallError::Transport(message)) => {
             let mut state = worker_state().lock().await;
             stop_worker(&mut state).await;
             Err(message)
         }
-    }
-}
-
-pub(crate) fn kill_process_by_pid(pid: u32) -> Result<(), String> {
-    if pid == 0 {
-        return Ok(());
-    }
-
-    #[cfg(target_os = "windows")]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x08000000;
-        let _ = std::process::Command::new("taskkill")
-            .args(["/PID", &pid.to_string(), "/T", "/F"])
-            .creation_flags(CREATE_NO_WINDOW)
-            .status()
-            .map_err(|e| format!("Failed to stop worker process {pid}: {e}"))?;
-        return Ok(());
-    }
-
-    #[cfg(not(target_os = "windows"))]
-    {
-        let term_status = std::process::Command::new("kill")
-            .args(["-TERM", &pid.to_string()])
-            .status()
-            .map_err(|e| format!("Failed to stop worker process {pid}: {e}"))?;
-
-        if !term_status.success() {
-            let _ = std::process::Command::new("kill")
-                .args(["-KILL", &pid.to_string()])
-                .status()
-                .map_err(|e| format!("Failed to force stop worker process {pid}: {e}"))?;
-        }
-
-        Ok(())
     }
 }
 
@@ -721,10 +720,50 @@ mod tests {
         assert!(!result.contains("s3cr3t"));
     }
 
-    // ─── kill_process_by_pid ────────────────────────────────────────────
+    #[test]
+    fn worker_request_includes_protocol_version() {
+        let request = WorkerRequest {
+            version: WORKER_PROTOCOL_VERSION,
+            id: "request-1",
+            method: "health",
+            params: serde_json::json!({}),
+        };
+        let value = serde_json::to_value(request).unwrap();
+        assert_eq!(value["version"], WORKER_PROTOCOL_VERSION);
+    }
 
     #[test]
-    fn kill_pid_zero_is_noop() {
-        assert!(kill_process_by_pid(0).is_ok());
+    fn worker_response_preserves_structured_error_code() {
+        let parsed: WorkerMessage = serde_json::from_value(serde_json::json!({
+            "version": WORKER_PROTOCOL_VERSION,
+            "type": "response",
+            "id": "request-1",
+            "ok": false,
+            "code": "cancelled",
+            "error": "Operation cancelled."
+        }))
+        .unwrap();
+        match parsed {
+            WorkerMessage::Response { code, error, .. } => {
+                assert_eq!(code.as_deref(), Some("cancelled"));
+                assert_eq!(error.as_deref(), Some("Operation cancelled."));
+            }
+            _ => panic!("expected response"),
+        }
+    }
+
+    #[test]
+    fn legacy_worker_response_still_parses_for_fast_protocol_rejection() {
+        let parsed: WorkerMessage = serde_json::from_value(serde_json::json!({
+            "type": "response",
+            "id": "request-1",
+            "ok": true,
+            "result": {}
+        }))
+        .unwrap();
+        match parsed {
+            WorkerMessage::Response { version, .. } => assert_eq!(version, None),
+            _ => panic!("expected response"),
+        }
     }
 }

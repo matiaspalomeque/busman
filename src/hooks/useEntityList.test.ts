@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { renderHook, act } from "@testing-library/react";
+import { renderHook, act, waitFor } from "@testing-library/react";
 import { useEntityList } from "./useEntityList";
 import { useAppStore } from "../store/appStore";
 
@@ -101,5 +101,48 @@ describe("useEntityList.refreshEntityCount", () => {
 
     // safeInvoke should never be called for refreshEntityCount (no fetchEntities either since conn is null)
     expect(mockSafeInvoke).not.toHaveBeenCalledWith("get_queue_count", expect.anything(), expect.anything());
+  });
+});
+
+describe("useEntityList entity count batching", () => {
+  it("loads all queue and topic counts through one bounded backend request", async () => {
+    mockSafeInvoke.mockResolvedValueOnce({ queues: ["orders"], topics: { billing: ["processor"] } });
+    mockSafeInvoke.mockResolvedValueOnce({
+      queues: [{ name: "orders", active: 12, dlq: 1 }],
+      subscriptions: [{ topic: "billing", subscription: "processor", active: 4, dlq: 2 }],
+      errors: [],
+    });
+
+    renderHook(() => useEntityList());
+
+    await waitFor(() => {
+      expect(useAppStore.getState().queueCounts.orders).toEqual({ active: 12, dlq: 1 });
+    });
+    expect(mockSafeInvoke).toHaveBeenCalledWith(
+      "get_entity_counts",
+      expect.anything(),
+      { args: { connectionId: CONN.id, queueNames: ["orders"], topicNames: ["billing"] } }
+    );
+    expect(mockSafeInvoke).toHaveBeenCalledTimes(2);
+  });
+
+  it("skips overlapping full count refreshes", async () => {
+    mockSafeInvoke.mockResolvedValueOnce({ queues: [], topics: {} });
+    const { result } = renderHook(() => useEntityList());
+    await waitFor(() => expect(mockSafeInvoke).toHaveBeenCalledTimes(1));
+
+    useAppStore.getState().setEntities({ queues: ["orders"], topics: {} });
+    mockSafeInvoke.mockImplementationOnce(() => new Promise(() => {}));
+
+    let first!: boolean;
+    let second!: boolean;
+    act(() => {
+      first = result.current.refreshAllCounts();
+      second = result.current.refreshAllCounts();
+    });
+
+    expect(first).toBe(true);
+    expect(second).toBe(false);
+    expect(mockSafeInvoke).toHaveBeenCalledTimes(2);
   });
 });
