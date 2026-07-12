@@ -42,11 +42,11 @@ jobs:
       - name: Run frontend tests
         run: bun run test:frontend
 
+      - name: Build worker sidecar
+        run: bun run build-sidecar
+
       - name: Run Rust tests
         run: bun run test:rust
 
       - name: Run Go worker tests
         run: bun run test:go
-
-      - name: Build worker sidecar
-        run: bun run build-sidecar
