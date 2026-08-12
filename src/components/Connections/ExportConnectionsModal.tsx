@@ -22,6 +22,7 @@ export function ExportConnectionsModal({ onClose }: Props) {
       : password !== confirm
       ? t("connections.exportModal.passwordMismatch")
       : null;
+  const feedback = error ?? ((password || confirm) ? validationError : null);
 
   const handleExport = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -40,24 +41,29 @@ export function ExportConnectionsModal({ onClose }: Props) {
   };
 
   return (
-    <div className="bg-white dark:bg-zinc-900 rounded-lg shadow-2xl border border-zinc-200 dark:border-zinc-700 w-full max-w-md">
-      <div className="px-5 py-3.5 border-b border-zinc-200 dark:border-zinc-700">
-        <h2 className="text-sm font-semibold text-azure-dark dark:text-azure-light">
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="export-connections-title"
+      className="flex min-h-[22rem] w-full max-w-md flex-col rounded-lg border border-zinc-200 bg-white shadow-2xl dark:border-zinc-700 dark:bg-zinc-900"
+    >
+      <div className="shrink-0 px-5 py-3.5 border-b border-zinc-200 dark:border-zinc-700">
+        <h2 id="export-connections-title" className="text-sm font-semibold text-azure-dark dark:text-azure-light">
           {t("connections.exportModal.title")}
         </h2>
       </div>
 
-      <div className="px-5 py-4">
+      <div className="flex flex-1 flex-col px-5 py-4">
         <p className="text-xs text-zinc-500 dark:text-zinc-400 mb-4">
           {t("connections.exportModal.description")}
         </p>
 
         {success ? (
-          <div className="space-y-4">
-            <p className="text-xs text-green-600 dark:text-green-400 font-medium">
+          <div className="flex flex-1 flex-col">
+            <p role="status" aria-live="polite" className="text-xs text-green-600 dark:text-green-400 font-medium">
               {t("connections.exportModal.success")}
             </p>
-            <div className="flex justify-end">
+            <div className="mt-auto flex justify-end">
               <button
                 onClick={onClose}
                 className="text-xs px-4 py-1.5 rounded bg-azure-primary text-white hover:bg-azure-primary/90"
@@ -67,12 +73,13 @@ export function ExportConnectionsModal({ onClose }: Props) {
             </div>
           </div>
         ) : (
-          <form onSubmit={handleExport} className="space-y-3">
+          <form onSubmit={handleExport} className="flex flex-1 flex-col gap-3">
             <div className="flex flex-col gap-1">
-              <label className="text-xs font-medium text-zinc-600 dark:text-zinc-300">
+              <label htmlFor="export-connections-password" className="text-xs font-medium text-zinc-600 dark:text-zinc-300">
                 {t("connections.exportModal.password")}
               </label>
               <input
+                id="export-connections-password"
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
@@ -81,10 +88,11 @@ export function ExportConnectionsModal({ onClose }: Props) {
               />
             </div>
             <div className="flex flex-col gap-1">
-              <label className="text-xs font-medium text-zinc-600 dark:text-zinc-300">
+              <label htmlFor="export-connections-confirm" className="text-xs font-medium text-zinc-600 dark:text-zinc-300">
                 {t("connections.exportModal.confirmPassword")}
               </label>
               <input
+                id="export-connections-confirm"
                 type="password"
                 value={confirm}
                 onChange={(e) => setConfirm(e.target.value)}
@@ -92,12 +100,11 @@ export function ExportConnectionsModal({ onClose }: Props) {
               />
             </div>
 
-            {validationError && (password || confirm) && (
-              <p className="text-xs text-red-500 dark:text-red-400">{validationError}</p>
-            )}
-            {error && <p className="text-xs text-red-500 dark:text-red-400">{error}</p>}
+            <div className="h-8 overflow-y-auto" aria-live="assertive">
+              {feedback && <p role="alert" className="break-words text-xs text-red-500 dark:text-red-400">{feedback}</p>}
+            </div>
 
-            <div className="flex justify-end gap-2 pt-1">
+            <div className="mt-auto flex justify-end gap-2 pt-1">
               <button
                 type="button"
                 onClick={onClose}

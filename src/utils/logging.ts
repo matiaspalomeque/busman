@@ -5,7 +5,7 @@ type LogLevel = "error" | "warn" | "info";
 type LogContext = Record<string, unknown>;
 
 const MAX_DETAIL_CHARS = 20_000;
-const SENSITIVE_KEY_PATTERN = /(password|connectionstring|sharedaccesskey|sharedaccesssignature|secret|token)/i;
+const SENSITIVE_KEY_PATTERN = /(password|connectionstring|sharedaccesskey|sharedaccesssignature|secret|token|statebase64)/i;
 
 export function isTauriRuntime(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;

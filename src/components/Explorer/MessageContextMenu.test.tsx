@@ -7,7 +7,12 @@ import { MessageContextMenu } from "./MessageContextMenu";
 import { messageOperationKey } from "../../utils/messageOperation";
 
 const mocks = vi.hoisted(() => ({
+  invoke: vi.fn(),
   runOperation: vi.fn(),
+}));
+
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: mocks.invoke,
 }));
 
 vi.mock("../../hooks/useScript", () => ({
@@ -54,6 +59,7 @@ function renderMenu(msg: PeekedMessage) {
 describe("MessageContextMenu", () => {
   beforeEach(() => {
     useAppStore.setState(useAppStore.getInitialState());
+    mocks.invoke.mockReset();
     mocks.runOperation.mockReset();
     vi.spyOn(crypto, "randomUUID").mockReturnValue(
       "00000000-0000-0000-0000-000000000001" as `${string}-${string}-${string}-${string}-${string}`,
@@ -82,6 +88,142 @@ describe("MessageContextMenu", () => {
     expect(screen.getByText("Delete this message")).toBeTruthy();
   });
 
+  it("gets, replaces, and clears the exact queue session state from a DLQ message", async () => {
+    mocks.invoke
+      .mockResolvedValueOnce({
+        encoding: "base64",
+        stateBase64: "AP8=",
+        byteLength: 2,
+        hasState: true,
+      })
+      .mockResolvedValueOnce({
+        encoding: "base64",
+        stateBase64: "aGVsbG8=",
+        byteLength: 5,
+        hasState: true,
+      })
+      .mockResolvedValueOnce({
+        encoding: "base64",
+        stateBase64: "",
+        byteLength: 0,
+        hasState: false,
+      });
+    renderMenu({
+      ...message("Dead Letter Queue: q1"),
+      sessionId: "session-42",
+    });
+
+    fireEvent.click(screen.getByText("Manage Session State…"));
+
+    const stateInput = await screen.findByLabelText("Session state (base64)");
+    await waitFor(() => {
+      expect((stateInput as HTMLTextAreaElement).value).toBe("AP8=");
+    });
+    expect(mocks.invoke).toHaveBeenNthCalledWith(1, "get_session_state", {
+      args: {
+        connectionId: CONN.id,
+        queueName: "q1",
+        topicName: undefined,
+        subscriptionName: undefined,
+        sessionId: "session-42",
+      },
+    });
+
+    fireEvent.change(stateInput, { target: { value: "aGVsbG8=" } });
+    fireEvent.click(screen.getByRole("button", { name: "Set State" }));
+    fireEvent.click(screen.getByRole("button", { name: "Replace State" }));
+    await waitFor(() => {
+      expect(mocks.invoke).toHaveBeenNthCalledWith(2, "set_session_state", {
+        args: {
+          connectionId: CONN.id,
+          queueName: "q1",
+          topicName: undefined,
+          subscriptionName: undefined,
+          sessionId: "session-42",
+          stateBase64: "aGVsbG8=",
+        },
+      });
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Clear State" }));
+    fireEvent.click(screen.getAllByRole("button", { name: "Clear State" })[0]);
+    await waitFor(() => {
+      expect(mocks.invoke).toHaveBeenNthCalledWith(3, "clear_session_state", {
+        args: {
+          connectionId: CONN.id,
+          queueName: "q1",
+          topicName: undefined,
+          subscriptionName: undefined,
+          sessionId: "session-42",
+        },
+      });
+    });
+  });
+
+  it.each(["AB==", "AAB="])(
+    "blocks noncanonical session state %s before invoking the set command",
+    async (stateBase64) => {
+      mocks.invoke.mockResolvedValueOnce({
+        encoding: "base64",
+        stateBase64: "",
+        byteLength: 0,
+        hasState: false,
+      });
+      renderMenu({
+        ...message("Dead Letter Queue: q1"),
+        sessionId: "session-42",
+      });
+
+      fireEvent.click(screen.getByText("Manage Session State…"));
+
+      const stateInput = await screen.findByLabelText("Session state (base64)");
+      await waitFor(() => {
+        expect((stateInput as HTMLTextAreaElement).disabled).toBe(false);
+      });
+      fireEvent.change(stateInput, { target: { value: stateBase64 } });
+      fireEvent.click(screen.getByRole("button", { name: "Set State" }));
+
+      expect((await screen.findByRole("alert")).textContent).toContain(
+        "Enter canonical standard base64",
+      );
+      expect(mocks.invoke).toHaveBeenCalledTimes(1);
+      expect(screen.queryByRole("button", { name: "Replace State" })).toBeNull();
+    },
+  );
+
+  it("maps a subscription session message to its parent topic and subscription", async () => {
+    mocks.invoke.mockResolvedValueOnce({
+      encoding: "base64",
+      stateBase64: "",
+      byteLength: 0,
+      hasState: false,
+    });
+    const store = useAppStore.getState();
+    store.setConnections([CONN]);
+    store.setActiveConnectionId(CONN.id);
+    store.setExplorerSubscription("events", "processor");
+    store.setMessageContextMenu({
+      x: 10,
+      y: 10,
+      msg: { ...message("Normal Subscription: events/processor"), sessionId: "s-1" },
+    });
+    render(<MessageContextMenu />);
+
+    fireEvent.click(screen.getByText("Manage Session State…"));
+
+    await waitFor(() => {
+      expect(mocks.invoke).toHaveBeenCalledWith("get_session_state", {
+        args: {
+          connectionId: CONN.id,
+          queueName: undefined,
+          topicName: "events",
+          subscriptionName: "processor",
+          sessionId: "s-1",
+        },
+      });
+    });
+  });
+
   it("starts a pending row operation and clears it when the action settles", async () => {
     let resolveRun!: (value: { exitCode: number }) => void;
     mocks.runOperation.mockReturnValue(
@@ -108,7 +250,7 @@ describe("MessageContextMenu", () => {
       "single_message_action",
       expect.objectContaining({
         action: "replay",
-        sequenceNumber: 42,
+        sequenceNumber: "42",
         messageId: "msg-42",
         sessionId: "session-42",
         state: "deferred",
@@ -122,6 +264,20 @@ describe("MessageContextMenu", () => {
     await waitFor(() => {
       expect(useAppStore.getState().pendingMessageOperations[key!]).toBeUndefined();
     });
+  });
+
+  it("targets a sequence number beyond JavaScript's safe integer range without coercion", () => {
+    mocks.runOperation.mockResolvedValue({ exitCode: 0 });
+    renderMenu(message("Dead Letter Queue: q1", "9007199254740993"));
+
+    fireEvent.click(screen.getByText("Delete this message"));
+    fireEvent.click(screen.getByText("Delete"));
+
+    expect(mocks.runOperation).toHaveBeenCalledWith(
+      "single_message_action",
+      expect.objectContaining({ sequenceNumber: "9007199254740993" }),
+      { scope: "atomic", runId: "00000000-0000-0000-0000-000000000001" },
+    );
   });
 
   it("disables destructive actions only for the row that is already pending", () => {

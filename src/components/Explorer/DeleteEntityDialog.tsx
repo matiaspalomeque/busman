@@ -118,7 +118,7 @@ export function DeleteEntityDialog() {
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
       onClick={(e) => e.target === e.currentTarget && close()}
     >
-      <div role="dialog" aria-modal="true" className="bg-white dark:bg-zinc-900 rounded-lg shadow-xl w-full max-w-sm mx-4 overflow-hidden border border-zinc-200 dark:border-zinc-700">
+      <div role="dialog" aria-modal="true" className="flex min-h-[17rem] w-full max-w-sm flex-col overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-xl mx-4 dark:border-zinc-700 dark:bg-zinc-900">
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-200 dark:border-zinc-700">
           <h2 className="text-sm font-semibold text-red-600 dark:text-red-400 flex items-center gap-2">
@@ -131,7 +131,7 @@ export function DeleteEntityDialog() {
         </div>
 
         {/* Body */}
-        <div className="px-4 py-4 space-y-3">
+        <div className="flex-1 px-4 py-4 space-y-3">
           <p className="text-xs text-zinc-600 dark:text-zinc-300">
             {t("explorer.entityManagement.deleteConfirm", { type: typeLabel, name: displayName })}
           </p>
@@ -142,11 +142,13 @@ export function DeleteEntityDialog() {
             </p>
           )}
 
-          {error && (
-            <div className="text-xs text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 px-3 py-2 rounded">
-              {error}
-            </div>
-          )}
+          <div className="h-12 overflow-y-auto" aria-live="assertive">
+            {error && (
+              <div role="alert" className="text-xs text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 px-3 py-2 rounded">
+                {error}
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Footer */}

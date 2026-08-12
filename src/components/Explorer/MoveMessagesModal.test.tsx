@@ -22,10 +22,10 @@ const CONN: Connection = {
   env: {},
 };
 
-function message(): PeekedMessage {
+function message(sequenceNumber = "42"): PeekedMessage {
   return {
-    messageId: "msg-42",
-    sequenceNumber: "42",
+    messageId: `msg-${sequenceNumber}`,
+    sequenceNumber,
     body: { ok: true },
     subject: null,
     contentType: "application/json",
@@ -80,7 +80,7 @@ describe("MoveMessagesModal", () => {
       "single_message_action",
       expect.objectContaining({
         action: "move",
-        sequenceNumber: 42,
+        sequenceNumber: "42",
         isDlq: true,
         queueName: "q1",
         destQueue: "q2",
@@ -91,6 +91,21 @@ describe("MoveMessagesModal", () => {
         source: "Dead Letter Queue: q1",
         sourceSubQueue: "deadLetter",
       }),
+      { scope: "atomic", runId: "00000000-0000-0000-0000-000000000001" },
+    );
+  });
+
+  it("passes the signed int64 maximum to an atomic move as an exact string", () => {
+    renderSingleMoveModal(message("9223372036854775807"));
+
+    fireEvent.change(screen.getByPlaceholderText("target-queue"), {
+      target: { value: "q2" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Move" }));
+
+    expect(mocks.runOperation).toHaveBeenCalledWith(
+      "single_message_action",
+      expect.objectContaining({ sequenceNumber: "9223372036854775807" }),
       { scope: "atomic", runId: "00000000-0000-0000-0000-000000000001" },
     );
   });

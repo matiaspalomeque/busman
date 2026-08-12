@@ -6,8 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"os"
-	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -41,9 +39,11 @@ func getAdminClient(connectionString string) (*admin.Client, error) {
 const entityNameMaxLen = 260
 const maxReceiveBatchSize = 500
 const maxPeekBatchSize = 500
+const maxPeekPageMessages = 5000
 const maxSearchMatches = 10000
 
 var entityNameRe = regexp.MustCompile(`^[a-zA-Z0-9._\-/]+$`)
+var sequenceNumberRe = regexp.MustCompile(`^(0|[1-9][0-9]*)$`)
 
 func requireConnectionString(env map[string]string) (string, error) {
 	cs := env["SERVICE_BUS_CONNECTION_STRING"]
@@ -89,6 +89,31 @@ func parseIntOrDefault(s string, def int) int {
 		return def
 	}
 	return v
+}
+
+func parseSequenceNumber(s string) (int64, error) {
+	if !sequenceNumberRe.MatchString(s) {
+		return 0, fmt.Errorf("sequence number must be a canonical non-negative 64-bit integer")
+	}
+	value, err := strconv.ParseInt(s, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("sequence number must be a canonical non-negative 64-bit integer")
+	}
+	return value, nil
+}
+
+func sequenceNumberValue(sequenceNumber *int64) any {
+	if sequenceNumber == nil {
+		return nil
+	}
+	return strconv.FormatInt(*sequenceNumber, 10)
+}
+
+func nextSequenceNumber(sequenceNumber int64) (int64, bool) {
+	if sequenceNumber == math.MaxInt64 {
+		return 0, false
+	}
+	return sequenceNumber + 1, true
 }
 
 func boundedIntFromEnv(env map[string]string, key string, def int, max int) int {
@@ -577,1779 +602,259 @@ func (s *subscriptionSource) label(queueFallback string) string {
 	return queueFallback
 }
 
-// ─── 3. emptyMessages ────────────────────────────────────────────────────────
-
-type emptyMessagesParams struct {
-	QueueName string            `json:"queueName"`
-	Mode      string            `json:"mode"`
-	Env       map[string]string `json:"env"`
-	RunID     string            `json:"runId"`
-	subscriptionSource
+type destructiveMessageReceiver interface {
+	ReceiveMessages(context.Context, int, *azservicebus.ReceiveMessagesOptions) ([]*azservicebus.ReceivedMessage, error)
+	CompleteMessage(context.Context, *azservicebus.ReceivedMessage, *azservicebus.CompleteMessageOptions) error
+	Close(context.Context) error
 }
 
-func handleEmptyMessages(requestCtx context.Context, raw json.RawMessage) (any, error) {
-	var p emptyMessagesParams
-	if err := json.Unmarshal(raw, &p); err != nil {
-		return nil, fmt.Errorf("invalid params: %w", err)
+type sessionLockReceiver interface {
+	SessionID() string
+	LockedUntil() time.Time
+	RenewSessionLock(context.Context, *azservicebus.RenewSessionLockOptions) error
+}
+
+type managedSessionReceiver interface {
+	destructiveMessageReceiver
+	sessionLockReceiver
+}
+
+type sessionLockRenewer struct {
+	cancel context.CancelFunc
+	done   chan struct{}
+	mu     sync.Mutex
+	err    error
+}
+
+func sessionLockRenewInterval(now, lockedUntil time.Time) time.Duration {
+	remaining := lockedUntil.Sub(now)
+	if lockedUntil.IsZero() || remaining <= 0 {
+		return time.Second
 	}
-	cs, err := requireConnectionString(p.Env)
-	if err != nil {
-		return nil, err
+	interval := remaining / 2
+	if interval > 20*time.Second {
+		interval = 20 * time.Second
 	}
-	mode, err := validateMode(p.Mode, "both")
-	if err != nil {
-		return nil, err
+	if interval < 100*time.Millisecond {
+		interval = 100 * time.Millisecond
 	}
-	if p.isSubscription() {
-		if err := validateEntityName(p.TopicName, "Topic"); err != nil {
-			return nil, err
-		}
-		if err := validateEntityName(p.SubscriptionName, "Subscription"); err != nil {
-			return nil, err
-		}
-	} else {
-		if err := validateEntityName(p.QueueName, "Queue"); err != nil {
-			return nil, err
-		}
+	return interval
+}
+
+func startSessionLockRenewer(parent context.Context, receiver sessionLockReceiver, maxWaitMs int, interval time.Duration) *sessionLockRenewer {
+	ctx, cancel := context.WithCancel(parent)
+	renewer := &sessionLockRenewer{
+		cancel: cancel,
+		done:   make(chan struct{}),
+	}
+	if maxWaitMs < 1000 {
+		maxWaitMs = 1000
 	}
 
-	batchSize := boundedIntFromEnv(p.Env, "RECEIVE_MESSAGES_COUNT", 50, maxReceiveBatchSize)
-	maxWaitMs := parseIntOrDefault(p.Env["MAX_WAIT_TIME_IN_MS"], 5000)
-	drainWaitMs := resolveDrainReceiveWaitMs(p.Env, maxWaitMs)
-	emptyProgressIntervalMs := parseIntOrDefault(p.Env["EMPTY_PROGRESS_INTERVAL_MS"], 1000)
-	if emptyProgressIntervalMs < 50 {
-		emptyProgressIntervalMs = 50
-	}
-	completeConcurrency := parseIntOrDefault(p.Env["COMPLETE_CONCURRENCY"], 8)
-	if completeConcurrency < 1 {
-		completeConcurrency = 1
-	}
-	if completeConcurrency > 32 {
-		completeConcurrency = 32
-	}
-	startedAt := time.Now()
-
-	client, err := azservicebus.NewClientFromConnectionString(cs, nil)
-	if err != nil {
-		return nil, fmt.Errorf("service bus client error: %w", err)
-	}
-	defer closeWithTimeout(client)
-
-	grandTotal := 0
-
-	runOne := func(receiver *azservicebus.Receiver, queueType string) (int, error) {
-		defer closeWithTimeout(receiver)
-		totalDeleted := 0
-		stageStart := time.Now()
-		lastProgressEmitAt := time.Time{}
-
-		emitOutput(p.RunID, "🚀 Starting to empty "+queueType+"...", false, elapsedSince(startedAt))
-		emitOutput(p.RunID, fmt.Sprintf("   Batch size: %d, First wait: %dms, Drain wait: %dms", batchSize, maxWaitMs, drainWaitMs), false, elapsedSince(startedAt))
-
+	go func() {
+		defer close(renewer.done)
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
 		for {
-			receiveWaitMs := maxWaitMs
-			if totalDeleted > 0 {
-				receiveWaitMs = drainWaitMs
-			}
-			ctx, cancel := context.WithTimeout(requestCtx, time.Duration(receiveWaitMs)*time.Millisecond)
-			messages, recvErr := receiver.ReceiveMessages(ctx, batchSize, nil)
-			cancel()
-
-			if recvErr != nil && len(messages) == 0 {
-				if requestCtx.Err() != nil {
-					return totalDeleted, requestCtx.Err()
-				}
-				if errors.Is(recvErr, context.DeadlineExceeded) || errors.Is(recvErr, context.Canceled) {
-					emitOutput(p.RunID, "✨ No more messages found in "+queueType+".", false, elapsedSince(startedAt))
-					break
-				}
-				return totalDeleted, fmt.Errorf("receive error: %w", recvErr)
-			}
-			if len(messages) == 0 {
-				emitOutput(p.RunID, "✨ No more messages found in "+queueType+".", false, elapsedSince(startedAt))
-				break
-			}
-
-			// Complete messages in parallel with bounded concurrency.
-			sem := make(chan struct{}, completeConcurrency)
-			var wg sync.WaitGroup
-			errCh := make(chan error, len(messages))
-			completedCh := make(chan struct{}, len(messages))
-			for _, msg := range messages {
-				wg.Add(1)
-				go func(m *azservicebus.ReceivedMessage) {
-					defer wg.Done()
-					sem <- struct{}{}
-					defer func() { <-sem }()
-					completeCtx, completeCancel := cancellableOperationContext(requestCtx, p.Env, maxWaitMs)
-					defer completeCancel()
-					if err := receiver.CompleteMessage(completeCtx, m, nil); err != nil {
-						errCh <- fmt.Errorf("complete message error: %w", err)
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				renewCtx, renewCancel := context.WithTimeout(ctx, time.Duration(maxWaitMs)*time.Millisecond)
+				err := receiver.RenewSessionLock(renewCtx, nil)
+				renewCancel()
+				if err != nil {
+					if ctx.Err() != nil {
 						return
 					}
-					completedCh <- struct{}{}
-				}(msg)
-			}
-			wg.Wait()
-			close(errCh)
-			close(completedCh)
-			for range completedCh {
-				totalDeleted++
-			}
-			if err := <-errCh; err != nil {
-				return totalDeleted, err
-			}
-
-			stageMs := time.Since(stageStart).Milliseconds()
-			overallRate := calculateRate(totalDeleted, stageMs)
-			progress := fmt.Sprintf("🗑️ Deleted: %d | Avg Rate: %d msg/s",
-				totalDeleted, overallRate)
-			now := time.Now()
-			if lastProgressEmitAt.IsZero() ||
-				now.Sub(lastProgressEmitAt) >= time.Duration(emptyProgressIntervalMs)*time.Millisecond {
-				emitProgress(p.RunID, progress, elapsedSince(startedAt))
-				lastProgressEmitAt = now
-			}
-		}
-
-		emitOutput(p.RunID,
-			fmt.Sprintf("✅ Finished %s. Total deleted: %d in %.1fs",
-				queueType, totalDeleted, time.Since(stageStart).Seconds()),
-			false, elapsedSince(startedAt))
-		return totalDeleted, nil
-	}
-
-	type emptyResult struct {
-		deleted int
-		err     error
-	}
-
-	newReceiver := func(opts *azservicebus.ReceiverOptions) (*azservicebus.Receiver, error) {
-		if p.isSubscription() {
-			return client.NewReceiverForSubscription(p.TopicName, p.SubscriptionName, opts)
-		}
-		return client.NewReceiverForQueue(p.QueueName, opts)
-	}
-
-	entityKind := "queue"
-	if p.isSubscription() {
-		entityKind = "subscription"
-	}
-
-	if mode != "both" {
-		label := "normal " + entityKind + ": " + p.label(p.QueueName)
-		var opts *azservicebus.ReceiverOptions
-		if mode == "dlq" {
-			label = "dead letter " + entityKind + ": " + p.label(p.QueueName)
-			opts = &azservicebus.ReceiverOptions{SubQueue: azservicebus.SubQueueDeadLetter}
-		}
-		receiver, err := newReceiver(opts)
-		if err != nil {
-			return nil, err
-		}
-		deleted, err := runOne(receiver, label)
-		if err != nil {
-			if deleted > 0 {
-				emitOutput(p.RunID,
-					fmt.Sprintf("⚠ Operation stopped after %d messages were confirmed deleted.", deleted),
-					true, elapsedSince(startedAt))
-			}
-			return nil, err
-		}
-		grandTotal = deleted
-	} else {
-		results := make(chan emptyResult, 2)
-		var wg sync.WaitGroup
-
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			receiver, err := newReceiver(nil)
-			if err != nil {
-				results <- emptyResult{err: err}
-				return
-			}
-			deleted, err := runOne(receiver, "normal "+entityKind+": "+p.label(p.QueueName))
-			results <- emptyResult{deleted: deleted, err: err}
-		}()
-
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			receiver, err := newReceiver(&azservicebus.ReceiverOptions{SubQueue: azservicebus.SubQueueDeadLetter})
-			if err != nil {
-				results <- emptyResult{err: err}
-				return
-			}
-			deleted, err := runOne(receiver, "dead letter "+entityKind+": "+p.label(p.QueueName))
-			results <- emptyResult{deleted: deleted, err: err}
-		}()
-
-		go func() { wg.Wait(); close(results) }()
-
-		var firstErr error
-		for r := range results {
-			if r.err != nil && firstErr == nil {
-				firstErr = r.err
-			}
-			grandTotal += r.deleted
-		}
-		if firstErr != nil {
-			if grandTotal > 0 {
-				emitOutput(p.RunID,
-					fmt.Sprintf("⚠ Operation stopped after %d messages were confirmed deleted.", grandTotal),
-					true, elapsedSince(startedAt))
-			}
-			return nil, fmt.Errorf("empty operation stopped after deleting %d messages: %w", grandTotal, firstErr)
-		}
-	}
-
-	return map[string]int{"totalDeleted": grandTotal}, nil
-}
-
-// ─── 4. moveMessages ─────────────────────────────────────────────────────────
-
-type moveMessagesParams struct {
-	SourceQueue string            `json:"sourceQueue"`
-	DestQueue   string            `json:"destQueue"`
-	Mode        string            `json:"mode"`
-	Env         map[string]string `json:"env"`
-	RunID       string            `json:"runId"`
-	subscriptionSource
-}
-
-func validateMoveSourceDest(sourceQueue, destQueue, mode string, isSubscription bool) error {
-	// When source is a subscription, source and dest are always different entity types.
-	if isSubscription {
-		return nil
-	}
-	// DLQ re-drive back into the same queue is valid because source (DLQ) and destination (main) are different subqueues.
-	if sourceQueue == destQueue && mode != "dlq" {
-		return fmt.Errorf("source and destination queues must be different when mode is normal or both")
-	}
-	return nil
-}
-
-func resolveDrainReceiveWaitMs(env map[string]string, maxWaitMs int) int {
-	drainWaitMs := parseIntOrDefault(env["DRAIN_IDLE_WAIT_TIME_IN_MS"], 3000)
-	if drainWaitMs > maxWaitMs {
-		return maxWaitMs
-	}
-	return drainWaitMs
-}
-
-func handleMoveMessages(requestCtx context.Context, raw json.RawMessage) (any, error) {
-	var p moveMessagesParams
-	if err := json.Unmarshal(raw, &p); err != nil {
-		return nil, fmt.Errorf("invalid params: %w", err)
-	}
-	cs, err := requireConnectionString(p.Env)
-	if err != nil {
-		return nil, err
-	}
-	mode, err := validateMode(p.Mode, "both")
-	if err != nil {
-		return nil, err
-	}
-	if p.isSubscription() {
-		if err := validateEntityName(p.TopicName, "Topic"); err != nil {
-			return nil, err
-		}
-		if err := validateEntityName(p.SubscriptionName, "Subscription"); err != nil {
-			return nil, err
-		}
-	} else {
-		if err := validateEntityName(p.SourceQueue, "Source queue"); err != nil {
-			return nil, err
-		}
-	}
-	if err := validateEntityName(p.DestQueue, "Destination queue"); err != nil {
-		return nil, err
-	}
-	if err := validateMoveSourceDest(p.SourceQueue, p.DestQueue, mode, p.isSubscription()); err != nil {
-		return nil, err
-	}
-
-	batchSize := boundedIntFromEnv(p.Env, "RECEIVE_MESSAGES_COUNT", 50, maxReceiveBatchSize)
-	maxWaitMs := parseIntOrDefault(p.Env["MAX_WAIT_TIME_IN_MS"], 5000)
-	drainWaitMs := resolveDrainReceiveWaitMs(p.Env, maxWaitMs)
-	moveProgressIntervalMs := parseIntOrDefault(p.Env["MOVE_PROGRESS_INTERVAL_MS"], 500)
-	if moveProgressIntervalMs < 50 {
-		moveProgressIntervalMs = 50
-	}
-	completeConcurrency := parseIntOrDefault(p.Env["COMPLETE_CONCURRENCY"], 8)
-	if completeConcurrency < 1 {
-		completeConcurrency = 1
-	}
-	if completeConcurrency > 32 {
-		completeConcurrency = 32
-	}
-	startedAt := time.Now()
-
-	client, err := azservicebus.NewClientFromConnectionString(cs, nil)
-	if err != nil {
-		return nil, fmt.Errorf("service bus client error: %w", err)
-	}
-	defer closeWithTimeout(client)
-
-	sender, err := client.NewSender(p.DestQueue, nil)
-	if err != nil {
-		return nil, fmt.Errorf("sender error: %w", err)
-	}
-	defer closeWithTimeout(sender)
-
-	grandTotal := 0
-
-	runOne := func(receiver *azservicebus.Receiver, queueType string) (int, error) {
-		defer closeWithTimeout(receiver)
-		totalMoved := 0
-		stageStart := time.Now()
-		lastProgressEmitAt := time.Time{}
-
-		for {
-			receiveWaitMs := maxWaitMs
-			if totalMoved > 0 {
-				receiveWaitMs = drainWaitMs
-			}
-			ctx, cancel := context.WithTimeout(requestCtx, time.Duration(receiveWaitMs)*time.Millisecond)
-			messages, recvErr := receiver.ReceiveMessages(ctx, batchSize, nil)
-			cancel()
-
-			if recvErr != nil && len(messages) == 0 {
-				if requestCtx.Err() != nil {
-					return totalMoved, requestCtx.Err()
-				}
-				if errors.Is(recvErr, context.DeadlineExceeded) || errors.Is(recvErr, context.Canceled) {
-					emitOutput(p.RunID, "✨ No more messages found in "+queueType+".", false, elapsedSince(startedAt))
-					break
-				}
-				return totalMoved, fmt.Errorf("receive error: %w", recvErr)
-			}
-			if len(messages) == 0 {
-				emitOutput(p.RunID, "✨ No more messages found in "+queueType+".", false, elapsedSince(startedAt))
-				break
-			}
-
-			sendAndCompleteBatch := func(
-				outboundBatch *azservicebus.MessageBatch,
-				sourceMessages []*azservicebus.ReceivedMessage,
-			) (int, error) {
-				if outboundBatch.NumMessages() == 0 {
-					return 0, nil
-				}
-				sendCtx, sendCancel := cancellableOperationContext(requestCtx, p.Env, maxWaitMs)
-				defer sendCancel()
-				if err := sender.SendMessageBatch(sendCtx, outboundBatch, nil); err != nil {
-					return 0, fmt.Errorf("send message batch error: %w", err)
-				}
-				// Complete source messages in parallel with bounded concurrency.
-				sem := make(chan struct{}, completeConcurrency)
-				var wg sync.WaitGroup
-				errCh := make(chan error, len(sourceMessages))
-				completedCh := make(chan struct{}, len(sourceMessages))
-				for _, srcMsg := range sourceMessages {
-					wg.Add(1)
-					go func(msg *azservicebus.ReceivedMessage) {
-						defer wg.Done()
-						sem <- struct{}{}
-						defer func() { <-sem }()
-						completeCtx, completeCancel := cancellableOperationContext(requestCtx, p.Env, maxWaitMs)
-						defer completeCancel()
-						if err := receiver.CompleteMessage(completeCtx, msg, nil); err != nil {
-							errCh <- fmt.Errorf("complete message error: %w", err)
-							return
-						}
-						completedCh <- struct{}{}
-					}(srcMsg)
-				}
-				wg.Wait()
-				close(errCh)
-				close(completedCh)
-				confirmed := 0
-				for range completedCh {
-					confirmed++
-				}
-				if err := <-errCh; err != nil {
-					failure := fmt.Errorf(
-						"destination accepted %d messages but source settlement failed; duplicate delivery is possible: %w",
-						outboundBatch.NumMessages(),
-						err,
-					)
-					emitOutput(p.RunID, "⚠ "+failure.Error(), true, elapsedSince(startedAt))
-					return confirmed, failure
-				}
-				return confirmed, nil
-			}
-
-			batchCtx, batchCancel := cancellableOperationContext(requestCtx, p.Env, maxWaitMs)
-			outboundBatch, err := sender.NewMessageBatch(batchCtx, nil)
-			batchCancel()
-			if err != nil {
-				return totalMoved, fmt.Errorf("create message batch error: %w", err)
-			}
-			sourceMessagesForBatch := make([]*azservicebus.ReceivedMessage, 0, len(messages))
-
-			for _, msg := range messages {
-				newMsg := &azservicebus.Message{
-					Body:                  msg.Body,
-					ContentType:           msg.ContentType,
-					CorrelationID:         msg.CorrelationID,
-					Subject:               msg.Subject,
-					PartitionKey:          msg.PartitionKey,
-					ApplicationProperties: msg.ApplicationProperties,
-					To:                    msg.To,
-					ReplyTo:               msg.ReplyTo,
-					ReplyToSessionID:      msg.ReplyToSessionID,
-					SessionID:             msg.SessionID,
-					TimeToLive:            msg.TimeToLive,
-				}
-				if msg.MessageID != "" {
-					idCopy := msg.MessageID
-					newMsg.MessageID = &idCopy
-				}
-
-				addErr := outboundBatch.AddMessage(newMsg, nil)
-				if addErr != nil {
-					if errors.Is(addErr, azservicebus.ErrMessageTooLarge) {
-						// Flush the current batch and retry adding the large message in a fresh batch.
-						if outboundBatch.NumMessages() == 0 {
-							return totalMoved, fmt.Errorf("send message error: message %q is too large for Service Bus batch", msg.MessageID)
-						}
-						confirmed, err := sendAndCompleteBatch(outboundBatch, sourceMessagesForBatch)
-						totalMoved += confirmed
-						if err != nil {
-							return totalMoved, fmt.Errorf("move stopped after %d confirmed messages: %w", totalMoved, err)
-						}
-
-						batchCtx, batchCancel := cancellableOperationContext(requestCtx, p.Env, maxWaitMs)
-						outboundBatch, err = sender.NewMessageBatch(batchCtx, nil)
-						batchCancel()
-						if err != nil {
-							return totalMoved, fmt.Errorf("create message batch error: %w", err)
-						}
-						sourceMessagesForBatch = sourceMessagesForBatch[:0]
-
-						addErr = outboundBatch.AddMessage(newMsg, nil)
-					}
-					if addErr != nil {
-						if errors.Is(addErr, azservicebus.ErrMessageTooLarge) {
-							return totalMoved, fmt.Errorf("send message error: message %q is too large for Service Bus batch", msg.MessageID)
-						}
-						return totalMoved, fmt.Errorf("add message to batch error: %w", addErr)
-					}
-				}
-				sourceMessagesForBatch = append(sourceMessagesForBatch, msg)
-			}
-
-			confirmed, err := sendAndCompleteBatch(outboundBatch, sourceMessagesForBatch)
-			totalMoved += confirmed
-			if err != nil {
-				return totalMoved, fmt.Errorf("move stopped after %d confirmed messages: %w", totalMoved, err)
-			}
-
-			stageMs := time.Since(stageStart).Milliseconds()
-			overallRate := calculateRate(totalMoved, stageMs)
-			progress := fmt.Sprintf("📦 Moved: %d | Avg Rate: %d msg/s",
-				totalMoved, overallRate)
-			now := time.Now()
-			if lastProgressEmitAt.IsZero() ||
-				now.Sub(lastProgressEmitAt) >= time.Duration(moveProgressIntervalMs)*time.Millisecond {
-				emitProgress(p.RunID, progress, elapsedSince(startedAt))
-				lastProgressEmitAt = now
-			}
-		}
-
-		emitOutput(p.RunID,
-			fmt.Sprintf("✅ Finished %s. Total moved: %d in %.1fs",
-				queueType, totalMoved, time.Since(stageStart).Seconds()),
-			false, elapsedSince(startedAt))
-		return totalMoved, nil
-	}
-
-	type moveResult struct {
-		moved int
-		err   error
-	}
-
-	newSourceReceiver := func(opts *azservicebus.ReceiverOptions) (*azservicebus.Receiver, error) {
-		if p.isSubscription() {
-			return client.NewReceiverForSubscription(p.TopicName, p.SubscriptionName, opts)
-		}
-		return client.NewReceiverForQueue(p.SourceQueue, opts)
-	}
-
-	entityKind := "queue"
-	if p.isSubscription() {
-		entityKind = "subscription"
-	}
-
-	if mode != "both" {
-		label := "normal " + entityKind + ": " + p.label(p.SourceQueue)
-		var opts *azservicebus.ReceiverOptions
-		if mode == "dlq" {
-			label = "dead letter " + entityKind + ": " + p.label(p.SourceQueue)
-			opts = &azservicebus.ReceiverOptions{SubQueue: azservicebus.SubQueueDeadLetter}
-		}
-		receiver, err := newSourceReceiver(opts)
-		if err != nil {
-			return nil, err
-		}
-		moved, err := runOne(receiver, label)
-		if err != nil {
-			if moved > 0 {
-				emitOutput(p.RunID,
-					fmt.Sprintf("⚠ Operation stopped after %d messages were confirmed moved.", moved),
-					true, elapsedSince(startedAt))
-			}
-			return nil, err
-		}
-		grandTotal = moved
-	} else {
-		results := make(chan moveResult, 2)
-		var wg sync.WaitGroup
-
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			receiver, err := newSourceReceiver(nil)
-			if err != nil {
-				results <- moveResult{err: err}
-				return
-			}
-			moved, err := runOne(receiver, "normal "+entityKind+": "+p.label(p.SourceQueue))
-			results <- moveResult{moved: moved, err: err}
-		}()
-
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			receiver, err := newSourceReceiver(&azservicebus.ReceiverOptions{SubQueue: azservicebus.SubQueueDeadLetter})
-			if err != nil {
-				results <- moveResult{err: err}
-				return
-			}
-			moved, err := runOne(receiver, "dead letter "+entityKind+": "+p.label(p.SourceQueue))
-			results <- moveResult{moved: moved, err: err}
-		}()
-
-		go func() { wg.Wait(); close(results) }()
-
-		var firstErr error
-		for r := range results {
-			if r.err != nil && firstErr == nil {
-				firstErr = r.err
-			}
-			grandTotal += r.moved
-		}
-		if firstErr != nil {
-			if grandTotal > 0 {
-				emitOutput(p.RunID,
-					fmt.Sprintf("⚠ Operation stopped after %d messages were confirmed moved.", grandTotal),
-					true, elapsedSince(startedAt))
-			}
-			return nil, fmt.Errorf("move operation partially completed: %d messages confirmed moved: %w", grandTotal, firstErr)
-		}
-	}
-
-	return map[string]int{"totalMoved": grandTotal}, nil
-}
-
-type republishSubscriptionDlqParams struct {
-	TopicName        string            `json:"topicName"`
-	SubscriptionName string            `json:"subscriptionName"`
-	Env              map[string]string `json:"env"`
-	RunID            string            `json:"runId"`
-}
-
-func handleRepublishSubscriptionDlq(requestCtx context.Context, raw json.RawMessage) (any, error) {
-	var p republishSubscriptionDlqParams
-	if err := json.Unmarshal(raw, &p); err != nil {
-		return nil, fmt.Errorf("invalid params: %w", err)
-	}
-	if err := validateEntityName(p.TopicName, "Topic"); err != nil {
-		return nil, err
-	}
-	if err := validateEntityName(p.SubscriptionName, "Subscription"); err != nil {
-		return nil, err
-	}
-
-	moveRaw, err := json.Marshal(moveMessagesParams{
-		DestQueue: p.TopicName,
-		Mode:      "dlq",
-		Env:       p.Env,
-		RunID:     p.RunID,
-		subscriptionSource: subscriptionSource{
-			TopicName:        p.TopicName,
-			SubscriptionName: p.SubscriptionName,
-		},
-	})
-	if err != nil {
-		return nil, fmt.Errorf("marshal republish params: %w", err)
-	}
-	return handleMoveMessages(requestCtx, moveRaw)
-}
-
-// ─── 5. searchMessages ───────────────────────────────────────────────────────
-
-type searchMessagesParams struct {
-	QueueName    string            `json:"queueName"`
-	SearchString string            `json:"searchString"`
-	Mode         string            `json:"mode"`
-	MaxMatches   any               `json:"maxMatches"`
-	Env          map[string]string `json:"env"`
-	RunID        string            `json:"runId"`
-}
-
-func handleSearchMessages(requestCtx context.Context, raw json.RawMessage) (any, error) {
-	var p searchMessagesParams
-	if err := json.Unmarshal(raw, &p); err != nil {
-		return nil, fmt.Errorf("invalid params: %w", err)
-	}
-	cs, err := requireConnectionString(p.Env)
-	if err != nil {
-		return nil, err
-	}
-	mode, err := validateMode(p.Mode, "both")
-	if err != nil {
-		return nil, err
-	}
-	if err := validateEntityName(p.QueueName, "Queue"); err != nil {
-		return nil, err
-	}
-
-	searchStr := strings.TrimSpace(p.SearchString)
-	if searchStr == "" {
-		return nil, fmt.Errorf("search string is required")
-	}
-
-	maxMatches := anyToIntOrDefault(p.MaxMatches, 50)
-	if maxMatches < 1 {
-		return nil, fmt.Errorf("max matches must be a positive integer")
-	}
-	if maxMatches > maxSearchMatches {
-		maxMatches = maxSearchMatches
-	}
-
-	batchSize := boundedIntFromEnv(p.Env, "BATCH_SIZE", 50, maxPeekBatchSize)
-	maxWaitMs := parseIntOrDefault(p.Env["MAX_WAIT_TIME_IN_MS"], 60000)
-	caseSensitive := p.Env["CASE_SENSITIVE"] == "true"
-	startedAt := time.Now()
-
-	client, err := azservicebus.NewClientFromConnectionString(cs, nil)
-	if err != nil {
-		return nil, fmt.Errorf("service bus client error: %w", err)
-	}
-	defer closeWithTimeout(client)
-
-	grandChecked := 0
-	grandMatches := 0
-	reachedLimit := false
-
-	searchLower := strings.ToLower(searchStr)
-
-	runOne := func(receiver *azservicebus.Receiver, queueType string) error {
-		defer closeWithTimeout(receiver)
-		if reachedLimit {
-			return nil
-		}
-
-		totalChecked := 0
-		matchesFound := 0
-		var fromSequenceNumber *int64
-		canAdvanceCursor := true
-		stageStart := time.Now()
-
-		emitOutput(p.RunID, "🔍 Searching "+queueType+"...", false, elapsedSince(startedAt))
-		emitOutput(p.RunID,
-			fmt.Sprintf(`   Looking for: "%s" (caseSensitive=%v) | Max matches: %d`,
-				searchStr, caseSensitive, maxMatches),
-			false, elapsedSince(startedAt))
-
-		for {
-			if reachedLimit {
-				break
-			}
-
-			var opts *azservicebus.PeekMessagesOptions
-			if fromSequenceNumber != nil {
-				opts = &azservicebus.PeekMessagesOptions{FromSequenceNumber: fromSequenceNumber}
-			}
-			peekCtx, peekCancel := context.WithTimeout(requestCtx, time.Duration(maxWaitMs)*time.Millisecond)
-			messages, err := receiver.PeekMessages(peekCtx, batchSize, opts)
-			peekCancel()
-			if err != nil {
-				return fmt.Errorf("peek error: %w", err)
-			}
-			if len(messages) == 0 {
-				emitOutput(p.RunID, "✨ No more messages found in "+queueType+".", false, elapsedSince(startedAt))
-				break
-			}
-
-			for _, msg := range messages {
-				totalChecked++
-				body := string(msg.Body)
-				var contains bool
-				if caseSensitive {
-					contains = strings.Contains(body, searchStr)
-				} else {
-					contains = strings.Contains(strings.ToLower(body), searchLower)
-				}
-
-				if contains {
-					matchesFound++
-					grandMatches++
-					matchRecord := map[string]any{
-						"messageId":                  msg.MessageID,
-						"sequenceNumber":             msg.SequenceNumber,
-						"sessionId":                  derefString(msg.SessionID),
-						"state":                      messageStateLabel(msg.State),
-						"deliveryCount":              msg.DeliveryCount,
-						"lockedUntilUtc":             derefTime(msg.LockedUntil),
-						"sourceSubQueue":             sourceSubQueueLabel(queueType),
-						"body":                       bodyToJSON(msg.Body),
-						"subject":                    derefString(msg.Subject),
-						"contentType":                derefString(msg.ContentType),
-						"correlationId":              derefString(msg.CorrelationID),
-						"partitionKey":               derefString(msg.PartitionKey),
-						"traceParent":                traceParent(msg.ApplicationProperties),
-						"applicationProperties":      msg.ApplicationProperties,
-						"enqueuedTimeUtc":            msg.EnqueuedTime,
-						"expiresAtUtc":               msg.ExpiresAt,
-						"deadLetterReason":           derefString(msg.DeadLetterReason),
-						"deadLetterErrorDescription": derefString(msg.DeadLetterErrorDescription),
-						"_source":                    queueType,
-					}
-					emitSearchMatch(p.RunID, matchRecord, elapsedSince(startedAt))
-					emitOutput(p.RunID, fmt.Sprintf("🎯 MATCH # %d", matchesFound), false, elapsedSince(startedAt))
-
-					emitOutput(p.RunID, "   MessageId: "+msg.MessageID, false, elapsedSince(startedAt))
-
-					seqStr := "—"
-					if msg.SequenceNumber != nil {
-						seqStr = strconv.FormatInt(*msg.SequenceNumber, 10)
-					}
-					emitOutput(p.RunID, "   SequenceNumber: "+seqStr, false, elapsedSince(startedAt))
-
-					enqueuedStr := "—"
-					if msg.EnqueuedTime != nil {
-						enqueuedStr = msg.EnqueuedTime.String()
-					}
-					emitOutput(p.RunID, "   Enqueued: "+enqueuedStr, false, elapsedSince(startedAt))
-
-					if msg.DeadLetterReason != nil {
-						emitOutput(p.RunID, "   DeadLetter Reason: "+*msg.DeadLetterReason, false, elapsedSince(startedAt))
-					}
-					if msg.DeadLetterErrorDescription != nil {
-						emitOutput(p.RunID, "   DeadLetter Error: "+*msg.DeadLetterErrorDescription, false, elapsedSince(startedAt))
-					}
-
-					preview := body
-					if len(preview) > 300 {
-						preview = preview[:300] + "..."
-					}
-					emitOutput(p.RunID, "   Body Preview: "+preview, false, elapsedSince(startedAt))
-
-					if grandMatches >= maxMatches {
-						reachedLimit = true
-						emitOutput(p.RunID,
-							fmt.Sprintf("⏹ Reached max matches (%d). Stopping search.", maxMatches),
-							false, elapsedSince(startedAt))
-						break
-					}
-				}
-
-				if msg.SequenceNumber != nil {
-					next := *msg.SequenceNumber + 1
-					fromSequenceNumber = &next
-				} else {
-					emitOutput(p.RunID,
-						"⚠ Unable to advance sequence number. Stopping current search stream.",
-						true, elapsedSince(startedAt))
-					canAdvanceCursor = false
-					break
+					renewer.mu.Lock()
+					renewer.err = fmt.Errorf("renew session %q lock: %w", receiver.SessionID(), err)
+					renewer.mu.Unlock()
+					return
 				}
 			}
-
-			emitProgress(p.RunID,
-				fmt.Sprintf("👀 Checked: %d | Matches: %d", totalChecked, matchesFound),
-				elapsedSince(startedAt))
-
-			if !canAdvanceCursor || reachedLimit {
-				break
-			}
 		}
+	}()
 
-		emitOutput(p.RunID,
-			fmt.Sprintf("✅ Finished %s. Checked: %d, Matches: %d in %.1fs",
-				queueType, totalChecked, matchesFound, time.Since(stageStart).Seconds()),
-			false, elapsedSince(startedAt))
-		grandChecked += totalChecked
-		return nil
-	}
-
-	if mode == "normal" || mode == "both" {
-		receiver, err := client.NewReceiverForQueue(p.QueueName, nil)
-		if err != nil {
-			return nil, err
-		}
-		if err := runOne(receiver, "normal queue"); err != nil {
-			return nil, err
-		}
-	}
-	if !reachedLimit && (mode == "dlq" || mode == "both") {
-		receiver, err := client.NewReceiverForQueue(p.QueueName,
-			&azservicebus.ReceiverOptions{SubQueue: azservicebus.SubQueueDeadLetter})
-		if err != nil {
-			return nil, err
-		}
-		if err := runOne(receiver, "dead letter queue"); err != nil {
-			return nil, err
-		}
-	}
-
-	return map[string]any{
-		"checked":      grandChecked,
-		"matches":      grandMatches,
-		"maxMatches":   maxMatches,
-		"reachedLimit": reachedLimit,
-	}, nil
+	return renewer
 }
 
-// ─── 6. peekMessages ─────────────────────────────────────────────────────────
-
-type peekMessagesParams struct {
-	Argv         []string          `json:"argv"`
-	Env          map[string]string `json:"env"`
-	RunID        string            `json:"runId"`
-	DownloadsDir string            `json:"downloadsDir"`
+func (r *sessionLockRenewer) currentError() error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.err
 }
 
-func handlePeekMessages(requestCtx context.Context, raw json.RawMessage) (any, error) {
-	var p peekMessagesParams
-	if err := json.Unmarshal(raw, &p); err != nil {
-		return nil, fmt.Errorf("invalid params: %w", err)
-	}
-	cs, err := requireConnectionString(p.Env)
-	if err != nil {
-		return nil, err
-	}
-	if len(p.Argv) == 0 {
-		return nil, fmt.Errorf("peek arguments are required")
-	}
-
-	downloadsDir := p.DownloadsDir
-	if downloadsDir == "" {
-		downloadsDir, _ = os.Getwd()
-	}
-
-	// Parse argv — mirrors the JS worker's argument parsing logic exactly.
-	var (
-		entityType   = "queue"
-		entityName   = ""
-		subscription = ""
-		countArg     = ""
-		typeArg      = ""
-		seqArg       = ""
-	)
-
-	first := p.Argv[0]
-	if first == "queue" || first == "topic" {
-		entityType = first
-		if len(p.Argv) > 1 {
-			entityName = p.Argv[1]
-		}
-		if entityType == "topic" {
-			if len(p.Argv) > 2 {
-				subscription = p.Argv[2]
-			}
-			if len(p.Argv) > 3 {
-				countArg = p.Argv[3]
-			}
-			if len(p.Argv) > 4 {
-				typeArg = p.Argv[4]
-			}
-			if len(p.Argv) > 5 {
-				seqArg = p.Argv[5]
-			}
-		} else {
-			if len(p.Argv) > 2 {
-				countArg = p.Argv[2]
-			}
-			if len(p.Argv) > 3 {
-				typeArg = p.Argv[3]
-			}
-			if len(p.Argv) > 4 {
-				seqArg = p.Argv[4]
-			}
-		}
-	} else {
-		entityName = first
-		if len(p.Argv) > 1 {
-			countArg = p.Argv[1]
-		}
-		if len(p.Argv) > 2 {
-			typeArg = p.Argv[2]
-		}
-		if len(p.Argv) > 3 {
-			seqArg = p.Argv[3]
-		}
-	}
-
-	labelStr := "Queue"
-	if entityType == "topic" {
-		labelStr = "Topic"
-	}
-	if err := validateEntityName(entityName, labelStr); err != nil {
-		return nil, err
-	}
-	if entityType == "topic" {
-		if err := validateEntityName(subscription, "Subscription"); err != nil {
-			return nil, err
-		}
-	}
-
-	count := parseIntOrDefault(countArg, 10)
-	if count < 1 {
-		return nil, fmt.Errorf("count must be a positive integer")
-	}
-	const maxCount = 10000
-	if count > maxCount {
-		count = maxCount
-	}
-
-	mode, err := validateMode(typeArg, "dlq")
-	if err != nil {
-		return nil, err
-	}
-
-	// Parse optional start sequence number.
-	var startSeqNum *int64
-	if trimmed := strings.TrimSpace(seqArg); trimmed != "" {
-		n, err := strconv.ParseInt(trimmed, 10, 64)
-		if err != nil || n <= 0 {
-			return nil, fmt.Errorf("start sequence number must be a positive integer")
-		}
-		startSeqNum = &n
-	}
-
-	maxWaitMs := parseIntOrDefault(p.Env["MAX_WAIT_TIME_IN_MS"], 60000)
-	startedAt := time.Now()
-	client, err := azservicebus.NewClientFromConnectionString(cs, nil)
-	if err != nil {
-		return nil, fmt.Errorf("service bus client error: %w", err)
-	}
-	defer closeWithTimeout(client)
-
-	allMessages := []map[string]any{}
-	const innerBatchSize = 250
-
-	runOne := func(receiver *azservicebus.Receiver, sourceLabel string) error {
-		defer closeWithTimeout(receiver)
-
-		seqNumHint := ""
-		if startSeqNum != nil {
-			seqNumHint = fmt.Sprintf(" (start sequence %d)", *startSeqNum)
-		}
-		emitOutput(p.RunID,
-			fmt.Sprintf("👀 Peeking %d messages from %s%s...", count, sourceLabel, seqNumHint),
-			false, elapsedSince(startedAt))
-
-		fromSeqNum := startSeqNum
-		canAdvanceCursor := true
-
-		for len(allMessages) < count {
-			remaining := count - len(allMessages)
-			fetchCount := remaining
-			if fetchCount > innerBatchSize {
-				fetchCount = innerBatchSize
-			}
-
-			var opts *azservicebus.PeekMessagesOptions
-			if fromSeqNum != nil {
-				opts = &azservicebus.PeekMessagesOptions{FromSequenceNumber: fromSeqNum}
-			}
-			peekCtx, peekCancel := context.WithTimeout(requestCtx, time.Duration(maxWaitMs)*time.Millisecond)
-			messages, err := receiver.PeekMessages(peekCtx, fetchCount, opts)
-			peekCancel()
-			if err != nil {
-				return fmt.Errorf("peek error: %w", err)
-			}
-			if len(messages) == 0 {
-				break
-			}
-
-			for _, msg := range messages {
-				allMessages = append(allMessages, map[string]any{
-					"messageId":                  msg.MessageID,
-					"sequenceNumber":             msg.SequenceNumber,
-					"sessionId":                  derefString(msg.SessionID),
-					"state":                      messageStateLabel(msg.State),
-					"deliveryCount":              msg.DeliveryCount,
-					"lockedUntilUtc":             derefTime(msg.LockedUntil),
-					"sourceSubQueue":             sourceSubQueueLabel(sourceLabel),
-					"body":                       bodyToJSON(msg.Body),
-					"subject":                    derefString(msg.Subject),
-					"contentType":                derefString(msg.ContentType),
-					"correlationId":              derefString(msg.CorrelationID),
-					"partitionKey":               derefString(msg.PartitionKey),
-					"traceParent":                traceParent(msg.ApplicationProperties),
-					"applicationProperties":      msg.ApplicationProperties,
-					"enqueuedTimeUtc":            msg.EnqueuedTime,
-					"expiresAtUtc":               msg.ExpiresAt,
-					"deadLetterReason":           derefString(msg.DeadLetterReason),
-					"deadLetterErrorDescription": derefString(msg.DeadLetterErrorDescription),
-					"_source":                    sourceLabel,
-				})
-
-				if msg.SequenceNumber != nil {
-					next := *msg.SequenceNumber + 1
-					fromSeqNum = &next
-				} else {
-					emitOutput(p.RunID,
-						"⚠ Unable to advance sequence number. Returning collected messages.",
-						true, elapsedSince(startedAt))
-					canAdvanceCursor = false
-					break
-				}
-			}
-
-			if count > innerBatchSize {
-				emitProgress(p.RunID,
-					fmt.Sprintf("📥 Retrieved: %d | messages...", len(allMessages)),
-					elapsedSince(startedAt))
-			}
-
-			if !canAdvanceCursor {
-				break
-			}
-		}
-
-		emitOutput(p.RunID,
-			fmt.Sprintf("✨ Found %d messages in %s.", len(allMessages), sourceLabel),
-			false, elapsedSince(startedAt))
-		return nil
-	}
-
-	if mode == "normal" || mode == "both" {
-		if entityType == "queue" {
-			receiver, err := client.NewReceiverForQueue(entityName, nil)
-			if err != nil {
-				return nil, err
-			}
-			if err := runOne(receiver, "Normal Queue: "+entityName); err != nil {
-				return nil, err
-			}
-		} else {
-			receiver, err := client.NewReceiverForSubscription(entityName, subscription, nil)
-			if err != nil {
-				return nil, err
-			}
-			if err := runOne(receiver, "Normal Subscription: "+entityName+"/"+subscription); err != nil {
-				return nil, err
-			}
-		}
-	}
-
-	if mode == "dlq" || mode == "both" {
-		dlqOpts := &azservicebus.ReceiverOptions{SubQueue: azservicebus.SubQueueDeadLetter}
-		if entityType == "queue" {
-			receiver, err := client.NewReceiverForQueue(entityName, dlqOpts)
-			if err != nil {
-				return nil, err
-			}
-			if err := runOne(receiver, "Dead Letter Queue: "+entityName); err != nil {
-				return nil, err
-			}
-		} else {
-			receiver, err := client.NewReceiverForSubscription(entityName, subscription, dlqOpts)
-			if err != nil {
-				return nil, err
-			}
-			if err := runOne(receiver, "Dead Letter Subscription: "+entityName+"/"+subscription); err != nil {
-				return nil, err
-			}
-		}
-	}
-
-	if len(allMessages) == 0 {
-		return map[string]any{
-			"messages": []any{},
-			"filename": "",
-			"savedAt":  time.Now().UTC().Format(time.RFC3339),
-		}, nil
-	}
-
-	// Persist to downloads dir — matches the JS filename format exactly.
-	if err := os.MkdirAll(downloadsDir, 0o755); err != nil {
-		return nil, fmt.Errorf("cannot create downloads dir: %w", err)
-	}
-
-	// JS: new Date().toISOString().replace(/[:.]/g, "-")
-	ts := strings.ReplaceAll(strings.ReplaceAll(
-		time.Now().UTC().Format("2006-01-02T15:04:05.000Z"), ":", "-"), ".", "-")
-	safeEntity := strings.ReplaceAll(entityName, "/", "-")
-	var filename string
-	if entityType == "queue" {
-		filename = fmt.Sprintf("messages-%s-%s-%s.json", safeEntity, mode, ts)
-	} else {
-		safeSub := strings.ReplaceAll(subscription, "/", "-")
-		filename = fmt.Sprintf("messages-%s-%s-%s-%s.json", safeEntity, safeSub, mode, ts)
-	}
-
-	fullPath := filepath.Join(downloadsDir, filename)
-	data, err := json.MarshalIndent(allMessages, "", "  ")
-	if err != nil {
-		return nil, fmt.Errorf("json marshal error: %w", err)
-	}
-	if err := os.WriteFile(fullPath, data, 0o644); err != nil {
-		return nil, fmt.Errorf("write file error: %w", err)
-	}
-
-	savedAt := time.Now().UTC().Format(time.RFC3339)
-	emitOutput(p.RunID,
-		fmt.Sprintf("✅ Saved %d messages to %s", len(allMessages), filename),
-		false, elapsedSince(startedAt))
-
-	return map[string]any{
-		"messages": allMessages,
-		"filename": filename,
-		"savedAt":  savedAt,
-	}, nil
+func (r *sessionLockRenewer) stop() error {
+	r.cancel()
+	<-r.done
+	return r.currentError()
 }
 
-// ─── 7. sendMessage ──────────────────────────────────────────────────────────
-
-type sendMessageParams struct {
-	EntityName string            `json:"entityName"`
-	Env        map[string]string `json:"env"`
-	Message    map[string]any    `json:"message"`
-}
-
-func handleSendMessage(raw json.RawMessage) (any, error) {
-	var p sendMessageParams
-	if err := json.Unmarshal(raw, &p); err != nil {
-		return nil, fmt.Errorf("invalid params: %w", err)
-	}
-	cs, err := requireConnectionString(p.Env)
-	if err != nil {
-		return nil, err
-	}
-	if err := validateEntityName(p.EntityName, "Entity"); err != nil {
-		return nil, err
-	}
-
-	msg := p.Message
-	if msg == nil {
-		msg = map[string]any{}
-	}
-
-	// Body: if contentType is application/json, try to parse → re-encode for clean bytes.
-	bodyStr, _ := msg["body"].(string)
-	body := []byte(bodyStr)
-	if ct, _ := msg["contentType"].(string); strings.Contains(ct, "application/json") {
-		var jsonVal any
-		if err := json.Unmarshal(body, &jsonVal); err == nil {
-			if b, err := json.Marshal(jsonVal); err == nil {
-				body = b
-			}
-		}
-	}
-
-	sbMsg := &azservicebus.Message{Body: body}
-
-	if v, _ := msg["contentType"].(string); v != "" {
-		sbMsg.ContentType = &v
-	}
-	if v, _ := msg["subject"].(string); v != "" {
-		sbMsg.Subject = &v
-	}
-	if v, _ := msg["messageId"].(string); v != "" {
-		sbMsg.MessageID = &v
-	}
-	if v, _ := msg["correlationId"].(string); v != "" {
-		sbMsg.CorrelationID = &v
-	}
-	if v, _ := msg["sessionId"].(string); v != "" {
-		sbMsg.SessionID = &v
-	}
-	if v, ok := msg["applicationProperties"].(map[string]any); ok {
-		sbMsg.ApplicationProperties = v
-	}
-	if v, _ := msg["scheduledEnqueueTimeUtc"].(string); v != "" {
-		t, err := time.Parse(time.RFC3339, v)
-		if err != nil {
-			return nil, fmt.Errorf("scheduledEnqueueTimeUtc must be an RFC3339 timestamp: %w", err)
-		}
-		sbMsg.ScheduledEnqueueTime = &t
-	}
-
-	maxWaitMs := parseIntOrDefault(p.Env["MAX_WAIT_TIME_IN_MS"], 60000)
-
-	client, err := azservicebus.NewClientFromConnectionString(cs, nil)
-	if err != nil {
-		return nil, fmt.Errorf("service bus client error: %w", err)
-	}
-	defer closeWithTimeout(client)
-
-	sender, err := client.NewSender(p.EntityName, nil)
-	if err != nil {
-		return nil, fmt.Errorf("sender error: %w", err)
-	}
-	defer closeWithTimeout(sender)
-
-	sendCtx, sendCancel := context.WithTimeout(context.Background(), time.Duration(maxWaitMs)*time.Millisecond)
-	defer sendCancel()
-	if err := sender.SendMessage(sendCtx, sbMsg, nil); err != nil {
-		return nil, fmt.Errorf("send error: %w", err)
-	}
-	return map[string]bool{"sent": true}, nil
-}
-
-// ─── singleMessageAction ─────────────────────────────────────────────────────
-
-type singleMessageActionParams struct {
-	subscriptionSource
-	Action         string            `json:"action"` // "delete" | "move" | "replay"
-	SequenceNumber int64             `json:"sequenceNumber"`
-	MessageID      string            `json:"messageId"`
-	SessionID      *string           `json:"sessionId"`
-	State          string            `json:"state"`
-	Source         string            `json:"source"`
-	SourceSubQueue string            `json:"sourceSubQueue"`
-	IsDlq          bool              `json:"isDlq"`
-	QueueName      string            `json:"queueName"`
-	DestQueue      string            `json:"destQueue"`
-	DestTopic      string            `json:"destTopic"`
-	Env            map[string]string `json:"env"`
-	RunID          string            `json:"runId"`
-}
-
-type singleMessageReceiver interface {
-	ReceiveMessages(context.Context, int, *azservicebus.ReceiveMessagesOptions) ([]*azservicebus.ReceivedMessage, error)
-	ReceiveDeferredMessages(context.Context, []int64, *azservicebus.ReceiveDeferredMessagesOptions) ([]*azservicebus.ReceivedMessage, error)
-	CompleteMessage(context.Context, *azservicebus.ReceivedMessage, *azservicebus.CompleteMessageOptions) error
-	AbandonMessage(context.Context, *azservicebus.ReceivedMessage, *azservicebus.AbandonMessageOptions) error
-}
-
-func (p singleMessageActionParams) sourceSubQueue() azservicebus.SubQueue {
-	switch p.SourceSubQueue {
-	case "active":
-		return 0
-	case "deadLetter":
-		if !p.IsDlq {
-			return 0
-		}
-		return azservicebus.SubQueueDeadLetter
-	case "transferDeadLetter":
-		return azservicebus.SubQueueTransfer
-	}
-	if !p.IsDlq {
-		return 0
-	}
-	if strings.Contains(strings.ToLower(p.Source), "transfer") {
-		return azservicebus.SubQueueTransfer
-	}
-	return azservicebus.SubQueueDeadLetter
-}
-
-func entityNameWithSubQueue(name string, subQueue azservicebus.SubQueue) string {
-	if strings.Contains(name, "/$DeadLetterQueue") || strings.Contains(name, "/$Transfer/$DeadLetterQueue") {
-		return name
-	}
-	switch subQueue {
-	case azservicebus.SubQueueDeadLetter:
-		return name + "/$DeadLetterQueue"
-	case azservicebus.SubQueueTransfer:
-		return name + "/$Transfer/$DeadLetterQueue"
-	default:
-		return name
-	}
-}
-
-func (p singleMessageActionParams) receiverOptions() *azservicebus.ReceiverOptions {
-	subQueue := p.sourceSubQueue()
-	if subQueue == 0 {
-		return nil
-	}
-	return &azservicebus.ReceiverOptions{SubQueue: subQueue}
-}
-
-func (p singleMessageActionParams) destinationEntity() string {
-	if p.Action == "replay" {
-		if p.isSubscription() {
-			return p.DestTopic
-		}
-		return p.QueueName
-	}
-	return p.DestQueue
-}
-
-func (p singleMessageActionParams) acceptSessionReceiver(ctx context.Context, client *azservicebus.Client, sessionID string) (*azservicebus.SessionReceiver, error) {
-	subQueue := p.sourceSubQueue()
-	if p.isSubscription() {
-		subscriptionName := entityNameWithSubQueue(p.SubscriptionName, subQueue)
-		return client.AcceptSessionForSubscription(ctx, p.TopicName, subscriptionName, sessionID, nil)
-	}
-	queueName := entityNameWithSubQueue(p.QueueName, subQueue)
-	return client.AcceptSessionForQueue(ctx, queueName, sessionID, nil)
-}
-
-func (p singleMessageActionParams) targetSessionID(peeked *azservicebus.ReceivedMessage) (string, bool) {
-	if p.SessionID != nil {
-		return *p.SessionID, true
-	}
-	if peeked != nil && peeked.SessionID != nil {
-		return *peeked.SessionID, true
-	}
-	return "", false
-}
-
-func validateSingleMessageTarget(p singleMessageActionParams, msg *azservicebus.ReceivedMessage, phase string) error {
-	if msg.SequenceNumber == nil || *msg.SequenceNumber != p.SequenceNumber {
-		return fmt.Errorf("received unexpected message while %s sequence number %d", phase, p.SequenceNumber)
-	}
-	if p.MessageID != "" && msg.MessageID != p.MessageID {
-		return fmt.Errorf("sequence number %d now belongs to messageId %q, expected %q; refresh the peeked messages before retrying", p.SequenceNumber, msg.MessageID, p.MessageID)
-	}
-	if p.SessionID != nil {
-		if msg.SessionID == nil || *msg.SessionID != *p.SessionID {
-			got := "<nil>"
-			if msg.SessionID != nil {
-				got = *msg.SessionID
-			}
-			return fmt.Errorf("sequence number %d now belongs to sessionId %q, expected %q; refresh the peeked messages before retrying", p.SequenceNumber, got, *p.SessionID)
-		}
-	}
-	return nil
-}
-
-func cloneApplicationProperties(props map[string]any) map[string]any {
-	if len(props) == 0 {
-		return nil
-	}
-	out := make(map[string]any, len(props))
-	for k, v := range props {
-		out[k] = v
-	}
-	return out
-}
-
-func uniqueBusmanMessageID(original string) string {
-	suffix := fmt.Sprintf("busman-%d", time.Now().UnixNano())
-	if original == "" {
-		return suffix
-	}
-	const maxServiceBusMessageIDLength = 128
-	maxOriginalLen := maxServiceBusMessageIDLength - len(suffix) - 1
-	if maxOriginalLen <= 0 {
-		return suffix
-	}
-	if len(original) > maxOriginalLen {
-		original = original[:maxOriginalLen]
-	}
-	return original + "-" + suffix
-}
-
-func outboundMessageFromReceived(target *azservicebus.ReceivedMessage, regenerateMessageID bool) *azservicebus.Message {
-	appProps := cloneApplicationProperties(target.ApplicationProperties)
-	newMsg := &azservicebus.Message{
-		Body:                  target.Body,
-		ContentType:           target.ContentType,
-		CorrelationID:         target.CorrelationID,
-		Subject:               target.Subject,
-		PartitionKey:          target.PartitionKey,
-		ApplicationProperties: appProps,
-		To:                    target.To,
-		ReplyTo:               target.ReplyTo,
-		ReplyToSessionID:      target.ReplyToSessionID,
-		SessionID:             target.SessionID,
-		TimeToLive:            target.TimeToLive,
-	}
-	if target.MessageID == "" {
-		return newMsg
-	}
-	idCopy := target.MessageID
-	if regenerateMessageID {
-		if newMsg.ApplicationProperties == nil {
-			newMsg.ApplicationProperties = map[string]any{}
-		}
-		newMsg.ApplicationProperties["BusmanOriginalMessageId"] = target.MessageID
-		idCopy = uniqueBusmanMessageID(target.MessageID)
-	}
-	newMsg.MessageID = &idCopy
-	return newMsg
-}
-
-func destinationUsesDuplicateDetection(ctx context.Context, cs string, p singleMessageActionParams) (bool, error) {
-	adminClient, err := getAdminClient(cs)
+func sourceRequiresSession(ctx context.Context, connectionString, queueName string, source subscriptionSource) (bool, error) {
+	adminClient, err := getAdminClient(connectionString)
 	if err != nil {
 		return false, err
 	}
-	if p.Action == "replay" && p.isSubscription() {
-		resp, err := adminClient.GetTopic(ctx, p.DestTopic, nil)
+	if source.isSubscription() {
+		resp, err := adminClient.GetSubscription(ctx, source.TopicName, source.SubscriptionName, nil)
 		if err != nil {
 			return false, err
 		}
-		return resp.TopicProperties.RequiresDuplicateDetection != nil && *resp.TopicProperties.RequiresDuplicateDetection, nil
+		if resp == nil {
+			return false, fmt.Errorf("subscription %q was not found", source.label(queueName))
+		}
+		return resp.RequiresSession != nil && *resp.RequiresSession, nil
 	}
-	resp, err := adminClient.GetQueue(ctx, p.destinationEntity(), nil)
+	resp, err := adminClient.GetQueue(ctx, queueName, nil)
 	if err != nil {
 		return false, err
 	}
-	return resp.QueueProperties.RequiresDuplicateDetection != nil && *resp.QueueProperties.RequiresDuplicateDetection, nil
+	if resp == nil {
+		return false, fmt.Errorf("queue %q was not found", queueName)
+	}
+	return resp.RequiresSession != nil && *resp.RequiresSession, nil
 }
 
-func singleMessageNotReceivableError(p singleMessageActionParams, entityLabel string, peeked *azservicebus.ReceivedMessage, scanned int) error {
-	details := []string{}
-	if peeked != nil {
-		details = append(details, "state="+messageStateLabel(peeked.State))
-		if peeked.MessageID != "" {
-			details = append(details, "messageId="+peeked.MessageID)
-		}
-		if peeked.SessionID != nil {
-			details = append(details, "sessionId="+*peeked.SessionID)
-		}
-		if peeked.LockedUntil != nil {
-			details = append(details, "lockedUntilUtc="+peeked.LockedUntil.Format(time.RFC3339))
-		}
+func acceptNextSessionForSource(
+	ctx context.Context,
+	client *azservicebus.Client,
+	queueName string,
+	source subscriptionSource,
+	subQueue azservicebus.SubQueue,
+) (*azservicebus.SessionReceiver, error) {
+	sessionQueueName, topicName, subscriptionName := sessionReceiverEntityNames(queueName, source, subQueue)
+	if topicName != "" {
+		return client.AcceptNextSessionForSubscription(ctx, topicName, subscriptionName, nil)
 	}
-	if len(details) == 0 {
-		return fmt.Errorf("message with sequence number %d not found in %s after scanning %d messages", p.SequenceNumber, entityLabel, scanned)
-	}
-	return fmt.Errorf("message with sequence number %d exists in %s but is not currently receivable after scanning %d messages (%s). It may be locked by another receiver, deferred, scheduled, or behind the scan budget; refresh and retry after the lock expires", p.SequenceNumber, entityLabel, scanned, strings.Join(details, ", "))
+	return client.AcceptNextSessionForQueue(ctx, sessionQueueName, nil)
 }
 
-func handleSingleMessageAction(requestCtx context.Context, raw json.RawMessage) (any, error) {
-	var p singleMessageActionParams
-	if err := json.Unmarshal(raw, &p); err != nil {
-		return nil, fmt.Errorf("invalid params: %w", err)
+func sessionReceiverEntityNames(
+	queueName string,
+	source subscriptionSource,
+	subQueue azservicebus.SubQueue,
+) (sessionQueueName string, topicName string, subscriptionName string) {
+	if source.isSubscription() {
+		return "", source.TopicName, entityNameWithSubQueue(source.SubscriptionName, subQueue)
 	}
-	cs, err := requireConnectionString(p.Env)
-	if err != nil {
-		return nil, err
-	}
+	return entityNameWithSubQueue(queueName, subQueue), "", ""
+}
 
-	switch p.Action {
-	case "delete", "move", "replay":
-	default:
-		return nil, fmt.Errorf("unknown action %q: must be delete, move, or replay", p.Action)
-	}
-	if !p.IsDlq {
-		return nil, fmt.Errorf("single-message actions are only supported for dead-letter messages; use bulk operations for active messages")
-	}
+func isNoAvailableSessionError(err error) bool {
+	var serviceBusErr *azservicebus.Error
+	return errors.Is(err, context.DeadlineExceeded) ||
+		(errors.As(err, &serviceBusErr) && serviceBusErr.Code == azservicebus.CodeTimeout)
+}
 
-	if p.isSubscription() {
-		if err := validateEntityName(p.TopicName, "Topic"); err != nil {
-			return nil, err
+func consumeAvailableSessions(
+	requestCtx context.Context,
+	maxWaitMs int,
+	drainWaitMs int,
+	label string,
+	accept func(context.Context) (managedSessionReceiver, error),
+	consume func(managedSessionReceiver, string) (int, error),
+) (int, error) {
+	total := 0
+	emptySessions := map[string]struct{}{}
+	for {
+		waitMs := maxWaitMs
+		if total > 0 {
+			waitMs = drainWaitMs
 		}
-		if err := validateEntityName(p.SubscriptionName, "Subscription"); err != nil {
-			return nil, err
-		}
-	} else {
-		if err := validateEntityName(p.QueueName, "Queue"); err != nil {
-			return nil, err
-		}
-	}
-
-	if p.Action == "move" {
-		if err := validateEntityName(p.DestQueue, "Destination queue"); err != nil {
-			return nil, fmt.Errorf("move requires a valid destination queue: %w", err)
-		}
-	}
-	if p.Action == "replay" && p.isSubscription() {
-		if err := validateEntityName(p.DestTopic, "Destination topic"); err != nil {
-			return nil, fmt.Errorf("subscription replay requires a valid destination topic: %w", err)
-		}
-	}
-
-	startedAt := time.Now()
-	scanBudget := parseIntOrDefault(p.Env["SINGLE_MSG_SCAN_BUDGET"], 10000)
-	if scanBudget < 50 {
-		scanBudget = 50
-	}
-	batchSize := boundedIntFromEnv(p.Env, "RECEIVE_MESSAGES_COUNT", 50, maxReceiveBatchSize)
-	if batchSize > scanBudget {
-		batchSize = scanBudget
-	}
-	maxWaitMs := parseIntOrDefault(p.Env["MAX_WAIT_TIME_IN_MS"], 5000)
-	completeConcurrency := parseIntOrDefault(p.Env["COMPLETE_CONCURRENCY"], 8)
-	if completeConcurrency < 1 {
-		completeConcurrency = 1
-	}
-	if completeConcurrency > 32 {
-		completeConcurrency = 32
-	}
-
-	client, err := azservicebus.NewClientFromConnectionString(cs, nil)
-	if err != nil {
-		return nil, fmt.Errorf("service bus client error: %w", err)
-	}
-	defer closeWithTimeout(client)
-
-	receiverOpts := p.receiverOptions()
-	var receiver *azservicebus.Receiver
-	if p.isSubscription() {
-		receiver, err = client.NewReceiverForSubscription(p.TopicName, p.SubscriptionName, receiverOpts)
-	} else {
-		receiver, err = client.NewReceiverForQueue(p.QueueName, receiverOpts)
-	}
-	if err != nil {
-		return nil, fmt.Errorf("receiver error: %w", err)
-	}
-	defer closeWithTimeout(receiver)
-
-	var sender *azservicebus.Sender
-	regenerateMessageID := false
-	if p.Action == "move" || p.Action == "replay" {
-		destEntity := p.destinationEntity()
-		sender, err = client.NewSender(destEntity, nil)
+		acceptCtx, acceptCancel := context.WithTimeout(requestCtx, time.Duration(waitMs)*time.Millisecond)
+		receiver, err := accept(acceptCtx)
+		acceptCancel()
 		if err != nil {
-			return nil, fmt.Errorf("sender error: %w", err)
-		}
-		defer closeWithTimeout(sender)
-
-		dupCtx, dupCancel := context.WithTimeout(requestCtx, time.Duration(maxWaitMs)*time.Millisecond)
-		dupEnabled, dupErr := destinationUsesDuplicateDetection(dupCtx, cs, p)
-		dupCancel()
-		if dupErr != nil {
-			emitOutput(p.RunID,
-				fmt.Sprintf("⚠ Could not inspect duplicate detection on destination %q; preserving MessageId. Error: %v", destEntity, dupErr),
-				true, elapsedSince(startedAt))
-		} else if dupEnabled {
-			regenerateMessageID = true
-			emitOutput(p.RunID,
-				fmt.Sprintf("ℹ Destination %q uses duplicate detection; replay will generate a new MessageId and store the original in BusmanOriginalMessageId.", destEntity),
-				false, elapsedSince(startedAt))
-		}
-	}
-
-	entityLabel := p.label(p.QueueName)
-	if p.IsDlq {
-		entityLabel += " (DLQ)"
-	}
-	emitOutput(p.RunID,
-		fmt.Sprintf("🔍 Resolving message with sequence number %d in %s...", p.SequenceNumber, entityLabel),
-		false, elapsedSince(startedAt))
-
-	peekCtx, peekCancel := context.WithTimeout(requestCtx, time.Duration(maxWaitMs)*time.Millisecond)
-	peekedMessages, peekErr := receiver.PeekMessages(peekCtx, 1, &azservicebus.PeekMessagesOptions{FromSequenceNumber: &p.SequenceNumber})
-	peekCancel()
-	var peekedTarget *azservicebus.ReceivedMessage
-	if peekErr != nil {
-		emitOutput(p.RunID,
-			fmt.Sprintf("⚠ Could not peek sequence number %d before receiving: %v", p.SequenceNumber, peekErr),
-			true, elapsedSince(startedAt))
-	} else if len(peekedMessages) > 0 && peekedMessages[0].SequenceNumber != nil && *peekedMessages[0].SequenceNumber == p.SequenceNumber {
-		peekedTarget = peekedMessages[0]
-		if err := validateSingleMessageTarget(p, peekedTarget, "peeking"); err != nil {
-			return nil, err
-		}
-		emitOutput(p.RunID,
-			fmt.Sprintf("👀 Found target by peek: state=%s, deliveryCount=%d", messageStateLabel(peekedTarget.State), peekedTarget.DeliveryCount),
-			false, elapsedSince(startedAt))
-	} else if len(peekedMessages) > 0 && peekedMessages[0].SequenceNumber != nil {
-		return nil, fmt.Errorf("message with sequence number %d was not found in %s; next available sequence is %d", p.SequenceNumber, entityLabel, *peekedMessages[0].SequenceNumber)
-	} else {
-		return nil, fmt.Errorf("message with sequence number %d was not found in %s", p.SequenceNumber, entityLabel)
-	}
-
-	completeTarget := func(actionReceiver singleMessageReceiver, target *azservicebus.ReceivedMessage) error {
-		completeCtx, completeCancel := cancellableOperationContext(requestCtx, p.Env, maxWaitMs)
-		err := actionReceiver.CompleteMessage(completeCtx, target, nil)
-		completeCancel()
-		if err != nil {
-			return fmt.Errorf("complete message error: %w", err)
-		}
-		return nil
-	}
-	abandonTarget := func(actionReceiver singleMessageReceiver, target *azservicebus.ReceivedMessage) {
-		abandonCtx, abandonCancel := cancellableOperationContext(requestCtx, p.Env, maxWaitMs)
-		_ = actionReceiver.AbandonMessage(abandonCtx, target, nil)
-		abandonCancel()
-	}
-	handleTarget := func(actionReceiver singleMessageReceiver, target *azservicebus.ReceivedMessage) error {
-		if err := validateSingleMessageTarget(p, target, "receiving"); err != nil {
-			abandonTarget(actionReceiver, target)
-			return err
-		}
-		switch p.Action {
-		case "delete":
-			return completeTarget(actionReceiver, target)
-		case "move", "replay":
-			newMsg := outboundMessageFromReceived(target, regenerateMessageID)
-			sendCtx, sendCancel := cancellableOperationContext(requestCtx, p.Env, maxWaitMs)
-			err := sender.SendMessage(sendCtx, newMsg, nil)
-			sendCancel()
-			if err != nil {
-				abandonTarget(actionReceiver, target)
-				return fmt.Errorf("send message error: %w", err)
-			}
-			if err := completeTarget(actionReceiver, target); err != nil {
-				failure := fmt.Errorf("destination accepted the message but source settlement failed; duplicate delivery is possible: %w", err)
-				emitOutput(p.RunID, "⚠ "+failure.Error(), true, elapsedSince(startedAt))
-				return failure
-			}
-			return nil
-		default:
-			return fmt.Errorf("unknown action %q", p.Action)
-		}
-	}
-
-	receiveDeferredTarget := func(actionReceiver singleMessageReceiver) error {
-		emitOutput(p.RunID,
-			fmt.Sprintf("↩ Receiving deferred message %d directly by sequence number...", p.SequenceNumber),
-			false, elapsedSince(startedAt))
-		deferCtx, deferCancel := cancellableOperationContext(requestCtx, p.Env, maxWaitMs)
-		deferred, deferErr := actionReceiver.ReceiveDeferredMessages(deferCtx, []int64{p.SequenceNumber}, nil)
-		deferCancel()
-		if deferErr != nil {
-			return fmt.Errorf("receive deferred message error: %w", deferErr)
-		}
-		if len(deferred) == 0 {
-			return singleMessageNotReceivableError(p, entityLabel, peekedTarget, 0)
-		}
-		if err := handleTarget(actionReceiver, deferred[0]); err != nil {
-			return err
-		}
-		emitOutput(p.RunID,
-			fmt.Sprintf("✅ %s completed for deferred message %d in %.2fs", p.Action, p.SequenceNumber, time.Since(startedAt).Seconds()),
-			false, elapsedSince(startedAt))
-		return nil
-	}
-
-	if peekedTarget != nil {
-		switch peekedTarget.State {
-		case azservicebus.MessageStateDeferred:
-			if sessionID, ok := p.targetSessionID(peekedTarget); ok {
-				emitOutput(p.RunID,
-					fmt.Sprintf("🔐 Accepting session %q for deferred message %d...", sessionID, p.SequenceNumber),
-					false, elapsedSince(startedAt))
-				sessionCtx, sessionCancel := cancellableOperationContext(requestCtx, p.Env, maxWaitMs)
-				sessionReceiver, sessionErr := p.acceptSessionReceiver(sessionCtx, client, sessionID)
-				sessionCancel()
-				if sessionErr != nil {
-					return nil, fmt.Errorf("accept session %q error: %w", sessionID, sessionErr)
-				}
-				defer closeWithTimeout(sessionReceiver)
-				if err := receiveDeferredTarget(sessionReceiver); err != nil {
-					return nil, err
-				}
-				return map[string]int64{"sequenceNumber": p.SequenceNumber}, nil
-			}
-			if err := receiveDeferredTarget(receiver); err != nil {
-				return nil, err
-			}
-			return map[string]int64{"sequenceNumber": p.SequenceNumber}, nil
-		case azservicebus.MessageStateScheduled:
-			return nil, fmt.Errorf("message with sequence number %d is scheduled in %s and cannot be settled until it becomes active", p.SequenceNumber, entityLabel)
-		}
-	}
-
-	actionReceiver := singleMessageReceiver(receiver)
-	if sessionID, ok := p.targetSessionID(peekedTarget); ok {
-		emitOutput(p.RunID,
-			fmt.Sprintf("🔐 Accepting session %q for active message %d...", sessionID, p.SequenceNumber),
-			false, elapsedSince(startedAt))
-		sessionCtx, sessionCancel := cancellableOperationContext(requestCtx, p.Env, maxWaitMs)
-		sessionReceiver, sessionErr := p.acceptSessionReceiver(sessionCtx, client, sessionID)
-		sessionCancel()
-		if sessionErr != nil {
-			return nil, fmt.Errorf("accept session %q error: %w", sessionID, sessionErr)
-		}
-		defer closeWithTimeout(sessionReceiver)
-		actionReceiver = sessionReceiver
-	}
-
-	scanned := 0
-	idleRetries := parseIntOrDefault(p.Env["SINGLE_MSG_IDLE_RETRIES"], 3)
-	idleAttempts := 0
-	for scanned < scanBudget {
-		remaining := scanBudget - scanned
-		fetch := batchSize
-		if fetch > remaining {
-			fetch = remaining
-		}
-
-		ctx, cancel := context.WithTimeout(requestCtx, time.Duration(maxWaitMs)*time.Millisecond)
-		msgs, recvErr := actionReceiver.ReceiveMessages(ctx, fetch, nil)
-		cancel()
-
-		if recvErr != nil && len(msgs) == 0 {
 			if requestCtx.Err() != nil {
-				return nil, requestCtx.Err()
+				return total, requestCtx.Err()
 			}
-			if errors.Is(recvErr, context.DeadlineExceeded) || errors.Is(recvErr, context.Canceled) {
-				if peekedTarget != nil && idleAttempts < idleRetries {
-					idleAttempts++
-					emitProgress(p.RunID,
-						fmt.Sprintf("Target exists but was not receivable yet; retry %d/%d...", idleAttempts, idleRetries),
-						elapsedSince(startedAt))
-					continue
-				}
-				return nil, singleMessageNotReceivableError(p, entityLabel, peekedTarget, scanned)
+			if isNoAvailableSessionError(err) {
+				return total, nil
 			}
-			return nil, fmt.Errorf("receive error: %w", recvErr)
-		}
-		if len(msgs) == 0 {
-			if peekedTarget != nil && idleAttempts < idleRetries {
-				idleAttempts++
-				continue
-			}
-			return nil, singleMessageNotReceivableError(p, entityLabel, peekedTarget, scanned)
-		}
-		idleAttempts = 0
-
-		var target *azservicebus.ReceivedMessage
-		others := make([]*azservicebus.ReceivedMessage, 0, len(msgs))
-		for _, m := range msgs {
-			if m.SequenceNumber != nil && *m.SequenceNumber == p.SequenceNumber {
-				target = m
-			} else {
-				others = append(others, m)
-			}
+			return total, fmt.Errorf("accept next session for %s: %w", label, err)
 		}
 
-		if len(others) > 0 {
-			sem := make(chan struct{}, completeConcurrency)
-			var wg sync.WaitGroup
-			errCh := make(chan error, len(others))
-			for _, o := range others {
-				sem <- struct{}{}
-				wg.Add(1)
-				go func(msg *azservicebus.ReceivedMessage) {
-					defer wg.Done()
-					defer func() { <-sem }()
-					abandonCtx, abandonCancel := cancellableOperationContext(requestCtx, p.Env, maxWaitMs)
-					defer abandonCancel()
-					if err := actionReceiver.AbandonMessage(abandonCtx, msg, nil); err != nil {
-						errCh <- fmt.Errorf("abandon non-target message error: %w", err)
-					}
-				}(o)
-			}
-			wg.Wait()
-			close(errCh)
-			if err := <-errCh; err != nil {
-				return nil, err
-			}
-		}
+		sessionID := receiver.SessionID()
+		renewer := startSessionLockRenewer(
+			requestCtx,
+			receiver,
+			maxWaitMs,
+			sessionLockRenewInterval(time.Now(), receiver.LockedUntil()),
+		)
+		consumed, consumeErr := consume(receiver, fmt.Sprintf("%s (session %q)", label, sessionID))
+		renewErr := renewer.stop()
+		closeWithTimeout(receiver)
+		total += consumed
 
-		if target != nil {
-			if err := handleTarget(actionReceiver, target); err != nil {
-				return nil, err
-			}
-			emitOutput(p.RunID,
-				fmt.Sprintf("✅ %s completed for message %d in %.2fs", p.Action, p.SequenceNumber, time.Since(startedAt).Seconds()),
-				false, elapsedSince(startedAt))
-			return map[string]int64{"sequenceNumber": p.SequenceNumber}, nil
+		if consumeErr != nil {
+			return total, consumeErr
 		}
-
-		scanned += len(msgs)
-		if scanned > 0 && scanned%100 == 0 {
-			emitProgress(p.RunID,
-				fmt.Sprintf("Scanned %d messages...", scanned),
-				elapsedSince(startedAt))
+		if renewErr != nil {
+			return total, renewErr
+		}
+		if consumed == 0 {
+			if _, seen := emptySessions[sessionID]; seen {
+				return total, fmt.Errorf("session %q in %s was accepted repeatedly without receivable messages; stopping to avoid an infinite loop", sessionID, label)
+			}
+			emptySessions[sessionID] = struct{}{}
+		} else {
+			delete(emptySessions, sessionID)
 		}
 	}
+}
 
-	return nil, singleMessageNotReceivableError(p, entityLabel, peekedTarget, scanned)
+func completeReceivedMessages(
+	requestCtx context.Context,
+	receiver destructiveMessageReceiver,
+	messages []*azservicebus.ReceivedMessage,
+	env map[string]string,
+	maxWaitMs int,
+	concurrency int,
+) (int, error) {
+	if concurrency <= 1 {
+		completed := 0
+		for _, msg := range messages {
+			completeCtx, completeCancel := cancellableOperationContext(requestCtx, env, maxWaitMs)
+			err := receiver.CompleteMessage(completeCtx, msg, nil)
+			completeCancel()
+			if err != nil {
+				return completed, fmt.Errorf("complete message error: %w", err)
+			}
+			completed++
+		}
+		return completed, nil
+	}
+
+	sem := make(chan struct{}, concurrency)
+	var wg sync.WaitGroup
+	errCh := make(chan error, len(messages))
+	completedCh := make(chan struct{}, len(messages))
+	for _, msg := range messages {
+		wg.Add(1)
+		go func(m *azservicebus.ReceivedMessage) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			completeCtx, completeCancel := cancellableOperationContext(requestCtx, env, maxWaitMs)
+			defer completeCancel()
+			if err := receiver.CompleteMessage(completeCtx, m, nil); err != nil {
+				errCh <- fmt.Errorf("complete message error: %w", err)
+				return
+			}
+			completedCh <- struct{}{}
+		}(msg)
+	}
+	wg.Wait()
+	close(errCh)
+	close(completedCh)
+
+	completed := 0
+	for range completedCh {
+		completed++
+	}
+	if err := <-errCh; err != nil {
+		return completed, err
+	}
+	return completed, nil
 }

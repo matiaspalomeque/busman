@@ -3,6 +3,23 @@ import { useAppStore, selectActiveConnection, SUBSCRIPTION_KEY_SEP } from "./app
 import { messageOperationKey } from "../utils/messageOperation";
 import type { PeekedMessage } from "../types";
 
+function peekedMessage(messageId: string, sequenceNumber: string, source: string): PeekedMessage {
+  return {
+    messageId,
+    sequenceNumber,
+    body: {},
+    subject: null,
+    contentType: null,
+    correlationId: null,
+    partitionKey: null,
+    traceParent: null,
+    applicationProperties: null,
+    enqueuedTimeUtc: null,
+    expiresAtUtc: null,
+    _source: source,
+  };
+}
+
 // Reset store to initial state before each test.
 beforeEach(() => {
   useAppStore.setState(useAppStore.getInitialState());
@@ -122,8 +139,62 @@ describe("appStore", () => {
     });
   });
 
-  // ─── Output lines ──────────────────────────────────────────────────
+  // Peek cursors
 
+  describe("peek cursors", () => {
+    it("advances each source cursor monotonically when pages are appended", () => {
+      const normal = peekedMessage("normal-10", "10", "Normal Queue: orders");
+      const dlq = peekedMessage("dlq-100", "100", "Dead Letter Queue: orders");
+      const state = useAppStore.getState();
+
+      state.setPeekResults([normal, dlq]);
+      state.removePeekedMessageByKey(messageOperationKey(normal)!);
+      state.appendPeekResults([
+        peekedMessage("dlq-101", "101", "Dead Letter Queue: orders"),
+      ]);
+
+      expect(useAppStore.getState().lastPeekNormalMaxSeqNum).toBe("10");
+      expect(useAppStore.getState().lastPeekDlqMaxSeqNum).toBe("101");
+
+      state.appendPeekResults([
+        peekedMessage("normal-9", "9", "Normal Queue: orders"),
+      ]);
+      expect(useAppStore.getState().lastPeekNormalMaxSeqNum).toBe("10");
+
+      state.appendPeekResults([
+        peekedMessage("normal-11", "11", "Normal Queue: orders"),
+      ]);
+      expect(useAppStore.getState().lastPeekNormalMaxSeqNum).toBe("11");
+      expect(useAppStore.getState().lastPeekDlqMaxSeqNum).toBe("101");
+    });
+
+    it("keeps large normal and DLQ cursors exact and independently monotonic", () => {
+      const state = useAppStore.getState();
+      state.setPeekResults(
+        [
+          peekedMessage("normal-large", "9007199254740993", "Normal Queue: orders"),
+          peekedMessage("dlq-max", "9223372036854775807", "Dead Letter Queue: orders"),
+        ]
+      );
+
+      state.appendPeekResults(
+        [
+          peekedMessage("normal-older", "9007199254740992", "Normal Queue: orders"),
+          peekedMessage("dlq-older", "9288674231451771", "Dead Letter Queue: orders"),
+        ]
+      );
+      expect(useAppStore.getState().lastPeekNormalMaxSeqNum).toBe("9007199254740993");
+      expect(useAppStore.getState().lastPeekDlqMaxSeqNum).toBe("9223372036854775807");
+
+      state.appendPeekResults([
+        peekedMessage("normal-partition", "9288674231451771", "Normal Queue: orders"),
+      ]);
+      expect(useAppStore.getState().lastPeekNormalMaxSeqNum).toBe("9288674231451771");
+      expect(useAppStore.getState().lastPeekDlqMaxSeqNum).toBe("9223372036854775807");
+    });
+  });
+
+  // Output lines
   describe("appendOutputLine", () => {
     it("caps at 2000 lines", () => {
       const state = useAppStore.getState();
@@ -221,7 +292,7 @@ describe("appStore", () => {
         _source: "Dead Letter Queue: q1",
       };
 
-      useAppStore.getState().setPeekResults([normal, dlq], "peek.json");
+      useAppStore.getState().setPeekResults([normal, dlq]);
       useAppStore.getState().setSelectedMessage(dlq);
 
       const dlqKey = messageOperationKey(dlq);

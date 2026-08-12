@@ -49,6 +49,7 @@ export function openResend(msg: PeekedMessage, store: Store): void {
     contentType: msg.contentType ?? undefined,
     subject: msg.subject ?? undefined,
     correlationId: msg.correlationId ?? undefined,
+    sessionId: msg.sessionId ?? undefined,
     applicationProperties: msg.applicationProperties ?? undefined,
   };
   store.setSendDraft(draft);

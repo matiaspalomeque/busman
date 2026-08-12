@@ -8,6 +8,7 @@ import { extractNamespace } from "../../utils/connection";
 import { exitCodeToStatus } from "../../utils/exitCode";
 import type { QueueMode } from "../../types";
 import { addSingleMessageActionMetadata, isDeadLetterMessage, messageOperationKey } from "../../utils/messageOperation";
+import { isCanonicalSequenceNumber } from "../../utils/sequenceNumber";
 
 const MODES: QueueMode[] = ["normal", "dlq", "both"];
 
@@ -95,11 +96,10 @@ export function MoveMessagesModal() {
     const namespace = extractNamespace(conn.connectionString);
 
     const singleMessageSequenceNumber =
-      isSingleMessage && singleMessageMoveTarget ? Number(singleMessageMoveTarget.sequenceNumber) : null;
-    if (
-      isSingleMessage &&
-      (!Number.isFinite(singleMessageSequenceNumber) || singleMessageSequenceNumber === null || singleMessageSequenceNumber <= 0)
-    ) {
+      isSingleMessage && singleMessageMoveTarget && isCanonicalSequenceNumber(singleMessageMoveTarget.sequenceNumber)
+        ? singleMessageMoveTarget.sequenceNumber
+        : null;
+    if (isSingleMessage && singleMessageSequenceNumber === null) {
       return;
     }
     if (isSingleMessage && !isSingleMessageDlq) return;
@@ -181,7 +181,7 @@ export function MoveMessagesModal() {
       params.sourceQueue = sourceQueue.trim();
     }
 
-    void runOperation("move_messages", params)
+    void runOperation("move_messages", params, { runId })
       .then(({ exitCode, errorMessage }) => {
         updateEventLogEntry(runId, exitCodeToStatus(exitCode), errorMessage);
       })
@@ -272,9 +272,11 @@ export function MoveMessagesModal() {
                 ))}
               </datalist>
             )}
-            {sameQueueError && (
-              <p className="text-[10px] text-red-500">{t("explorer.moveModal.errorSameQueue")}</p>
-            )}
+            <div className="min-h-4" aria-live="assertive">
+              {sameQueueError && (
+                <p role="alert" className="text-[10px] text-red-500">{t("explorer.moveModal.errorSameQueue")}</p>
+              )}
+            </div>
           </div>
 
           {/* Mode — hidden in single-message mode */}

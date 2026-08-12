@@ -85,7 +85,7 @@ export function CreateEntityModal() {
         options.enablePartitioning = enablePartitioning;
       }
       if (defaultTtl.trim()) options.defaultMessageTimeToLive = defaultTtl.trim();
-      if (lockDuration.trim()) options.lockDuration = lockDuration.trim();
+      if (entityType !== "topic" && lockDuration.trim()) options.lockDuration = lockDuration.trim();
       if (entityType !== "topic") {
         options.maxDeliveryCount = maxDeliveryCount;
         options.deadLetteringOnMessageExpiration = deadLetteringOnExpiration;
@@ -129,7 +129,7 @@ export function CreateEntityModal() {
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
       onClick={(e) => e.target === e.currentTarget && close()}
     >
-      <div role="dialog" aria-modal="true" className="bg-white dark:bg-zinc-900 rounded-lg shadow-xl w-full max-w-md mx-4 overflow-hidden border border-zinc-200 dark:border-zinc-700">
+      <div role="dialog" aria-modal="true" className="flex min-h-[24rem] max-h-[90vh] w-full max-w-md flex-col overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-xl mx-4 dark:border-zinc-700 dark:bg-zinc-900">
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-200 dark:border-zinc-700">
           <h2 className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">
@@ -141,7 +141,7 @@ export function CreateEntityModal() {
         </div>
 
         {/* Body */}
-        <div className="px-4 py-4 space-y-3 max-h-[70vh] overflow-y-auto">
+        <div className="flex-1 min-h-0 px-4 py-4 space-y-3 overflow-y-auto">
           {/* Entity type */}
           <div>
             <label className={labelClass}>{t("explorer.entityManagement.entityType")}</label>
@@ -229,17 +229,19 @@ export function CreateEntityModal() {
                 />
               </div>
 
-              {/* Lock Duration */}
-              <div>
-                <label className={labelClass}>{t("explorer.entityManagement.lockDuration")}</label>
-                <input
-                  type="text"
-                  value={lockDuration}
-                  onChange={(e) => setLockDuration(e.target.value)}
-                  placeholder={t("explorer.entityManagement.lockDurationPlaceholder")}
-                  className={inputClass}
-                />
-              </div>
+              {/* Lock Duration (queue/subscription only) */}
+              {entityType !== "topic" && (
+                <div>
+                  <label className={labelClass}>{t("explorer.entityManagement.lockDuration")}</label>
+                  <input
+                    type="text"
+                    value={lockDuration}
+                    onChange={(e) => setLockDuration(e.target.value)}
+                    placeholder={t("explorer.entityManagement.lockDurationPlaceholder")}
+                    className={inputClass}
+                  />
+                </div>
+              )}
 
               {/* Partitioning (queue/topic only) */}
               {entityType !== "subscription" && (
@@ -296,12 +298,14 @@ export function CreateEntityModal() {
             </div>
           )}
 
-          {/* Error */}
-          {error && (
-            <div className="text-xs text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 px-3 py-2 rounded">
-              {error}
-            </div>
-          )}
+          {/* Reserved feedback slot keeps the footer fixed when validation finishes. */}
+          <div className="h-12 overflow-y-auto" aria-live="assertive">
+            {error && (
+              <div role="alert" className="text-xs text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/20 px-3 py-2 rounded">
+                {error}
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Footer */}

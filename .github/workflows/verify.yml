@@ -19,14 +19,21 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.23"
+          go-version: "1.25.12"
           cache-dependency-path: src-tauri/worker-go/go.sum
 
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
 
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: ./src-tauri -> target
+
+      - uses: taiki-e/install-action@13608cbb45b01feb47ef444ab1a42dc41ad56f1a # v2.79.11
+        with:
+          tool: cargo-audit@0.22.2
+          fallback: none
 
       - name: Install Tauri system dependencies
         run: |
@@ -35,6 +42,9 @@ jobs:
 
       - name: Install frontend dependencies
         run: bun install --frozen-lockfile
+
+      - name: Audit frontend dependencies
+        run: bun audit
 
       - name: Build frontend
         run: bun run build
@@ -45,8 +55,40 @@ jobs:
       - name: Build worker sidecar
         run: bun run build-sidecar
 
+      - name: Check Rust formatting
+        working-directory: src-tauri
+        run: cargo fmt -- --check
+
+      - name: Lint Rust
+        working-directory: src-tauri
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
       - name: Run Rust tests
-        run: bun run test:rust
+        working-directory: src-tauri
+        run: cargo test --locked
+
+      - name: Audit Rust dependencies
+        working-directory: src-tauri
+        run: cargo audit
+
+      - name: Check Go formatting
+        working-directory: src-tauri/worker-go
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then
+            echo "The following Go files need formatting:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: Vet Go worker
+        working-directory: src-tauri/worker-go
+        run: go vet ./...
 
       - name: Run Go worker tests
-        run: bun run test:go
+        working-directory: src-tauri/worker-go
+        run: go test -race ./...
+
+      - name: Audit Go worker dependencies
+        working-directory: src-tauri/worker-go
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.6.0 ./...

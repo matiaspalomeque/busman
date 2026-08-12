@@ -4,7 +4,7 @@ version = "0.1.24"
 description = "Azure Service Bus desktop client"
 authors = []
 edition = "2021"
-rust-version = "1.77.2"
+rust-version = "1.88"
 
 [lib]
 name = "busman_lib"
@@ -31,3 +31,4 @@ aes-gcm = "0.10"
 argon2 = "0.5"
 base64 = "0.22"
 rand = "0.8"
+keyring = "4.1.6"

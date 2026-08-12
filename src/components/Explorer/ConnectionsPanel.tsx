@@ -150,35 +150,36 @@ function ConnectionForm({ initial, onSave, onCancel }: ConnectionFormProps) {
         </div>
       </div>
 
-      {/* Test result */}
-      {testResult && (
-        <p
-          className={[
-            "text-xs px-2.5 py-1.5 rounded",
-            testResult.ok
-              ? "bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-400"
-              : "bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400",
-          ].join(" ")}
-        >
-          {testResult.ok
-            ? t("explorer.connectionsModal.testSuccess", {
-                queues: testResult.queueCount,
-                topics: testResult.topicCount,
-              })
-            : t("explorer.connectionsModal.testError", { error: testResult.error })}
-        </p>
-      )}
-
-      {error && (
-        <p className="text-xs text-red-500 dark:text-red-400">{error}</p>
-      )}
+      {/* Reserved feedback slot keeps the form controls in place after async work. */}
+      <div className="h-12 overflow-y-auto" aria-live={error || (testResult && !testResult.ok) ? "assertive" : "polite"}>
+        {error ? (
+          <p role="alert" className="text-xs text-red-500 dark:text-red-400">{error}</p>
+        ) : testResult ? (
+          <p
+            role={testResult.ok ? "status" : "alert"}
+            className={[
+              "text-xs px-2.5 py-1.5 rounded",
+              testResult.ok
+                ? "bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-400"
+                : "bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400",
+            ].join(" ")}
+          >
+            {testResult.ok
+              ? t("explorer.connectionsModal.testSuccess", {
+                  queues: testResult.queueCount,
+                  topics: testResult.topicCount,
+                })
+              : t("explorer.connectionsModal.testError", { error: testResult.error })}
+          </p>
+        ) : null}
+      </div>
 
       <div className="flex justify-between gap-2">
         <button
           type="button"
           onClick={() => void handleTest()}
           disabled={testing || !connectionString.trim()}
-          className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded border border-zinc-300 dark:border-zinc-600 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-300 disabled:opacity-40 disabled:cursor-not-allowed"
+          className="flex min-w-[7.5rem] items-center justify-center gap-1.5 text-xs px-3 py-1.5 rounded border border-zinc-300 dark:border-zinc-600 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-300 disabled:opacity-40 disabled:cursor-not-allowed"
         >
           {testing && (
             <span className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" />

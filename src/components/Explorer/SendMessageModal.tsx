@@ -6,6 +6,7 @@ import { Icon } from "../Common/Icon";
 import { extractNamespace } from "../../utils/connection";
 import { useMessageTemplates, type MessageTemplate } from "../../hooks/useMessageTemplates";
 import type { ExplorerSelection } from "../../types";
+import { QueuePropertiesSchema, safeInvoke } from "../../schemas/ipc";
 
 interface AppProperty {
   key: string;
@@ -27,6 +28,7 @@ export function SendMessageModal() {
   const conn = useAppStore(selectActiveConnection);
   const {
     explorerSelection,
+    entityProperties,
     sendDraft,
     setSendDraft,
     setIsSendModalOpen,
@@ -41,7 +43,7 @@ export function SendMessageModal() {
   const [subject, setSubject] = useState(sendDraft?.subject ?? "");
   const [messageId, setMessageId] = useState("");
   const [correlationId, setCorrelationId] = useState(sendDraft?.correlationId ?? "");
-  const [sessionId, setSessionId] = useState("");
+  const [sessionId, setSessionId] = useState(sendDraft?.sessionId ?? "");
   const [scheduled, setScheduled] = useState("");
   const [appProps, setAppProps] = useState<AppProperty[]>(() => {
     if (!sendDraft?.applicationProperties) return [];
@@ -153,6 +155,7 @@ export function SendMessageModal() {
     const runId = crypto.randomUUID();
     const namespace = extractNamespace(conn.connectionString);
     const currentTarget = extractSendTarget(explorerSelection);
+    const targetName = entityName.trim();
 
     const builtProps: Record<string, unknown> = {};
     for (const { key, value } of appProps) {
@@ -172,23 +175,56 @@ export function SendMessageModal() {
       applicationProperties: Object.keys(builtProps).length > 0 ? builtProps : undefined,
     };
 
-    addEventLogEntry({
-      id: runId,
-      time: new Date().toISOString(),
-      namespace,
-      entity: entityName.trim(),
-      entityType: currentTarget.entityType,
-      operation: "Send",
-      status: "running",
-    });
-
     setSending(true);
     setStatus(null);
+    let eventStarted = false;
 
     try {
+      if (currentTarget.entityType === "Queue") {
+        let requiresSession: boolean;
+        if (
+          entityProperties?.kind === "queue" &&
+          entityProperties.data.name === targetName
+        ) {
+          requiresSession = entityProperties.data.requiresSession === true;
+        } else {
+          try {
+            const properties = await safeInvoke(
+              "get_queue_properties",
+              QueuePropertiesSchema,
+              { args: { connectionId: conn.id, queueName: targetName } },
+            );
+            requiresSession = properties.requiresSession === true;
+          } catch (error) {
+            throw new Error(
+              t("explorer.sendModal.sessionValidationFailed", { error: String(error) }),
+            );
+          }
+        }
+        if (requiresSession && sessionId.trim() === "") {
+          setShowAdvanced(true);
+          setStatus({
+            ok: false,
+            text: t("explorer.sendModal.sessionRequired", { entity: targetName }),
+          });
+          return;
+        }
+      }
+
+      addEventLogEntry({
+        id: runId,
+        time: new Date().toISOString(),
+        namespace,
+        entity: targetName,
+        entityType: currentTarget.entityType,
+        operation: "Send",
+        status: "running",
+      });
+      eventStarted = true;
       await invoke("send_message", {
         args: {
-          entityName: entityName.trim(),
+          entityName: targetName,
+          entityKind: currentTarget.entityType.toLowerCase(),
           connectionId: conn.id,
           message,
         },
@@ -198,7 +234,7 @@ export function SendMessageModal() {
     } catch (err) {
       const msg = String(err);
       setStatus({ ok: false, text: msg });
-      updateEventLogEntry(runId, "error", msg);
+      if (eventStarted) updateEventLogEntry(runId, "error", msg);
     } finally {
       setSending(false);
     }
@@ -218,7 +254,7 @@ export function SendMessageModal() {
       }}
       onKeyDown={handleKeyDown}
     >
-      <div className="bg-white dark:bg-zinc-900 rounded-lg shadow-2xl border border-zinc-200 dark:border-zinc-700 w-full max-w-2xl max-h-[90vh] flex flex-col">
+      <div className="flex h-[min(42rem,90vh)] w-full max-w-2xl flex-col rounded-lg border border-zinc-200 bg-white shadow-2xl dark:border-zinc-700 dark:bg-zinc-900">
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-3.5 border-b border-zinc-200 dark:border-zinc-700">
           <h2 className="text-sm font-semibold text-azure-dark dark:text-azure-light flex items-center gap-2">
@@ -351,15 +387,17 @@ export function SendMessageModal() {
             )}
           </div>
 
-          {/* Save flash */}
-          {saveFlash && (
-            <div className="flex items-center gap-1.5 text-xs text-green-600 dark:text-green-400 -mt-1">
-              <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round">
-                <polyline points="20 6 9 17 4 12" />
-              </svg>
-              {t("explorer.sendModal.templates.saved")}
-            </div>
-          )}
+          {/* Reserved flash slot avoids moving the form when a template is saved. */}
+          <div className="min-h-4" aria-live="polite">
+            {saveFlash && (
+              <div role="status" className="flex items-center gap-1.5 text-xs text-green-600 dark:text-green-400">
+                <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round">
+                  <polyline points="20 6 9 17 4 12" />
+                </svg>
+                {t("explorer.sendModal.templates.saved")}
+              </div>
+            )}
+          </div>
 
           {/* Divider */}
           <div className="border-t border-zinc-100 dark:border-zinc-800" />
@@ -528,9 +566,13 @@ export function SendMessageModal() {
             </div>
           )}
 
-          {/* Status */}
+        </div>
+
+        {/* Persistent feedback slot stays visible without resizing the modal. */}
+        <div className="min-h-[3rem] shrink-0 px-5 pb-2 pt-1" aria-live={status?.ok === false ? "assertive" : "polite"}>
           {status && (
             <div
+              role={status.ok ? "status" : "alert"}
               className={[
                 "text-xs px-3 py-2 rounded",
                 status.ok

@@ -12,7 +12,9 @@ import type {
   SendMessageDraft,
 } from "../types";
 import { logHandledError } from "../utils/logging";
-import { isDeadLetterMessage, messageOperationKey, type MessageOperation } from "../utils/messageOperation";
+import { messageOperationKey, type MessageOperation } from "../utils/messageOperation";
+import { compareSequenceNumbers } from "../utils/sequenceNumber";
+import { computeMaxSeqNums } from "./peekCursors";
 
 /** Internal key separator for subscription store entries: "topic\0subscription". */
 export const SUBSCRIPTION_KEY_SEP = "\0";
@@ -46,9 +48,9 @@ interface AppState {
 
   // Peek results
   peekMessages: PeekedMessage[];
-  peekFilename: string | null;
-  lastPeekNormalMaxSeqNum: number | null;
-  lastPeekDlqMaxSeqNum: number | null;
+  hasBrowsed: boolean;
+  lastPeekNormalMaxSeqNum: string | null;
+  lastPeekDlqMaxSeqNum: string | null;
 
   // Worker availability
   workerAvailable: boolean | null;
@@ -142,8 +144,8 @@ interface AppState {
   appendOutputLine: (line: string, isStderr: boolean, elapsedMs: number) => void;
   setProgress: (progress: ProgressUpdate | null) => void;
   clearOutput: () => void;
-  setPeekResults: (messages: PeekedMessage[], filename: string) => void;
-  appendPeekResults: (messages: PeekedMessage[], filename: string) => void;
+  setPeekResults: (messages: PeekedMessage[]) => void;
+  appendPeekResults: (messages: PeekedMessage[]) => void;
   clearPeekResults: () => void;
   setWorkerAvailable: (available: boolean) => void;
   setEntities: (entities: { queues: string[]; topics: Record<string, string[]> } | null) => void;
@@ -207,7 +209,7 @@ interface AppState {
 /** Resets all entity-specific grid/peek state. Used when switching connection, queue, or subscription. */
 function resetGridState(state: AppState): void {
   state.peekMessages = [];
-  state.peekFilename = null;
+  state.hasBrowsed = false;
   state.lastPeekNormalMaxSeqNum = null;
   state.lastPeekDlqMaxSeqNum = null;
   state.selectedMessage = null;
@@ -219,22 +221,6 @@ function resetGridState(state: AppState): void {
   state.entityPropertiesError = null;
   state.isInsightsPanelOpen = false;
   state.pendingMessageOperations = {};
-}
-
-function computeMaxSeqNums(messages: PeekedMessage[]): { normal: number | null; dlq: number | null } {
-  let normal: number | null = null;
-  let dlq: number | null = null;
-  for (const msg of messages) {
-    if (msg.sequenceNumber == null) continue;
-    const n = Number(msg.sequenceNumber);
-    if (isNaN(n)) continue;
-    if (isDeadLetterMessage(msg)) {
-      if (dlq === null || n > dlq) dlq = n;
-    } else {
-      if (normal === null || n > normal) normal = n;
-    }
-  }
-  return { normal, dlq };
 }
 
 export const useAppStore = create<AppState>()(
@@ -254,7 +240,7 @@ export const useAppStore = create<AppState>()(
     outputLines: [],
     progress: null,
     peekMessages: [],
-    peekFilename: null,
+    hasBrowsed: false,
     lastPeekNormalMaxSeqNum: null,
     lastPeekDlqMaxSeqNum: null,
     workerAvailable: null,
@@ -497,28 +483,38 @@ export const useAppStore = create<AppState>()(
         state.progress = null;
       }),
 
-    setPeekResults: (messages, filename) =>
+    setPeekResults: (messages) =>
       set((state) => {
         state.peekMessages = messages;
-        state.peekFilename = filename;
+        state.hasBrowsed = true;
         const { normal: n1, dlq: d1 } = computeMaxSeqNums(messages);
         state.lastPeekNormalMaxSeqNum = n1;
         state.lastPeekDlqMaxSeqNum = d1;
       }),
 
-    appendPeekResults: (messages, filename) =>
+    appendPeekResults: (messages) =>
       set((state) => {
         state.peekMessages = [...state.peekMessages, ...messages];
-        state.peekFilename = filename;
-        const { normal: n2, dlq: d2 } = computeMaxSeqNums(state.peekMessages);
-        state.lastPeekNormalMaxSeqNum = n2;
-        state.lastPeekDlqMaxSeqNum = d2;
+        state.hasBrowsed = true;
+        const { normal: n2, dlq: d2 } = computeMaxSeqNums(messages);
+        if (
+          n2 !== null &&
+          (state.lastPeekNormalMaxSeqNum === null || compareSequenceNumbers(n2, state.lastPeekNormalMaxSeqNum) > 0)
+        ) {
+          state.lastPeekNormalMaxSeqNum = n2;
+        }
+        if (
+          d2 !== null &&
+          (state.lastPeekDlqMaxSeqNum === null || compareSequenceNumbers(d2, state.lastPeekDlqMaxSeqNum) > 0)
+        ) {
+          state.lastPeekDlqMaxSeqNum = d2;
+        }
       }),
 
     clearPeekResults: () =>
       set((state) => {
         state.peekMessages = [];
-        state.peekFilename = null;
+        state.hasBrowsed = false;
         state.lastPeekNormalMaxSeqNum = null;
         state.lastPeekDlqMaxSeqNum = null;
       }),

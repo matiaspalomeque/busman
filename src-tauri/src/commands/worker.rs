@@ -13,14 +13,15 @@ use std::{
 };
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::{
-    io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
-    process::{Child, ChildStderr, ChildStdin, ChildStdout, Command},
+    io::{AsyncBufRead, AsyncBufReadExt, AsyncWriteExt, BufReader},
+    process::{Child, ChildStderr, ChildStdin, Command},
     sync::{oneshot, Mutex},
     task::JoinHandle,
 };
 use uuid::Uuid;
 
 const WORKER_PROTOCOL_VERSION: u8 = 1;
+const MAX_WORKER_LINE_BYTES: usize = 32 * 1024 * 1024;
 pub(crate) const WORKER_CANCELLED_PREFIX: &str = "[worker:cancelled] ";
 
 pub(crate) static WORKER_PID: AtomicU32 = AtomicU32::new(0);
@@ -77,6 +78,7 @@ enum WorkerMessage {
     },
 }
 
+#[derive(Debug)]
 pub(crate) enum WorkerCallError {
     Transport(String),
     Worker {
@@ -205,13 +207,6 @@ pub(crate) fn resolve_sidecar_path(app: &AppHandle) -> Result<PathBuf, String> {
     Err("Worker sidecar not found in resource dir. Run `bun run build-sidecar`.".to_string())
 }
 
-pub(crate) fn downloads_dir(app: &AppHandle) -> Result<PathBuf, String> {
-    app.path()
-        .app_data_dir()
-        .map(|p| p.join("downloads"))
-        .map_err(|e| format!("Cannot resolve app data dir: {e}"))
-}
-
 // ─── Worker event emission ──────────────────────────────────────────────────
 
 struct WorkerEventParams {
@@ -317,9 +312,10 @@ async fn spawn_worker(app: &AppHandle) -> Result<ActiveWorker, String> {
     let reader_pending = pending.clone();
     let reader_app = app.clone();
     let reader_handle = tokio::spawn(reader_loop(
-        reader_app,
         BufReader::new(stdout),
         reader_pending,
+        MAX_WORKER_LINE_BYTES,
+        move |params| emit_worker_event(&reader_app, params),
     ));
 
     Ok(ActiveWorker {
@@ -332,69 +328,159 @@ async fn spawn_worker(app: &AppHandle) -> Result<ActiveWorker, String> {
 
 async fn log_worker_stderr(stderr: ChildStderr) {
     let mut reader = BufReader::new(stderr);
-    let mut line = String::new();
+    let mut line = Vec::with_capacity(8 * 1024);
     loop {
-        match reader.read_line(&mut line).await {
-            Ok(0) => break,
-            Ok(_) => {
-                let trimmed = line.trim();
-                if !trimmed.is_empty() {
-                    log::warn!("[worker stderr] {}", redact_secrets(trimmed));
-                }
-                line.clear();
+        match read_bounded_line(&mut reader, &mut line, MAX_WORKER_LINE_BYTES).await {
+            Ok(BoundedLineRead::Eof) => break,
+            Ok(BoundedLineRead::Oversized) => {
+                log::warn!("Worker stderr line exceeded the bounded line limit");
             }
-            Err(e) => {
-                log::warn!("[worker stderr] read error: {e}");
+            Ok(BoundedLineRead::Line) => {
+                if let Ok(text) = std::str::from_utf8(trim_ascii_whitespace(&line)) {
+                    if !text.is_empty() {
+                        log::warn!("[worker stderr] {}", redact_secrets(text));
+                    }
+                }
+            }
+            Err(error) => {
+                log::warn!("[worker stderr] read error: {error}");
                 break;
             }
         }
     }
 }
 
+#[derive(Debug, Eq, PartialEq)]
+enum BoundedLineRead {
+    Eof,
+    Line,
+    Oversized,
+}
+
+/// Reads and drains one newline-delimited frame while retaining at most
+/// `max_line_bytes` bytes. The trailing LF is not part of the size limit.
+async fn read_bounded_line<R>(
+    reader: &mut R,
+    line: &mut Vec<u8>,
+    max_line_bytes: usize,
+) -> std::io::Result<BoundedLineRead>
+where
+    R: AsyncBufRead + Unpin,
+{
+    line.clear();
+    let mut oversized = false;
+
+    loop {
+        let (consumed, line_complete) = {
+            let available = reader.fill_buf().await?;
+            if available.is_empty() {
+                if oversized {
+                    return Ok(BoundedLineRead::Oversized);
+                }
+                return Ok(if line.is_empty() {
+                    BoundedLineRead::Eof
+                } else {
+                    BoundedLineRead::Line
+                });
+            }
+
+            let newline = available.iter().position(|byte| *byte == b'\n');
+            let content_len = newline.unwrap_or(available.len());
+            if !oversized {
+                let remaining = max_line_bytes.saturating_sub(line.len());
+                let retained = content_len.min(remaining);
+                line.extend_from_slice(&available[..retained]);
+                if content_len > remaining {
+                    oversized = true;
+                }
+            }
+
+            (
+                newline.map_or(available.len(), |index| index + 1),
+                newline.is_some(),
+            )
+        };
+        reader.consume(consumed);
+
+        if line_complete {
+            return Ok(if oversized {
+                BoundedLineRead::Oversized
+            } else {
+                BoundedLineRead::Line
+            });
+        }
+    }
+}
+
+fn trim_ascii_whitespace(bytes: &[u8]) -> &[u8] {
+    let start = bytes
+        .iter()
+        .position(|byte| !byte.is_ascii_whitespace())
+        .unwrap_or(bytes.len());
+    let end = bytes
+        .iter()
+        .rposition(|byte| !byte.is_ascii_whitespace())
+        .map_or(start, |index| index + 1);
+    &bytes[start..end]
+}
+
 /// Background task that reads worker stdout, routes responses by ID, and emits events.
-async fn reader_loop(app: AppHandle, mut stdout: BufReader<ChildStdout>, pending: PendingMap) {
-    let mut line = String::new();
+async fn reader_loop<R, F>(
+    mut stdout: R,
+    pending: PendingMap,
+    max_line_bytes: usize,
+    mut emit_event: F,
+) where
+    R: AsyncBufRead + Unpin,
+    F: FnMut(&WorkerEventParams),
+{
+    let mut line = Vec::with_capacity(64 * 1024);
     // Rate-limit progress events to avoid flooding the frontend with re-renders.
     // Progress events are display-only overwrites — skipping intermediate ones is safe.
     let mut last_progress_emit = std::time::Instant::now() - Duration::from_secs(1);
     const PROGRESS_MIN_INTERVAL: Duration = Duration::from_millis(50);
     loop {
-        line.clear();
-        let read = match stdout.read_line(&mut line).await {
-            Ok(n) => n,
-            Err(e) => {
-                log::warn!("Worker stdout read error: {e}");
-                drain_pending(&pending, &format!("Worker read error: {e}"));
+        match read_bounded_line(&mut stdout, &mut line, max_line_bytes).await {
+            Ok(BoundedLineRead::Eof) => {
+                drain_pending(&pending, "Service Bus worker exited unexpectedly");
                 break;
             }
-        };
-
-        if read == 0 {
-            // Worker exited — error all pending requests.
-            drain_pending(&pending, "Service Bus worker exited unexpectedly");
-            break;
+            Ok(BoundedLineRead::Oversized) => {
+                let message =
+                    format!("Worker protocol frame exceeded the {max_line_bytes}-byte limit");
+                log::error!("{message}");
+                drain_pending(&pending, &message);
+                break;
+            }
+            Ok(BoundedLineRead::Line) => {}
+            Err(error) => {
+                let message = format!("Worker read error: {error}");
+                log::warn!("Worker stdout read error: {error}");
+                drain_pending(&pending, &message);
+                break;
+            }
         }
 
-        let trimmed = line.trim();
+        let trimmed = trim_ascii_whitespace(&line);
         if trimmed.is_empty() {
             continue;
         }
-
-        // Guard against a runaway worker sending enormous payloads.
-        const MAX_LINE_BYTES: usize = 100 * 1024 * 1024; // 100 MB
-        if trimmed.len() > MAX_LINE_BYTES {
-            log::error!("Worker response exceeded size limit (100 MB), skipping");
-            continue;
-        }
-
-        let parsed: WorkerMessage = match serde_json::from_str(trimmed) {
+        let text = match std::str::from_utf8(trimmed) {
+            Ok(text) => text,
+            Err(error) => {
+                let message = format!("Worker protocol frame was not valid UTF-8: {error}");
+                log::error!("{message}");
+                drain_pending(&pending, &message);
+                break;
+            }
+        };
+        let parsed: WorkerMessage = match serde_json::from_str(text) {
             Ok(value) => value,
-            Err(e) => {
-                log::debug!(
-                    "Worker non-protocol line skipped ({e}): {}",
-                    redact_secrets(trimmed)
-                );
-                continue;
+            Err(error) => {
+                let message = format!("Malformed worker protocol response: {error}");
+                log::error!("{message}");
+                drain_pending(&pending, &message);
+                break;
             }
         };
 
@@ -410,12 +496,13 @@ async fn reader_loop(app: AppHandle, mut stdout: BufReader<ChildStdout>, pending
                 elapsed_ms,
             } => {
                 if version != Some(WORKER_PROTOCOL_VERSION) {
-                    log::error!(
+                    let message = format!(
                         "Worker protocol mismatch: app expects v{}, worker sent {:?}",
-                        WORKER_PROTOCOL_VERSION,
-                        version
+                        WORKER_PROTOCOL_VERSION, version
                     );
-                    continue;
+                    log::error!("{message}");
+                    drain_pending(&pending, &message);
+                    break;
                 }
                 if let Some(run_id) = run_id {
                     // Rate-limit progress events to reduce frontend re-render pressure.
@@ -426,18 +513,15 @@ async fn reader_loop(app: AppHandle, mut stdout: BufReader<ChildStdout>, pending
                         }
                         last_progress_emit = now;
                     }
-                    emit_worker_event(
-                        &app,
-                        &WorkerEventParams {
-                            run_id,
-                            kind,
-                            line,
-                            text,
-                            match_data,
-                            is_stderr,
-                            elapsed_ms,
-                        },
-                    );
+                    emit_event(&WorkerEventParams {
+                        run_id,
+                        kind,
+                        line,
+                        text,
+                        match_data,
+                        is_stderr,
+                        elapsed_ms,
+                    });
                 }
             }
             WorkerMessage::Response {
@@ -481,9 +565,12 @@ fn drain_pending(pending: &PendingMap, message: &str) {
 
 pub(crate) async fn stop_worker(state: &mut Option<ActiveWorker>) {
     if let Some(worker) = state.as_mut() {
+        drain_pending(
+            &worker.pending,
+            "Service Bus worker stopped before responding",
+        );
         let _ = worker.child.start_kill();
         let _ = worker.child.wait().await;
-        // Reader task will see EOF and drain pending requests.
         worker.reader_handle.abort();
     }
     set_worker_pid(None);
@@ -500,6 +587,12 @@ async fn ensure_worker_running(
     };
 
     if worker_dead {
+        if let Some(worker) = state.as_ref() {
+            drain_pending(
+                &worker.pending,
+                "Service Bus worker reader stopped unexpectedly",
+            );
+        }
         set_worker_pid(None);
         *state = None;
     }
@@ -640,6 +733,32 @@ pub(crate) fn emit_done(app: &AppHandle, run_id: &str, exit_code: i32, elapsed_m
 mod tests {
     use super::*;
 
+    fn pending_map() -> PendingMap {
+        std::sync::Arc::new(std::sync::Mutex::new(HashMap::new()))
+    }
+
+    fn register_pending(
+        pending: &PendingMap,
+        id: &str,
+    ) -> oneshot::Receiver<Result<Value, WorkerCallError>> {
+        let (sender, receiver) = oneshot::channel();
+        pending.lock().unwrap().insert(id.to_string(), sender);
+        receiver
+    }
+
+    fn success_response(id: &str) -> Vec<u8> {
+        let mut frame = serde_json::to_vec(&serde_json::json!({
+            "version": WORKER_PROTOCOL_VERSION,
+            "type": "response",
+            "id": id,
+            "ok": true,
+            "result": { "received": true }
+        }))
+        .unwrap();
+        frame.push(b'\n');
+        frame
+    }
+
     // ─── redact_secrets ─────────────────────────────────────────────────
 
     #[test]
@@ -765,5 +884,131 @@ mod tests {
             WorkerMessage::Response { version, .. } => assert_eq!(version, None),
             _ => panic!("expected response"),
         }
+    }
+
+    #[tokio::test]
+    async fn bounded_reader_accepts_exact_limit_and_drains_over_limit() {
+        const LIMIT: usize = 64;
+        let mut input = vec![b'a'; LIMIT];
+        input.extend_from_slice(b"\n");
+        input.extend(std::iter::repeat_n(b'b', LIMIT + 1));
+        input.extend_from_slice(b"\nnext\n");
+        let mut reader = BufReader::new(input.as_slice());
+        let mut line = Vec::new();
+
+        assert_eq!(
+            read_bounded_line(&mut reader, &mut line, LIMIT)
+                .await
+                .unwrap(),
+            BoundedLineRead::Line
+        );
+        assert_eq!(line.len(), LIMIT);
+        assert_eq!(
+            read_bounded_line(&mut reader, &mut line, LIMIT)
+                .await
+                .unwrap(),
+            BoundedLineRead::Oversized
+        );
+        assert_eq!(line.len(), LIMIT);
+        assert_eq!(
+            read_bounded_line(&mut reader, &mut line, LIMIT)
+                .await
+                .unwrap(),
+            BoundedLineRead::Line
+        );
+        assert_eq!(line, b"next");
+    }
+
+    #[tokio::test]
+    async fn reader_routes_valid_responses_and_cancelled_errors() {
+        let pending = pending_map();
+        let success = register_pending(&pending, "success");
+        let cancelled = register_pending(&pending, "cancelled");
+        let mut input = success_response("success");
+        input.extend_from_slice(
+            serde_json::to_string(&serde_json::json!({
+                "version": WORKER_PROTOCOL_VERSION,
+                "type": "response",
+                "id": "cancelled",
+                "ok": false,
+                "code": "cancelled",
+                "error": "Operation cancelled."
+            }))
+            .unwrap()
+            .as_bytes(),
+        );
+        input.push(b'\n');
+
+        reader_loop(BufReader::new(input.as_slice()), pending, 1024, |_| {}).await;
+
+        assert_eq!(success.await.unwrap().unwrap()["received"], true);
+        match cancelled.await.unwrap().unwrap_err() {
+            WorkerCallError::Worker { code, message } => {
+                assert_eq!(code.as_deref(), Some("cancelled"));
+                assert_eq!(message, "Operation cancelled.");
+            }
+            error => panic!("unexpected cancellation error: {error:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn malformed_response_fails_all_pending_requests() {
+        let pending = pending_map();
+        let first = register_pending(&pending, "first");
+        let second = register_pending(&pending, "second");
+
+        reader_loop(
+            BufReader::new(b"{malformed}\n".as_slice()),
+            pending.clone(),
+            1024,
+            |_| {},
+        )
+        .await;
+
+        for receiver in [first, second] {
+            match receiver.await.unwrap().unwrap_err() {
+                WorkerCallError::Transport(message) => {
+                    assert!(message.contains("Malformed worker protocol response"));
+                }
+                error => panic!("unexpected malformed-response error: {error:?}"),
+            }
+        }
+        assert!(pending.lock().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn oversized_response_fails_pending_and_a_new_reader_recovers() {
+        const LIMIT: usize = 64;
+        let failed_pending = pending_map();
+        let failed = register_pending(&failed_pending, "failed");
+        let mut oversized = vec![b'x'; LIMIT + 1];
+        oversized.push(b'\n');
+        oversized.extend_from_slice(&success_response("ignored"));
+
+        reader_loop(
+            BufReader::new(oversized.as_slice()),
+            failed_pending,
+            LIMIT,
+            |_| {},
+        )
+        .await;
+        match failed.await.unwrap().unwrap_err() {
+            WorkerCallError::Transport(message) => {
+                assert!(message.contains("64-byte limit"));
+            }
+            error => panic!("unexpected oversized-response error: {error:?}"),
+        }
+
+        let recovered_pending = pending_map();
+        let recovered = register_pending(&recovered_pending, "recovered");
+        let response = success_response("recovered");
+        reader_loop(
+            BufReader::new(response.as_slice()),
+            recovered_pending,
+            1024,
+            |_| {},
+        )
+        .await;
+        assert_eq!(recovered.await.unwrap().unwrap()["received"], true);
     }
 }

@@ -1,7 +1,9 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { invoke } from "@tauri-apps/api/core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import "../../i18n";
 import { useAppStore } from "../../store/appStore";
+import type { PeekedMessage } from "../../types";
 import { Toolbar } from "./Toolbar";
 
 vi.mock("@tauri-apps/api/core", () => ({
@@ -28,8 +30,32 @@ const CONN = {
   env: {},
 };
 
+const mockInvoke = vi.mocked(invoke);
+
+function peekedMessage(messageId: string, sequenceNumber: string, source: string): PeekedMessage {
+  return {
+    messageId,
+    sequenceNumber,
+    body: {},
+    subject: null,
+    contentType: null,
+    correlationId: null,
+    partitionKey: null,
+    traceParent: null,
+    applicationProperties: null,
+    enqueuedTimeUtc: null,
+    expiresAtUtc: null,
+    _source: source,
+  };
+}
+
+function peekResult(messages: PeekedMessage[]) {
+  return { messages };
+}
+
 describe("Toolbar", () => {
   beforeEach(() => {
+    mockInvoke.mockReset();
     useAppStore.setState(useAppStore.getInitialState());
     useAppStore.getState().setConnections([CONN]);
     useAppStore.getState().setActiveConnectionId(CONN.id);
@@ -61,5 +87,192 @@ describe("Toolbar", () => {
     fireEvent.click(manageRulesButton);
 
     expect(useAppStore.getState().isSubscriptionRulesModalOpen).toBe(true);
+  });
+
+  it("requests the initial Both page once and stores independent source cursors", async () => {
+    useAppStore.getState().setExplorerQueue("orders");
+    mockInvoke.mockResolvedValueOnce(
+      peekResult(
+        [
+          peekedMessage("normal-10", "10", "Normal Queue: orders"),
+          peekedMessage("dlq-500", "500", "Dead Letter Queue: orders"),
+        ]
+      )
+    );
+
+    render(<Toolbar />);
+    fireEvent.click(screen.getByRole("button", { name: "Both" }));
+    fireEvent.click(screen.getByRole("button", { name: "Browse" }));
+
+    await waitFor(() => expect(mockInvoke).toHaveBeenCalledTimes(1));
+    expect(mockInvoke).toHaveBeenCalledWith("peek_messages", {
+      args: {
+        argv: ["queue", "orders", "100", "both", ""],
+        connectionId: CONN.id,
+        runId: expect.any(String),
+      },
+    });
+    await waitFor(() => {
+      const state = useAppStore.getState();
+      expect(state.peekMessages.map((message) => message.messageId)).toEqual(["normal-10", "dlq-500"]);
+      expect(state.lastPeekNormalMaxSeqNum).toBe("10");
+      expect(state.lastPeekDlqMaxSeqNum).toBe("500");
+    });
+  });
+
+  it("loads repeated Both pages from independent normal and DLQ cursors", async () => {
+    useAppStore.getState().setExplorerQueue("orders");
+    useAppStore.getState().setPeekResults(
+      [
+        peekedMessage("normal-10", "10", "Normal Queue: orders"),
+        peekedMessage("dlq-500", "500", "Dead Letter Queue: orders"),
+      ]
+    );
+    mockInvoke
+      .mockResolvedValueOnce(
+        peekResult([peekedMessage("normal-11", "11", "Normal Queue: orders")])
+      )
+      .mockResolvedValueOnce(
+        peekResult([peekedMessage("dlq-501", "501", "Dead Letter Queue: orders")])
+      )
+      .mockResolvedValueOnce(
+        peekResult([peekedMessage("normal-12", "12", "Normal Queue: orders")])
+      )
+      .mockResolvedValueOnce(
+        peekResult([peekedMessage("dlq-502", "502", "Dead Letter Queue: orders")])
+      );
+
+    render(<Toolbar />);
+    fireEvent.click(screen.getByRole("button", { name: "Both" }));
+    fireEvent.click(screen.getByRole("button", { name: "Load More" }));
+
+    await waitFor(() => expect(mockInvoke).toHaveBeenCalledTimes(2));
+    expect(mockInvoke).toHaveBeenNthCalledWith(1, "peek_messages", {
+      args: {
+        argv: ["queue", "orders", "100", "normal", "11"],
+        connectionId: CONN.id,
+        runId: expect.any(String),
+      },
+    });
+    expect(mockInvoke).toHaveBeenNthCalledWith(2, "peek_messages", {
+      args: {
+        argv: ["queue", "orders", "100", "dlq", "501"],
+        connectionId: CONN.id,
+        runId: expect.any(String),
+      },
+    });
+
+    await waitFor(() => {
+      expect((screen.getByRole("button", { name: "Load More" }) as HTMLButtonElement).disabled).toBe(false);
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Load More" }));
+
+    await waitFor(() => expect(mockInvoke).toHaveBeenCalledTimes(4));
+    expect(mockInvoke).toHaveBeenNthCalledWith(3, "peek_messages", {
+      args: {
+        argv: ["queue", "orders", "100", "normal", "12"],
+        connectionId: CONN.id,
+        runId: expect.any(String),
+      },
+    });
+    expect(mockInvoke).toHaveBeenNthCalledWith(4, "peek_messages", {
+      args: {
+        argv: ["queue", "orders", "100", "dlq", "502"],
+        connectionId: CONN.id,
+        runId: expect.any(String),
+      },
+    });
+
+    await waitFor(() => {
+      const state = useAppStore.getState();
+      expect(state.peekMessages.map((message) => message.messageId)).toEqual([
+        "normal-10",
+        "dlq-500",
+        "normal-11",
+        "dlq-501",
+        "normal-12",
+        "dlq-502",
+      ]);
+      expect(state.lastPeekNormalMaxSeqNum).toBe("12");
+      expect(state.lastPeekDlqMaxSeqNum).toBe("502");
+    });
+  });
+
+  it("increments a large cursor exactly and skips a source already at i64 max", async () => {
+    useAppStore.getState().setExplorerQueue("orders");
+    useAppStore.getState().setPeekResults(
+      [
+        peekedMessage("normal-large", "9007199254740993", "Normal Queue: orders"),
+        peekedMessage("dlq-max", "9223372036854775807", "Dead Letter Queue: orders"),
+      ]
+    );
+    mockInvoke.mockResolvedValueOnce(
+      peekResult(
+        [peekedMessage("normal-partition", "9288674231451771", "Normal Queue: orders")]
+      )
+    );
+
+    render(<Toolbar />);
+    fireEvent.click(screen.getByRole("button", { name: "Both" }));
+    fireEvent.click(screen.getByRole("button", { name: "Load More" }));
+
+    await waitFor(() => expect(mockInvoke).toHaveBeenCalledTimes(1));
+    expect(mockInvoke).toHaveBeenCalledWith("peek_messages", {
+      args: {
+        argv: ["queue", "orders", "100", "normal", "9007199254740994"],
+        connectionId: CONN.id,
+        runId: expect.any(String),
+      },
+    });
+    await waitFor(() => {
+      const state = useAppStore.getState();
+      expect(state.lastPeekNormalMaxSeqNum).toBe("9288674231451771");
+      expect(state.lastPeekDlqMaxSeqNum).toBe("9223372036854775807");
+    });
+  });
+
+  it("rechecks an initially empty Both source without resetting the other cursor", async () => {
+    useAppStore.getState().setExplorerQueue("orders");
+    useAppStore.getState().setPeekResults([
+      peekedMessage("normal-10", "10", "Normal Queue: orders"),
+    ]);
+    mockInvoke
+      .mockResolvedValueOnce(
+        peekResult([peekedMessage("normal-11", "11", "Normal Queue: orders")])
+      )
+      .mockResolvedValueOnce(
+        peekResult([peekedMessage("dlq-500", "500", "Dead Letter Queue: orders")])
+      );
+
+    render(<Toolbar />);
+    fireEvent.click(screen.getByRole("button", { name: "Both" }));
+    fireEvent.click(screen.getByRole("button", { name: "Load More" }));
+
+    await waitFor(() => expect(mockInvoke).toHaveBeenCalledTimes(2));
+    expect(mockInvoke).toHaveBeenNthCalledWith(1, "peek_messages", {
+      args: {
+        argv: ["queue", "orders", "100", "normal", "11"],
+        connectionId: CONN.id,
+        runId: expect.any(String),
+      },
+    });
+    expect(mockInvoke).toHaveBeenNthCalledWith(2, "peek_messages", {
+      args: {
+        argv: ["queue", "orders", "100", "dlq", ""],
+        connectionId: CONN.id,
+        runId: expect.any(String),
+      },
+    });
+
+    await waitFor(() => {
+      const state = useAppStore.getState();
+      expect(state.peekMessages.map((message) => message.messageId)).toEqual([
+        "normal-10",
+        "normal-11",
+        "dlq-500",
+      ]);
+      expect(state.lastPeekNormalMaxSeqNum).toBe("11");
+      expect(state.lastPeekDlqMaxSeqNum).toBe("500");
+    });
   });
 });

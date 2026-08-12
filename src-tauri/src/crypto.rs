@@ -1,11 +1,14 @@
 use aes_gcm::{
-    aead::{Aead, KeyInit},
+    aead::{Aead, KeyInit, Payload},
     Aes256Gcm, Key, Nonce,
 };
 use argon2::Argon2;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
-use rand::RngCore;
+use rand::{rngs::OsRng, RngCore};
 use serde::{Deserialize, Serialize};
+
+pub const DATA_KEY_LENGTH: usize = 32;
+const SEALED_PAYLOAD_AAD: &[u8] = b"busman-connection-secrets-v1";
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct EncryptedPayload {
@@ -18,6 +21,79 @@ pub struct EncryptedPayload {
     pub nonce: String,
     /// Base64-encoded ciphertext (includes GCM auth tag).
     pub data: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct SealedPayload {
+    pub version: u32,
+    pub algorithm: String,
+    /// Base64-encoded random 12-byte AES-GCM nonce.
+    pub nonce: String,
+    /// Base64-encoded ciphertext (includes GCM auth tag).
+    pub data: String,
+}
+
+pub fn generate_data_key() -> [u8; DATA_KEY_LENGTH] {
+    let mut key = [0u8; DATA_KEY_LENGTH];
+    OsRng.fill_bytes(&mut key);
+    key
+}
+
+pub fn seal_with_key(
+    plaintext: &[u8],
+    key_bytes: &[u8; DATA_KEY_LENGTH],
+) -> Result<SealedPayload, String> {
+    let mut nonce_bytes = [0u8; 12];
+    OsRng.fill_bytes(&mut nonce_bytes);
+
+    let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(key_bytes));
+    let nonce = Nonce::from_slice(&nonce_bytes);
+    let ciphertext = cipher
+        .encrypt(
+            nonce,
+            Payload {
+                msg: plaintext,
+                aad: SEALED_PAYLOAD_AAD,
+            },
+        )
+        .map_err(|_| "Failed to encrypt connection credentials".to_string())?;
+
+    Ok(SealedPayload {
+        version: 1,
+        algorithm: "AES-256-GCM".to_string(),
+        nonce: BASE64.encode(nonce_bytes),
+        data: BASE64.encode(ciphertext),
+    })
+}
+
+pub fn open_with_key(
+    payload: &SealedPayload,
+    key_bytes: &[u8; DATA_KEY_LENGTH],
+) -> Result<Vec<u8>, String> {
+    if payload.version != 1 || payload.algorithm != "AES-256-GCM" {
+        return Err("Unsupported encrypted credential format".to_string());
+    }
+
+    let nonce_bytes = BASE64
+        .decode(&payload.nonce)
+        .map_err(|_| "Connection credential store is corrupted".to_string())?;
+    let ciphertext = BASE64
+        .decode(&payload.data)
+        .map_err(|_| "Connection credential store is corrupted".to_string())?;
+    if nonce_bytes.len() != 12 {
+        return Err("Connection credential store is corrupted".to_string());
+    }
+
+    let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(key_bytes));
+    cipher
+        .decrypt(
+            Nonce::from_slice(&nonce_bytes),
+            Payload {
+                msg: ciphertext.as_ref(),
+                aad: SEALED_PAYLOAD_AAD,
+            },
+        )
+        .map_err(|_| "Connection credential store is corrupted or inaccessible".to_string())
 }
 
 fn derive_key(password: &str, salt: &[u8]) -> Result<[u8; 32], String> {
@@ -122,5 +198,30 @@ mod tests {
         let p2 = encrypt(plaintext, "pw").unwrap();
         assert_ne!(p1.salt, p2.salt);
         assert_ne!(p1.nonce, p2.nonce);
+    }
+
+    #[test]
+    fn sealed_payload_round_trip() {
+        let key = generate_data_key();
+        let payload = seal_with_key(b"connection secrets", &key).unwrap();
+
+        assert_eq!(
+            open_with_key(&payload, &key).unwrap(),
+            b"connection secrets"
+        );
+    }
+
+    #[test]
+    fn sealed_payload_rejects_wrong_key_and_tampering() {
+        let key = generate_data_key();
+        let wrong_key = generate_data_key();
+        let mut payload = seal_with_key(b"connection secrets", &key).unwrap();
+
+        assert!(open_with_key(&payload, &wrong_key).is_err());
+
+        let mut data = BASE64.decode(&payload.data).unwrap();
+        data[0] ^= 0xff;
+        payload.data = BASE64.encode(data);
+        assert!(open_with_key(&payload, &key).is_err());
     }
 }

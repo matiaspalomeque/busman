@@ -4,6 +4,7 @@ import { useAppStore, selectActiveConnection } from "../../store/appStore";
 import { useScript } from "../../hooks/useScript";
 import { extractNamespace } from "../../utils/connection";
 import { exitCodeToStatus } from "../../utils/exitCode";
+import { isCanonicalSequenceNumber } from "../../utils/sequenceNumber";
 import {
   copyMessageId,
   copySequenceNumber,
@@ -18,6 +19,7 @@ import {
   messageOperationKey,
   type MessageOperation,
 } from "../../utils/messageOperation";
+import { SessionStateModal, type SessionStateTarget } from "./SessionStateModal";
 
 type ConfirmAction = "delete" | "replay";
 
@@ -25,6 +27,7 @@ export function MessageContextMenu() {
   const { t } = useTranslation();
   const menuRef = useRef<HTMLDivElement>(null);
   const [confirmAction, setConfirmAction] = useState<ConfirmAction | null>(null);
+  const [managingSessionState, setManagingSessionState] = useState(false);
 
   const conn = useAppStore(selectActiveConnection);
   const {
@@ -44,6 +47,7 @@ export function MessageContextMenu() {
 
   const close = () => {
     setConfirmAction(null);
+    setManagingSessionState(false);
     setMessageContextMenu(null);
   };
 
@@ -84,8 +88,31 @@ export function MessageContextMenu() {
   const msgKey = messageOperationKey(msg);
   const isPending = msgKey ? pendingMessageOperations[msgKey] != null : false;
 
+  if (
+    managingSessionState &&
+    conn &&
+    msg.sessionId != null &&
+    msg.sessionId.trim() !== "" &&
+    explorerSelection.kind !== "none"
+  ) {
+    const target: SessionStateTarget =
+      explorerSelection.kind === "queue"
+        ? {
+            connectionId: conn.id,
+            queueName: explorerSelection.queueName,
+            sessionId: msg.sessionId,
+          }
+        : {
+            connectionId: conn.id,
+            topicName: explorerSelection.topicName,
+            subscriptionName: explorerSelection.subscriptionName,
+            sessionId: msg.sessionId,
+          };
+    return <SessionStateModal target={target} onClose={close} />;
+  }
+
   const handleConfirm = () => {
-    if (!conn || isRunning || isPending || !confirmAction || msg.sequenceNumber == null || !msgKey) return;
+    if (!conn || isRunning || isPending || !confirmAction || !isCanonicalSequenceNumber(msg.sequenceNumber) || !msgKey) return;
 
     const action = confirmAction;
     const targetMsg = msg;
@@ -119,7 +146,7 @@ export function MessageContextMenu() {
 
     const params: Record<string, unknown> = {
       action,
-      sequenceNumber: Number(targetMsg.sequenceNumber),
+      sequenceNumber: targetMsg.sequenceNumber,
       isDlq: isDlq,
       connectionId: conn.id,
     };
@@ -213,6 +240,12 @@ export function MessageContextMenu() {
       <Divider />
 
       <MenuItem label={t("explorer.messageContext.resend")} onClick={() => { close(); openResend(msg, store()); }} />
+      {msg.sessionId != null && msg.sessionId.trim() !== "" && explorerSelection.kind !== "none" && (
+        <MenuItem
+          label={t("explorer.messageContext.manageSessionState")}
+          onClick={() => setManagingSessionState(true)}
+        />
+      )}
       {isDlq && (
         <>
           <MenuItem label={t("explorer.messageContext.move")} onClick={() => { close(); openMoveSingle(msg, store()); }} disabled={isPending} />

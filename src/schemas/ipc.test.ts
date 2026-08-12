@@ -9,10 +9,74 @@ import {
   ConnectionsConfigSchema,
   ListSubscriptionRulesResultSchema,
   ManageSubscriptionRuleSchema,
+  SequenceNumberSchema,
+  SessionStateResultSchema,
 } from "./ipc";
 import type { PeekedMessage } from "../types";
 
 describe("IPC schemas", () => {
+  describe("SessionStateResultSchema", () => {
+    it("accepts lossless base64 state and explicit cleared state", () => {
+      expect(
+        SessionStateResultSchema.parse({
+          encoding: "base64",
+          stateBase64: "AP+A",
+          byteLength: 3,
+          hasState: true,
+        }),
+      ).toMatchObject({ stateBase64: "AP+A", byteLength: 3, hasState: true });
+      expect(
+        SessionStateResultSchema.parse({
+          encoding: "base64",
+          stateBase64: "",
+          byteLength: 0,
+          hasState: false,
+        }),
+      ).toMatchObject({ stateBase64: "", byteLength: 0, hasState: false });
+    });
+
+    it("rejects invalid encoding, mismatched length, and non-empty cleared state", () => {
+      expect(() =>
+        SessionStateResultSchema.parse({
+          encoding: "utf8",
+          stateBase64: "AP+A",
+          byteLength: 3,
+          hasState: true,
+        }),
+      ).toThrow();
+      expect(() =>
+        SessionStateResultSchema.parse({
+          encoding: "base64",
+          stateBase64: "AP+A",
+          byteLength: 2,
+          hasState: true,
+        }),
+      ).toThrow();
+      expect(() =>
+        SessionStateResultSchema.parse({
+          encoding: "base64",
+          stateBase64: "AA==",
+          byteLength: 1,
+          hasState: false,
+        }),
+      ).toThrow();
+    });
+
+    it.each(["AB==", "AAB="])(
+      "rejects noncanonical session-state pad bits in %s",
+      (stateBase64) => {
+        expect(() =>
+          SessionStateResultSchema.parse({
+            encoding: "base64",
+            stateBase64,
+            byteLength: stateBase64 === "AB==" ? 1 : 2,
+            hasState: true,
+          }),
+        ).toThrow();
+      },
+    );
+  });
+
   describe("ListEntitiesResultSchema", () => {
     it("accepts valid result", () => {
       const data = {
@@ -106,6 +170,21 @@ describe("IPC schemas", () => {
     });
   });
 
+  describe("SequenceNumberSchema", () => {
+    it("preserves boundary strings exactly", () => {
+      for (const value of ["9007199254740993", "9288674231451771", "9223372036854775807"]) {
+        expect(SequenceNumberSchema.parse(value)).toBe(value);
+      }
+    });
+
+    it("normalizes safe legacy numbers without accepting rounded values", () => {
+      expect(SequenceNumberSchema.parse(42)).toBe("42");
+      expect(() => SequenceNumberSchema.parse(Number.MAX_SAFE_INTEGER + 1)).toThrow();
+      expect(() => SequenceNumberSchema.parse("9223372036854775808")).toThrow();
+      expect(() => SequenceNumberSchema.parse("01")).toThrow();
+    });
+  });
+
   describe("PeekResultSchema", () => {
     it("accepts valid peek result with messages", () => {
       const data = {
@@ -124,12 +203,9 @@ describe("IPC schemas", () => {
             _source: "Active",
           },
         ],
-        filename: "messages.json",
-        savedAt: "2025-01-01T00:00:00Z",
       };
       const result = PeekResultSchema.parse(data);
       expect(result.messages).toHaveLength(1);
-      expect(result.filename).toBe("messages.json");
     });
 
     it("accepts optional metadata needed for single-message actions", () => {
@@ -155,8 +231,6 @@ describe("IPC schemas", () => {
             _source: "Dead Letter Queue: q1",
           },
         ],
-        filename: "messages.json",
-        savedAt: "2025-01-01T00:00:00Z",
       });
 
       const msg: PeekedMessage = result.messages[0];
@@ -170,7 +244,7 @@ describe("IPC schemas", () => {
     });
 
     it("accepts empty messages array", () => {
-      const data = { messages: [], filename: "empty.json", savedAt: "2025-01-01" };
+      const data = { messages: [] };
       expect(PeekResultSchema.parse(data).messages).toEqual([]);
     });
   });

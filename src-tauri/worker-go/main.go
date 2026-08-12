@@ -152,6 +152,7 @@ var handlers = map[string]handlerFn{
 	"getQueueProperties":         handleGetQueueProperties,
 	"getTopicProperties":         handleGetTopicProperties,
 	"getSubscriptionProperties":  handleGetSubscriptionProperties,
+	"sessionState":               handleSessionState,
 	"listSubscriptionRules":      handleListSubscriptionRules,
 	"createSubscriptionRule":     handleCreateSubscriptionRule,
 	"updateSubscriptionRule":     handleUpdateSubscriptionRule,

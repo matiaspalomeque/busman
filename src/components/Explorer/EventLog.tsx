@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useAppStore } from "../../store/appStore";
 import type { EventLogEntry } from "../../types";
@@ -49,17 +49,9 @@ export function EventLog() {
   const { t } = useTranslation();
   const { eventLog, isRunning } = useAppStore();
 
-  const [collapsed, setCollapsed] = useState(() => eventLog.length === 0);
+  const [collapsed, setCollapsed] = useState(true);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState<(typeof PAGE_SIZES)[number]>(25);
-  const previousEntryCount = useRef(eventLog.length);
-
-  useEffect(() => {
-    if (previousEntryCount.current === 0 && eventLog.length > 0) {
-      setCollapsed(false);
-    }
-    previousEntryCount.current = eventLog.length;
-  }, [eventLog.length]);
 
   const totalPages = Math.max(1, Math.ceil(eventLog.length / pageSize));
   const safePage = Math.min(page, totalPages);

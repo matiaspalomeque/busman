@@ -1,6 +1,11 @@
 import { z } from "zod";
 import { invoke } from "@tauri-apps/api/core";
 import { logHandledError } from "../utils/logging";
+import { normalizeSequenceNumber } from "../utils/sequenceNumber";
+import {
+  MAX_SESSION_STATE_BYTES,
+  sessionStateBase64ByteLength,
+} from "../utils/sessionState";
 
 // ─── IPC response schemas ───────────────────────────────────────────────────
 
@@ -14,11 +19,21 @@ function summarizeIpcResponse(value: unknown): Record<string, unknown> {
   return { type: value === null ? "null" : typeof value };
 }
 
+export const SequenceNumberSchema = z.union([z.string(), z.number()]).transform((value, context) => {
+  try {
+    return normalizeSequenceNumber(value);
+  } catch (error) {
+    context.addIssue({
+      code: "custom",
+      message: error instanceof Error ? error.message : "Invalid sequence number",
+    });
+    return z.NEVER;
+  }
+});
+
 export const PeekedMessageSchema = z.object({
   messageId: z.string().nullable(),
-  sequenceNumber: z.union([z.string(), z.number()]).nullable().optional().transform((value) =>
-    value == null ? value : String(value)
-  ),
+  sequenceNumber: SequenceNumberSchema.nullable().optional(),
   sessionId: z.string().nullable().optional(),
   state: z.string().nullable().optional(),
   deliveryCount: z.number().nullable().optional(),
@@ -40,9 +55,34 @@ export const PeekedMessageSchema = z.object({
 
 export const PeekResultSchema = z.object({
   messages: z.array(PeekedMessageSchema),
-  filename: z.string(),
-  savedAt: z.string(),
 });
+
+export const SessionStateResultSchema = z
+  .object({
+    encoding: z.literal("base64"),
+    stateBase64: z.string().refine((value) => sessionStateBase64ByteLength(value) !== null, {
+      message: "Session state must be bounded canonical standard base64",
+    }),
+    byteLength: z.number().int().nonnegative().max(MAX_SESSION_STATE_BYTES),
+    hasState: z.boolean(),
+  })
+  .superRefine((value, context) => {
+    const decodedLength = sessionStateBase64ByteLength(value.stateBase64);
+    if (decodedLength !== value.byteLength) {
+      context.addIssue({
+        code: "custom",
+        path: ["byteLength"],
+        message: "Session state byteLength does not match stateBase64",
+      });
+    }
+    if (!value.hasState && (value.stateBase64 !== "" || value.byteLength !== 0)) {
+      context.addIssue({
+        code: "custom",
+        path: ["hasState"],
+        message: "Cleared session state must have an empty payload",
+      });
+    }
+  });
 
 export const ListEntitiesResultSchema = z.object({
   queues: z.array(z.string()),

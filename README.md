@@ -195,5 +195,4 @@ Busman checks for new releases on startup. When an update is available, you will
 
 ## Security & Privacy
 
-Busman runs entirely on your local machine. Connection strings are stored in local application storage and are never sent to any external server. All Service Bus communication goes directly from your machine to Azure.
-
+Busman runs entirely on your local machine. Connection strings and custom environment variables are encrypted with AES-256-GCM in local application storage; the single random encryption key is kept in the operating system credential store. Credentials are never sent to an external server, and all Service Bus communication goes directly from your machine to Azure.

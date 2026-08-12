@@ -78,21 +78,9 @@ export interface SendMessageDraft {
   contentType?: string;
   subject?: string;
   correlationId?: string;
+  sessionId?: string;
   applicationProperties?: Record<string, unknown>;
 }
-
-export interface DownloadedFile {
-  filename: string;
-  savedAt: string;
-  sizeBytes: number;
-}
-
-export interface PeekResult {
-  messages: PeekedMessage[];
-  filename: string;
-  savedAt: string;
-}
-
 
 // Entity properties (inferred from Zod schemas in ipc.ts)
 import type { z } from "zod";

@@ -16,16 +16,12 @@ static CONFIG_LOCK: Mutex<()> = Mutex::new(());
 
 #[tauri::command]
 pub fn load_connections(app: AppHandle) -> Result<ConnectionsConfig, String> {
-    store::load(&app).map(public_config)
+    store::load_public(&app)
 }
 
 #[tauri::command]
 pub fn get_connection_for_edit(app: AppHandle, id: String) -> Result<Connection, String> {
-    store::load(&app)?
-        .connections
-        .into_iter()
-        .find(|connection| connection.id == id)
-        .ok_or_else(|| BusmanError::NotFound(format!("Connection not found: {id}")).into())
+    store::load_connection(&app, &id)
 }
 
 #[tauri::command]
@@ -88,15 +84,7 @@ pub fn set_active_connection(
         .lock()
         .map_err(|e| BusmanError::Internal(format!("Config lock poisoned: {e}")))?;
 
-    let mut config = store::load(&app)?;
-    if let Some(ref cid) = id {
-        if !config.connections.iter().any(|c| &c.id == cid) {
-            return Err(BusmanError::NotFound(format!("Connection not found: {cid}")).into());
-        }
-    }
-    config.active_connection_id = id;
-    store::save(&app, &config)?;
-    Ok(public_config(config))
+    store::set_active(&app, id)
 }
 
 #[tauri::command]
