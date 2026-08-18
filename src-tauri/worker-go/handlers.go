@@ -37,6 +37,7 @@ func getAdminClient(connectionString string) (*admin.Client, error) {
 // ─── Shared validation / parsing helpers ─────────────────────────────────────
 
 const entityNameMaxLen = 260
+const defaultOperationTimeoutMs = 30_000
 const maxReceiveBatchSize = 500
 const maxPeekBatchSize = 500
 const maxPeekPageMessages = 5000

@@ -701,6 +701,45 @@ func TestResolveDrainReceiveWaitMs(t *testing.T) {
 	}
 }
 
+func TestOperationTimeoutConfiguration(t *testing.T) {
+	tests := []struct {
+		name string
+		env  map[string]string
+		want int
+	}{
+		{
+			name: "does not reuse receive wait as operation default",
+			env: map[string]string{
+				"MAX_WAIT_TIME_IN_MS": "5000",
+			},
+			want: 30_000,
+		},
+		{
+			name: "respects explicit operation timeout",
+			env: map[string]string{
+				"OPERATION_TIMEOUT_IN_MS": "45000",
+			},
+			want: 45000,
+		},
+		{
+			name: "falls back for invalid operation timeout",
+			env: map[string]string{
+				"OPERATION_TIMEOUT_IN_MS": "abc",
+			},
+			want: 30_000,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := timeoutMsFromEnv(tt.env, "OPERATION_TIMEOUT_IN_MS", defaultOperationTimeoutMs)
+			if got != tt.want {
+				t.Fatalf("expected %d, got %d", tt.want, got)
+			}
+		})
+	}
+}
+
 func TestParseBoolOrDefault(t *testing.T) {
 	tests := []struct {
 		name string

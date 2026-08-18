@@ -125,14 +125,14 @@ func handleMoveMessages(requestCtx context.Context, raw json.RawMessage) (any, e
 	}
 	startedAt := time.Now()
 
-	sessionCheckCtx, sessionCheckCancel := cancellableOperationContext(requestCtx, p.Env, maxWaitMs)
+	sessionCheckCtx, sessionCheckCancel := cancellableOperationContext(requestCtx, p.Env, defaultOperationTimeoutMs)
 	requiresSession, err := sourceRequiresSession(sessionCheckCtx, cs, p.SourceQueue, p.subscriptionSource)
 	sessionCheckCancel()
 	if err != nil {
 		return nil, fmt.Errorf("cannot safely move messages from %s because its session configuration could not be read: %w", p.label(p.SourceQueue), err)
 	}
 
-	duplicateDetectionCtx, duplicateDetectionCancel := cancellableOperationContext(requestCtx, p.Env, maxWaitMs)
+	duplicateDetectionCtx, duplicateDetectionCancel := cancellableOperationContext(requestCtx, p.Env, defaultOperationTimeoutMs)
 	sendPolicy, err := inspectDestinationPolicy(duplicateDetectionCtx, cs, destination)
 	duplicateDetectionCancel()
 	if err != nil {
@@ -199,7 +199,7 @@ func handleMoveMessages(requestCtx context.Context, raw json.RawMessage) (any, e
 				if outboundBatch.NumMessages() == 0 {
 					return 0, nil
 				}
-				sendCtx, sendCancel := cancellableOperationContext(requestCtx, p.Env, maxWaitMs)
+				sendCtx, sendCancel := cancellableOperationContext(requestCtx, p.Env, defaultOperationTimeoutMs)
 				defer sendCancel()
 				if err := sender.SendMessageBatch(sendCtx, outboundBatch, nil); err != nil {
 					return 0, fmt.Errorf("send message batch error: %w", err)
@@ -209,7 +209,7 @@ func handleMoveMessages(requestCtx context.Context, raw json.RawMessage) (any, e
 					receiver,
 					sourceMessages,
 					p.Env,
-					maxWaitMs,
+					defaultOperationTimeoutMs,
 					settlementConcurrency,
 				)
 				if err != nil {
@@ -228,7 +228,7 @@ func handleMoveMessages(requestCtx context.Context, raw json.RawMessage) (any, e
 				messages,
 				sendPolicy,
 				func() (*azservicebus.MessageBatch, error) {
-					batchCtx, batchCancel := cancellableOperationContext(requestCtx, p.Env, maxWaitMs)
+					batchCtx, batchCancel := cancellableOperationContext(requestCtx, p.Env, defaultOperationTimeoutMs)
 					defer batchCancel()
 					return sender.NewMessageBatch(batchCtx, nil)
 				},
