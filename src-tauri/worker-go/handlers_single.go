@@ -365,6 +365,13 @@ func scanActiveSingleMessage(
 		}
 
 		fetch := config.BatchSize
+		if config.TargetKnown {
+			// ReceiveMessages may return less than the requested credit. Once the
+			// target is found, unused credit can capture unrelated messages during
+			// send/cleanup. Consume exactly one credit per step of a known-target
+			// scan so a successful action leaves no receive demand outstanding.
+			fetch = 1
+		}
 		if remaining := config.ScanBudget - result.Scanned; fetch > remaining {
 			fetch = remaining
 		}
@@ -562,6 +569,10 @@ func performSingleMessageTargetAction(
 	maxWaitMs int,
 	onAmbiguousSettlement func(error),
 ) error {
+	sourceMode := "normal"
+	if p.IsDlq {
+		sourceMode = "dlq"
+	}
 	abandonTarget := func() error {
 		abandonCtx, abandonCancel := operationContext(p.Env, maxWaitMs)
 		err := receiver.AbandonMessage(abandonCtx, target, nil)
@@ -579,11 +590,13 @@ func performSingleMessageTargetAction(
 	}
 	completeTarget := func() error {
 		completeCtx, completeCancel := cancellableOperationContext(requestCtx, p.Env, maxWaitMs)
+		recordOperation(requestCtx, sourceMode, 0, 0, 0, 1)
 		err := receiver.CompleteMessage(completeCtx, target, nil)
 		completeCancel()
 		if err != nil {
 			return fmt.Errorf("complete message error: %w", err)
 		}
+		recordOperation(requestCtx, sourceMode, 0, 1, 0, -1)
 		return nil
 	}
 
@@ -598,12 +611,22 @@ func performSingleMessageTargetAction(
 			return failAndReleaseTarget(fmt.Errorf("%s requires a destination sender", p.Action))
 		}
 		newMsg := outboundMessageFromReceived(target, regenerateMessageID)
+		if p.Action == "replay" && p.RunID != "" {
+			if newMsg.ApplicationProperties == nil {
+				newMsg.ApplicationProperties = map[string]any{}
+			}
+			// Correlate this attempt even when duplicate detection changes MessageId.
+			// Replace any earlier attempt's marker without modifying the source.
+			newMsg.ApplicationProperties["BusmanReplayRunId"] = p.RunID
+		}
 		sendCtx, sendCancel := cancellableOperationContext(requestCtx, p.Env, maxWaitMs)
+		recordOperation(requestCtx, sourceMode, 0, 0, 1, 0)
 		err := sender.SendMessage(sendCtx, newMsg, nil)
 		sendCancel()
 		if err != nil {
 			return failAndReleaseTarget(fmt.Errorf("send message error: %w", err))
 		}
+		recordOperation(requestCtx, sourceMode, 1, 0, -1, 0)
 		if err := completeTarget(); err != nil {
 			failure := fmt.Errorf("destination accepted the message but source settlement failed; duplicate delivery is possible: %w", err)
 			if onAmbiguousSettlement != nil {
@@ -676,6 +699,14 @@ func handleSingleMessageAction(requestCtx context.Context, raw json.RawMessage) 
 			return nil, fmt.Errorf("subscription replay requires a valid destination topic: %w", err)
 		}
 	}
+
+	// A scan holds non-target locks until cleanup. A second scan of the same
+	// source must wait until those locks and receivers have been released.
+	releaseSource, err := singleMessageSources.acquire(requestCtx, singleMessageSourceKey(cs, p))
+	if err != nil {
+		return nil, fmt.Errorf("waiting for another message operation on this source: %w", err)
+	}
+	defer releaseSource()
 
 	startedAt := time.Now()
 	// The Go SDK renews message locks individually. Keep the held-lock set within

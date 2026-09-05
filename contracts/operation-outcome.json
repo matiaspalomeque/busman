@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "runId": "contract-run",
+  "status": "unknown",
+  "startedAt": "2026-09-05T12:00:00Z",
+  "finishedAt": "2026-09-05T12:00:02Z",
+  "counts": {
+    "sent": 5,
+    "settled": 4,
+    "sendUnconfirmed": 0,
+    "settlementUnconfirmed": 1,
+    "sources": {
+      "normal": { "sent": 2, "settled": 2, "sendUnconfirmed": 0, "settlementUnconfirmed": 0 },
+      "dlq": { "sent": 3, "settled": 2, "sendUnconfirmed": 0, "settlementUnconfirmed": 1 }
+    }
+  },
+  "errorCode": "broker_acknowledgment_unknown",
+  "errorMessage": "Destination accepted the batch; source completion was not fully acknowledged."
+}

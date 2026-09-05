@@ -1,3 +1,4 @@
+import type { OperationCounts, OperationOutcome } from "../schemas/operation";
 export interface Connection {
   id: string;
   name: string;
@@ -22,6 +23,7 @@ export interface OutputLine {
 }
 
 export interface ProgressUpdate {
+  counts?: OperationCounts | null;
   text: string;
   elapsedMs: number;
 }
@@ -56,11 +58,15 @@ export interface ScriptOutputEvent {
 }
 
 export interface ScriptProgressEvent {
+  counts?: OperationCounts | null;
+  heartbeat?: boolean;
   text: string;
   elapsedMs: number;
 }
 
 export interface ScriptDoneEvent {
+  errorMessage?: string;
+  result?: unknown;
   exitCode: number;
   elapsedMs: number;
 }
@@ -138,6 +144,11 @@ export interface EventLogEntry {
   entity: string;
   entityType: "Queue" | "Subscription" | "Topic";
   operation: "Browse" | "Send" | "Receive" | "Replay" | "Republish" | "Move" | "Create" | "Delete" | "DeleteMessage" | "ReplayMessage" | "MoveMessage";
-  status: "running" | "success" | "error" | "stopped";
+  status: "running" | "success" | "error" | "stopped" | "unknown";
+  scope?: { connectionId: string; mode: string; destination: string; replaySource?: string };
+  replayReturn?: { observedAt: string; sequenceNumber: string };
+  outcome?: OperationOutcome;
+  checkpoint?: { at: string; counts: OperationCounts };
+  reconciledAt?: string;
   errorMessage?: string;
 }

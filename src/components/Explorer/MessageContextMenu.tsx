@@ -161,17 +161,17 @@ export function MessageContextMenu() {
     }
 
     void runOperation("single_message_action", params, { scope: "atomic", runId })
-      .then(({ exitCode, errorMessage }) => {
+      .then(({ exitCode, errorMessage, contextCurrent }) => {
         updateEventLogEntry(runId, exitCodeToStatus(exitCode), errorMessage);
-        if (exitCode === 0) {
+        if (exitCode === 0 && contextCurrent !== false) {
           removePeekedMessageByKey(targetKey);
         }
       })
-      .catch(() => {
-        updateEventLogEntry(runId, "error");
+      .catch((error) => {
+        updateEventLogEntry(runId, "error", String(error));
       })
       .finally(() => {
-        finishMessageOperation(targetKey);
+        finishMessageOperation(targetKey, runId);
       });
   };
 

@@ -70,35 +70,83 @@ pub async fn ensure_scripts_ready(app: AppHandle) -> Result<(), String> {
 
 // ─── Streaming operation helpers ────────────────────────────────────────────
 
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OperationCompletion {
+    pub exit_code: i32,
+    pub elapsed_ms: u64,
+    pub error_message: Option<String>,
+    pub result: Option<Value>,
+}
+
 async fn run_worker_operation(
     app: &AppHandle,
     method: &str,
     params: Value,
     run_id: &str,
-) -> Result<(), String> {
+) -> Result<OperationCompletion, String> {
     let started = Instant::now();
-    match call_worker(app, method, params, None).await {
-        Ok(_) => {
-            emit_done(app, run_id, 0, started.elapsed().as_millis() as u64);
-            Ok(())
-        }
-        Err(err) => {
-            if err.starts_with(WORKER_CANCELLED_PREFIX) {
-                emit_done(app, run_id, 130, started.elapsed().as_millis() as u64);
-                return Ok(());
+    let response = call_worker(app, method, params, None).await;
+    let elapsed_ms = started.elapsed().as_millis() as u64;
+    let completion = match response {
+        Ok(result) => {
+            if matches!(
+                method,
+                "emptyMessages"
+                    | "moveMessages"
+                    | "republishSubscriptionDlq"
+                    | "singleMessageAction"
+            ) {
+                match crate::operation_outcome::OperationOutcome::parse(result, run_id) {
+                    Ok(outcome) => OperationCompletion {
+                        exit_code: outcome.exit_code(),
+                        elapsed_ms,
+                        error_message: outcome.error_message.clone(),
+                        result: Some(json!(outcome)),
+                    },
+                    Err(error) => OperationCompletion {
+                        exit_code: -2,
+                        elapsed_ms,
+                        error_message: Some(error),
+                        result: None,
+                    },
+                }
+            } else {
+                OperationCompletion {
+                    exit_code: 0,
+                    elapsed_ms,
+                    error_message: None,
+                    result: Some(result),
+                }
             }
+        }
+        Err(err) if err.starts_with(WORKER_CANCELLED_PREFIX) => OperationCompletion {
+            exit_code: 130,
+            elapsed_ms,
+            error_message: None,
+            result: None,
+        },
+        Err(err) => {
+            let error = redact_secrets(&err);
             let _ = app.emit(
                 &format!("script-output:{run_id}"),
                 ScriptOutputLine {
-                    line: redact_secrets(&format!("Error: {err}")),
+                    line: format!("Error: {error}"),
                     is_stderr: true,
-                    elapsed_ms: started.elapsed().as_millis() as u64,
+                    elapsed_ms,
                 },
             );
-            emit_done(app, run_id, -1, started.elapsed().as_millis() as u64);
-            Err(redact_secrets(&err))
+            OperationCompletion {
+                exit_code: -2,
+                elapsed_ms,
+                error_message: Some(error),
+                result: None,
+            }
         }
-    }
+    };
+    // Both transports carry the terminal result. A lost event cannot strand the UI.
+    let _ = app.emit(&format!("script-done:{run_id}"), &completion);
+    Ok(completion)
 }
 
 // ─── Streaming operation commands ───────────────────────────────────────────
@@ -119,7 +167,10 @@ pub struct EmptyMessagesArgs {
 }
 
 #[tauri::command]
-pub async fn empty_messages(app: AppHandle, args: EmptyMessagesArgs) -> Result<(), String> {
+pub async fn empty_messages(
+    app: AppHandle,
+    args: EmptyMessagesArgs,
+) -> Result<OperationCompletion, String> {
     let env = store::resolve_connection_env(&app, &args.connection_id)?;
     run_worker_operation(
         &app,
@@ -155,7 +206,10 @@ pub struct MoveMessagesArgs {
 }
 
 #[tauri::command]
-pub async fn move_messages(app: AppHandle, args: MoveMessagesArgs) -> Result<(), String> {
+pub async fn move_messages(
+    app: AppHandle,
+    args: MoveMessagesArgs,
+) -> Result<OperationCompletion, String> {
     let env = store::resolve_connection_env(&app, &args.connection_id)?;
     run_worker_operation(
         &app,
@@ -190,7 +244,7 @@ pub struct RepublishSubscriptionDlqArgs {
 pub async fn republish_subscription_dlq(
     app: AppHandle,
     args: RepublishSubscriptionDlqArgs,
-) -> Result<(), String> {
+) -> Result<OperationCompletion, String> {
     let env = store::resolve_connection_env(&app, &args.connection_id)?;
     run_worker_operation(
         &app,
@@ -222,7 +276,10 @@ pub struct SearchMessagesArgs {
 }
 
 #[tauri::command]
-pub async fn search_messages(app: AppHandle, args: SearchMessagesArgs) -> Result<(), String> {
+pub async fn search_messages(
+    app: AppHandle,
+    args: SearchMessagesArgs,
+) -> Result<OperationCompletion, String> {
     let env = store::resolve_connection_env(&app, &args.connection_id)?;
     run_worker_operation(
         &app,
@@ -476,7 +533,7 @@ pub struct SingleMessageActionArgs {
 pub async fn single_message_action(
     app: AppHandle,
     args: SingleMessageActionArgs,
-) -> Result<(), String> {
+) -> Result<OperationCompletion, String> {
     let sequence_number = parse_sequence_number(&args.sequence_number)?;
     let env = store::resolve_connection_env(&app, &args.connection_id)?;
     run_worker_operation(

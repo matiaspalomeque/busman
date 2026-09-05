@@ -1,3 +1,7 @@
+import { createOperationSlice, type OperationSlice } from "./operationSlice";
+import { createMessageSlice, messageBytes, observeReplayReturns, type MessageSlice } from "./messageSlice";
+import { loadOperationJournal, saveOperationJournal } from "./operationJournal";
+import type { OperationCounts, OperationOutcome } from "../schemas/operation";
 import { create } from "zustand";
 import { immer } from "zustand/middleware/immer";
 import type {
@@ -6,15 +10,12 @@ import type {
   EventLogEntry,
   ExplorerSelection,
   NavPage,
-  OutputLine,
   PeekedMessage,
-  ProgressUpdate,
+  QueueMode,
   SendMessageDraft,
 } from "../types";
 import { logHandledError } from "../utils/logging";
 import { messageOperationKey, type MessageOperation } from "../utils/messageOperation";
-import { compareSequenceNumbers } from "../utils/sequenceNumber";
-import { computeMaxSeqNums } from "./peekCursors";
 
 /** Internal key separator for subscription store entries: "topic\0subscription". */
 export const SUBSCRIPTION_KEY_SEP = "\0";
@@ -30,27 +31,15 @@ export interface PendingMessageOperation {
 /** Timer handle for the changedEntities auto-clear. Module-scoped since the store is a singleton. */
 let changedEntitiesTimer: ReturnType<typeof setTimeout> | null = null;
 
-interface AppState {
+export interface AppState extends MessageSlice, OperationSlice {
   // Connections
   connections: Connection[];
   activeConnectionId: string | null;
+  connectionGeneration: number;
 
   // Navigation
   currentPage: NavPage;
   explorerSelection: ExplorerSelection;
-
-  // Script execution state
-  isRunning: boolean;
-  operationScope: "atomic" | "bulk" | null;
-  runId: string | null;
-  outputLines: OutputLine[];
-  progress: ProgressUpdate | null;
-
-  // Peek results
-  peekMessages: PeekedMessage[];
-  hasBrowsed: boolean;
-  lastPeekNormalMaxSeqNum: string | null;
-  lastPeekDlqMaxSeqNum: string | null;
 
   // Worker availability
   workerAvailable: boolean | null;
@@ -64,6 +53,7 @@ interface AppState {
   queueCounts: Record<string, { active: number; dlq: number }>;
   subscriptionCounts: Record<string, { active: number; dlq: number }>;
   entityCountsLoading: number; // number of in-flight per-entity count requests
+  countRefresh: Record<string, { requestId: number; updatedAt?: string; error?: string }>;
 
   // Entity properties (configuration + runtime details for selected entity)
   entityProperties: EntityProperties | null;
@@ -87,9 +77,16 @@ interface AppState {
   gridPage: number;
   gridPageSize: number;
   eventLog: EventLogEntry[];
+  clearEventLog: () => void;
+  journalError: string | null;
+  reconcileOperation: (id: string) => void;
+  recordOperationCheckpoint: (id: string, counts: OperationCounts) => void;
+  recordOperationOutcome: (id: string, outcome: OperationOutcome) => void;
+  recordOperationScope: (id: string, scope: NonNullable<EventLogEntry["scope"]>) => void;
   isInsightsPanelOpen: boolean;
   isSendModalOpen: boolean;
   isMoveModalOpen: boolean;
+  peekMode: QueueMode;
   isSettingsModalOpen: boolean;
   settingsTab: SettingsTab;
   isAboutModalOpen: boolean;
@@ -136,17 +133,12 @@ interface AppState {
   // Actions
   setConnections: (connections: Connection[]) => void;
   setActiveConnectionId: (id: string | null) => void;
+  setPeekMode: (mode: QueueMode) => void;
+  setCountRefresh: (key: string, status: { requestId: number; updatedAt?: string; error?: string }) => void;
   setCurrentPage: (page: NavPage) => void;
   setExplorerQueue: (queueName: string) => void;
   setExplorerSubscription: (topicName: string, subscriptionName: string) => void;
   clearExplorerSelection: () => void;
-  setRunning: (running: boolean, runId?: string, scope?: "atomic" | "bulk") => void;
-  appendOutputLine: (line: string, isStderr: boolean, elapsedMs: number) => void;
-  setProgress: (progress: ProgressUpdate | null) => void;
-  clearOutput: () => void;
-  setPeekResults: (messages: PeekedMessage[]) => void;
-  appendPeekResults: (messages: PeekedMessage[]) => void;
-  clearPeekResults: () => void;
   setWorkerAvailable: (available: boolean) => void;
   setEntities: (entities: { queues: string[]; topics: Record<string, string[]> } | null) => void;
   setEntitiesLoading: (loading: boolean) => void;
@@ -172,7 +164,7 @@ interface AppState {
   setGridPage: (page: number) => void;
   setGridPageSize: (size: number) => void;
   addEventLogEntry: (entry: EventLogEntry) => void;
-  updateEventLogEntry: (id: string, status: "success" | "error" | "stopped", errorMessage?: string) => void;
+  updateEventLogEntry: (id: string, status: "success" | "error" | "stopped" | "unknown", errorMessage?: string) => void;
   setLastBrowseError: (err: string | null) => void;
   setIsInsightsPanelOpen: (open: boolean) => void;
   setIsSendModalOpen: (open: boolean) => void;
@@ -186,7 +178,7 @@ interface AppState {
   setMessageContextMenu: (menu: { x: number; y: number; msg: PeekedMessage } | null) => void;
   setSingleMessageMoveTarget: (msg: PeekedMessage | null) => void;
   startMessageOperation: (key: string, operation: PendingMessageOperation) => void;
-  finishMessageOperation: (key: string) => void;
+  finishMessageOperation: (key: string, runId?: string) => void;
   removePeekedMessageBySeq: (sequenceNumber: string | null | undefined) => void;
   removePeekedMessageByKey: (key: string) => void;
   toggleSidebarSection: (section: "queues" | "topics" | "system") => void;
@@ -209,6 +201,8 @@ interface AppState {
 /** Resets all entity-specific grid/peek state. Used when switching connection, queue, or subscription. */
 function resetGridState(state: AppState): void {
   state.peekMessages = [];
+  state.loadedMessageBytes = 0;
+  state.messageBudgetReached = false;
   state.hasBrowsed = false;
   state.lastPeekNormalMaxSeqNum = null;
   state.lastPeekDlqMaxSeqNum = null;
@@ -223,10 +217,13 @@ function resetGridState(state: AppState): void {
   state.pendingMessageOperations = {};
 }
 
+const initialJournal = loadOperationJournal();
+
 export const useAppStore = create<AppState>()(
-  immer((set, get) => ({
+  immer((set, get, api) => ({
     connections: [],
     activeConnectionId: null,
+    connectionGeneration: 0,
     currentPage: "connections",
     explorerSelection: {
       kind: "none",
@@ -234,15 +231,8 @@ export const useAppStore = create<AppState>()(
       topicName: null,
       subscriptionName: null,
     },
-    isRunning: false,
-    operationScope: null,
-    runId: null,
-    outputLines: [],
-    progress: null,
-    peekMessages: [],
-    hasBrowsed: false,
-    lastPeekNormalMaxSeqNum: null,
-    lastPeekDlqMaxSeqNum: null,
+    ...createOperationSlice(set, get, api),
+    ...createMessageSlice(set, get, api),
     workerAvailable: null,
     entities: null,
     entitiesLoading: false,
@@ -250,6 +240,7 @@ export const useAppStore = create<AppState>()(
     queueCounts: {},
     subscriptionCounts: {},
     entityCountsLoading: 0,
+    countRefresh: {},
     entityProperties: null,
     entityPropertiesLoading: false,
     entityPropertiesError: null,
@@ -261,10 +252,12 @@ export const useAppStore = create<AppState>()(
     gridFilters: { messageId: "", deadLetterReason: "", deadLetterErrorDescription: "", body: "" },
     gridPage: 1,
     gridPageSize: 100,
-    eventLog: [],
+    eventLog: initialJournal.entries,
+    journalError: initialJournal.error,
     isInsightsPanelOpen: false,
     isSendModalOpen: false,
     isMoveModalOpen: false,
+    peekMode: "dlq",
     isSettingsModalOpen: false,
     settingsTab: "connections" as SettingsTab,
     isAboutModalOpen: false,
@@ -346,6 +339,7 @@ export const useAppStore = create<AppState>()(
 
     setActiveConnectionId: (id) =>
       set((state) => {
+        state.connectionGeneration += 1;
         state.activeConnectionId = id;
         // Clear cached entities when connection changes
         state.entities = null;
@@ -353,6 +347,8 @@ export const useAppStore = create<AppState>()(
         state.queueCounts = {};
         state.subscriptionCounts = {};
         state.entityCountsLoading = 0;
+        state.countRefresh = {};
+        state.entitiesLoading = false;
         state.entityCountHistory = {};
         state.isSubscriptionRulesModalOpen = false;
         state.explorerSelection = {
@@ -398,6 +394,9 @@ export const useAppStore = create<AppState>()(
           state.currentPage = "peek";
         }
       }),
+
+    setPeekMode: (mode) => set((state) => { state.peekMode = mode; }),
+    setCountRefresh: (key, status) => set((state) => { state.countRefresh[key] = status; }),
 
     setCurrentPage: (page) =>
       set((state) => {
@@ -446,77 +445,6 @@ export const useAppStore = create<AppState>()(
           subscriptionName: null,
         };
         state.isSubscriptionRulesModalOpen = false;
-      }),
-
-    setRunning: (running, runId, scope) =>
-      set((state) => {
-        state.isRunning = running;
-        state.runId = runId ?? null;
-        state.operationScope = running ? (scope ?? "bulk") : null;
-        if (!running) {
-          state.progress = null;
-        }
-      }),
-
-    appendOutputLine: (line, isStderr, elapsedMs) =>
-      set((state) => {
-        state.outputLines.push({
-          id: crypto.randomUUID(),
-          text: line,
-          isStderr,
-          elapsedMs,
-        });
-        // Cap at 2000 lines to prevent unbounded memory growth.
-        if (state.outputLines.length > 2000) {
-          state.outputLines.splice(0, state.outputLines.length - 2000);
-        }
-      }),
-
-    setProgress: (progress) =>
-      set((state) => {
-        state.progress = progress;
-      }),
-
-    clearOutput: () =>
-      set((state) => {
-        state.outputLines = [];
-        state.progress = null;
-      }),
-
-    setPeekResults: (messages) =>
-      set((state) => {
-        state.peekMessages = messages;
-        state.hasBrowsed = true;
-        const { normal: n1, dlq: d1 } = computeMaxSeqNums(messages);
-        state.lastPeekNormalMaxSeqNum = n1;
-        state.lastPeekDlqMaxSeqNum = d1;
-      }),
-
-    appendPeekResults: (messages) =>
-      set((state) => {
-        state.peekMessages = [...state.peekMessages, ...messages];
-        state.hasBrowsed = true;
-        const { normal: n2, dlq: d2 } = computeMaxSeqNums(messages);
-        if (
-          n2 !== null &&
-          (state.lastPeekNormalMaxSeqNum === null || compareSequenceNumbers(n2, state.lastPeekNormalMaxSeqNum) > 0)
-        ) {
-          state.lastPeekNormalMaxSeqNum = n2;
-        }
-        if (
-          d2 !== null &&
-          (state.lastPeekDlqMaxSeqNum === null || compareSequenceNumbers(d2, state.lastPeekDlqMaxSeqNum) > 0)
-        ) {
-          state.lastPeekDlqMaxSeqNum = d2;
-        }
-      }),
-
-    clearPeekResults: () =>
-      set((state) => {
-        state.peekMessages = [];
-        state.hasBrowsed = false;
-        state.lastPeekNormalMaxSeqNum = null;
-        state.lastPeekDlqMaxSeqNum = null;
       }),
 
     setWorkerAvailable: (available) =>
@@ -655,6 +583,28 @@ export const useAppStore = create<AppState>()(
         state.gridPage = 1;
       }),
 
+    clearEventLog: () => set((state) => {
+      if (state.isRunning || state.eventLog.some((entry) => entry.status === "running" || (entry.status === "unknown" && !entry.reconciledAt))) return;
+      state.eventLog = [];
+    }),
+    reconcileOperation: (id) => set((state) => {
+      const entry = state.eventLog.find((entry) => entry.id === id);
+      if (entry?.status === "unknown") entry.reconciledAt = new Date().toISOString();
+    }),
+    recordOperationCheckpoint: (id, counts) => set((state) => {
+      const entry = state.eventLog.find((entry) => entry.id === id);
+      if (entry) entry.checkpoint = { at: new Date().toISOString(), counts };
+    }),
+    recordOperationOutcome: (id, outcome) => set((state) => {
+      const entry = state.eventLog.find((entry) => entry.id === id);
+      if (entry) { entry.outcome = outcome; entry.status = outcome.status; }
+      observeReplayReturns(state, state.peekMessages);
+    }),
+    recordOperationScope: (id, scope) => set((state) => {
+      const entry = state.eventLog.find((entry) => entry.id === id);
+      if (entry) entry.scope = scope;
+    }),
+
     addEventLogEntry: (entry) =>
       set((state) => {
         state.eventLog.unshift(entry);
@@ -668,6 +618,7 @@ export const useAppStore = create<AppState>()(
         const entry = state.eventLog.find((e) => e.id === id);
         if (entry) {
           entry.status = status;
+          if (status === "success") observeReplayReturns(state, state.peekMessages);
           if (errorMessage) entry.errorMessage = errorMessage;
           if (status === "error") {
             logHandledError(`Operation failed: ${entry.operation}`, errorMessage ?? "Unknown error", {
@@ -752,9 +703,9 @@ export const useAppStore = create<AppState>()(
         state.pendingMessageOperations[key] = operation;
       }),
 
-    finishMessageOperation: (key) =>
+    finishMessageOperation: (key, runId) =>
       set((state) => {
-        delete state.pendingMessageOperations[key];
+        if (!runId || state.pendingMessageOperations[key]?.runId === runId) delete state.pendingMessageOperations[key];
       }),
 
     removePeekedMessageBySeq: (sequenceNumber) =>
@@ -762,6 +713,7 @@ export const useAppStore = create<AppState>()(
         if (sequenceNumber == null) return;
         const idx = state.peekMessages.findIndex((m) => m.sequenceNumber === sequenceNumber);
         if (idx >= 0) {
+          state.loadedMessageBytes = Math.max(0, state.loadedMessageBytes - messageBytes(state.peekMessages[idx]));
           state.peekMessages.splice(idx, 1);
           if (state.selectedMessage?.sequenceNumber === sequenceNumber) {
             state.selectedMessage = null;
@@ -773,6 +725,7 @@ export const useAppStore = create<AppState>()(
       set((state) => {
         const idx = state.peekMessages.findIndex((m) => messageOperationKey(m) === key);
         if (idx >= 0) {
+          state.loadedMessageBytes = Math.max(0, state.loadedMessageBytes - messageBytes(state.peekMessages[idx]));
           const [removed] = state.peekMessages.splice(idx, 1);
           if (state.selectedMessage && messageOperationKey(state.selectedMessage) === messageOperationKey(removed)) {
             state.selectedMessage = null;
@@ -939,3 +892,10 @@ export const useAppStore = create<AppState>()(
 // Selectors
 export const selectActiveConnection = (state: AppState) =>
   state.connections.find((c) => c.id === state.activeConnectionId) ?? null;
+
+// Persist metadata, terminal outcomes, and throttled progress checkpoints.
+useAppStore.subscribe((state, previous) => {
+  if (state.eventLog === previous.eventLog) return;
+  const error = saveOperationJournal(state.eventLog);
+  if (error !== state.journalError) useAppStore.setState({ journalError: error });
+});

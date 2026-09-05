@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import "../../i18n";
 import { useAppStore } from "../../store/appStore";
@@ -57,6 +57,7 @@ function renderSingleMoveModal(msg: PeekedMessage = message()) {
 
 describe("MoveMessagesModal", () => {
   beforeEach(() => {
+    mocks.runOperation.mockClear();
     useAppStore.setState(useAppStore.getInitialState());
     mocks.runOperation.mockResolvedValue({ exitCode: 0 });
     vi.spyOn(crypto, "randomUUID").mockReturnValue(
@@ -108,5 +109,53 @@ describe("MoveMessagesModal", () => {
       expect.objectContaining({ sequenceNumber: "9223372036854775807" }),
       { scope: "atomic", runId: "00000000-0000-0000-0000-000000000001" },
     );
+  });
+
+  it.each(["normal", "dlq", "both"] as const)("preserves %s scope in the dialog and command", (mode) => {
+    const store = useAppStore.getState();
+    store.setConnections([CONN]);
+    store.setActiveConnectionId(CONN.id);
+    store.setExplorerQueue("orders_error");
+    store.setPeekMode(mode);
+    render(<MoveMessagesModal />);
+    expect(screen.getByRole("dialog")).toBeTruthy();
+    expect(document.activeElement).toBe(screen.getByLabelText(/Destination Queue/));
+    expect(screen.getByText(/Browse count and loaded-message filters/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Move" }));
+    expect(mocks.runOperation).toHaveBeenCalledWith("move_messages", expect.objectContaining({
+      mode, sourceQueue: "orders_error", destQueue: "orders", connectionId: CONN.id,
+    }), expect.anything());
+  });
+
+  it("keeps the original source and prevents a connection change from retargeting the move", () => {
+    const store = useAppStore.getState();
+    store.setConnections([CONN, { ...CONN, id: "conn-2" }]);
+    store.setActiveConnectionId(CONN.id);
+    store.setExplorerQueue("orders_error");
+    render(<MoveMessagesModal />);
+    act(() => { store.setExplorerQueue("different"); });
+    expect((screen.getByLabelText(/Source Queue/) as HTMLInputElement).value).toBe("orders_error");
+    act(() => { store.setActiveConnectionId("conn-2"); });
+    expect((screen.getByRole("button", { name: "Move" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByRole("alert").textContent).toContain("connection changed");
+  });
+
+  it("traps keyboard focus, closes with Escape, and restores focus", () => {
+    const opener = document.createElement("button");
+    document.body.append(opener);
+    opener.focus();
+    const store = useAppStore.getState();
+    store.setConnections([CONN]); store.setActiveConnectionId(CONN.id); store.setExplorerQueue("orders_error");
+    store.setIsMoveModalOpen(true);
+    const view = render(<MoveMessagesModal />);
+    const move = screen.getByRole("button", { name: "Move" });
+    move.focus();
+    fireEvent.keyDown(move, { key: "Tab" });
+    expect(document.activeElement).toBe(screen.getAllByRole("button", { name: "Close" })[0]);
+    fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+    expect(useAppStore.getState().isMoveModalOpen).toBe(false);
+    view.unmount();
+    expect(document.activeElement).toBe(opener);
+    opener.remove();
   });
 });

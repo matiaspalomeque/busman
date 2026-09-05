@@ -30,6 +30,51 @@ beforeEach(() => {
 });
 
 describe("useEntityList.refreshEntityCount", () => {
+  it.each([false, true])("does not overwrite a newer refresh (separate consumer: %s)", async (separateConsumer) => {
+    const pending: Array<(value: unknown) => void> = [];
+    mockSafeInvoke.mockImplementation((command) => command === "get_queue_count"
+      ? new Promise((resolve) => pending.push(resolve)) as ReturnType<typeof safeInvoke>
+      : Promise.resolve({ queues: [], topics: {} }) as ReturnType<typeof safeInvoke>);
+    const { result } = renderHook(() => useEntityList());
+    const other = renderHook(() => useEntityList());
+    let first!: Promise<void>, second!: Promise<void>;
+    act(() => { first = result.current.refreshEntityCount({ type: "queue", name: "orders" }); second = (separateConsumer ? other.result : result).current.refreshEntityCount({ type: "queue", name: "orders" }); });
+    await act(async () => { pending[1]({ name: "orders", active: 7, dlq: 0 }); await second; });
+    await act(async () => { pending[0]({ name: "orders", active: 999, dlq: 0 }); await first; });
+    expect(useAppStore.getState().queueCounts.orders.active).toBe(7);
+  });
+
+  it.each([false, true])("ignores delayed counts across connection changes (return to A: %s)", async (returnToA) => {
+    const other = { ...CONN, id: "conn-2" };
+    useAppStore.getState().setConnections([CONN, other]);
+    let resolveCount!: (value: unknown) => void;
+    mockSafeInvoke.mockImplementation((command) => command === "get_queue_count"
+      ? new Promise((resolve) => { resolveCount = resolve; }) as ReturnType<typeof safeInvoke>
+      : Promise.resolve({ queues: [], topics: {} }) as ReturnType<typeof safeInvoke>);
+    const { result } = renderHook(() => useEntityList());
+    let request!: Promise<void>;
+    act(() => { request = result.current.refreshEntityCount({ type: "queue", name: "orders" }); });
+    await act(async () => { useAppStore.getState().setActiveConnectionId(other.id); });
+    if (returnToA) await act(async () => { useAppStore.getState().setActiveConnectionId(CONN.id); });
+    act(() => { useAppStore.getState().batchSetCounts([{ name: "orders", active: 7, dlq: 0 }], []); });
+    await act(async () => { resolveCount({ name: "orders", active: 999, dlq: 0 }); await request; });
+    expect(useAppStore.getState().queueCounts.orders.active).toBe(7);
+  });
+
+  it("retains the last count with a failure status and clears it after retry", async () => {
+    const { result } = renderHook(() => useEntityList());
+    await act(async () => {});
+    useAppStore.getState().batchSetCounts([{ name: "orders", active: 7, dlq: 0 }], []);
+    mockSafeInvoke.mockRejectedValueOnce(new Error("offline"));
+    await act(async () => { await result.current.refreshEntityCount({ type: "queue", name: "orders" }); });
+    expect(useAppStore.getState().queueCounts.orders.active).toBe(7);
+    expect(useAppStore.getState().countRefresh["queue:orders"].error).toContain("offline");
+    mockSafeInvoke.mockResolvedValueOnce({ name: "orders", active: 8, dlq: 0 });
+    await act(async () => { await result.current.refreshEntityCount({ type: "queue", name: "orders" }); });
+    expect(useAppStore.getState().countRefresh["queue:orders"].error).toBeUndefined();
+    expect(useAppStore.getState().countRefresh["queue:orders"].updatedAt).toBeTruthy();
+  });
+
   it("calls get_queue_count and updates queue count in store", async () => {
     mockSafeInvoke.mockResolvedValueOnce({ queues: [], topics: {} }); // fetchEntities on mount
     mockSafeInvoke.mockResolvedValueOnce({ name: "my-queue", active: 42, dlq: 3 }); // refreshEntityCount

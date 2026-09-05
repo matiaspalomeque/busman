@@ -20,7 +20,7 @@ use tokio::{
 };
 use uuid::Uuid;
 
-const WORKER_PROTOCOL_VERSION: u8 = 1;
+const WORKER_PROTOCOL_VERSION: u8 = 2;
 const MAX_WORKER_LINE_BYTES: usize = 32 * 1024 * 1024;
 pub(crate) const WORKER_CANCELLED_PREFIX: &str = "[worker:cancelled] ";
 
@@ -62,6 +62,7 @@ enum WorkerMessage {
         text: Option<String>,
         #[serde(rename = "match")]
         match_data: Option<Value>,
+        counts: Option<crate::operation_outcome::OperationCounts>,
         #[serde(rename = "isStderr")]
         is_stderr: Option<bool>,
         #[serde(rename = "elapsedMs")]
@@ -215,6 +216,7 @@ struct WorkerEventParams {
     line: Option<String>,
     text: Option<String>,
     match_data: Option<Value>,
+    counts: Option<crate::operation_outcome::OperationCounts>,
     is_stderr: Option<bool>,
     elapsed_ms: Option<u64>,
 }
@@ -240,7 +242,7 @@ fn emit_worker_event(app: &AppHandle, params: &WorkerEventParams) {
                 },
             );
         }
-        "progress" => {
+        "progress" | "heartbeat" => {
             let progress = redact_secrets(
                 &params
                     .text
@@ -252,6 +254,8 @@ fn emit_worker_event(app: &AppHandle, params: &WorkerEventParams) {
                 &format!("script-progress:{run_id}"),
                 ScriptProgress {
                     text: progress,
+                    heartbeat: params.kind == "heartbeat",
+                    counts: params.counts.clone(),
                     elapsed_ms: elapsed,
                 },
             );
@@ -492,6 +496,7 @@ async fn reader_loop<R, F>(
                 line,
                 text,
                 match_data,
+                counts,
                 is_stderr,
                 elapsed_ms,
             } => {
@@ -519,6 +524,7 @@ async fn reader_loop<R, F>(
                         line,
                         text,
                         match_data,
+                        counts,
                         is_stderr,
                         elapsed_ms,
                     });

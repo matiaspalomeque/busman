@@ -1,3 +1,4 @@
+import { useShallow } from "zustand/react/shallow";
 import { useAppStore } from "../../store/appStore";
 import { useEntityProperties } from "../../hooks/useEntityProperties";
 import { Sidebar } from "./Sidebar";
@@ -30,7 +31,19 @@ export function Explorer() {
     selectedMessage,
     isInsightsPanelOpen,
     messageContextMenu,
-  } = useAppStore();
+  } = useAppStore(useShallow((state) => ({
+    isSendModalOpen: state.isSendModalOpen,
+    isMoveModalOpen: state.isMoveModalOpen,
+    isSettingsModalOpen: state.isSettingsModalOpen,
+    isAboutModalOpen: state.isAboutModalOpen,
+    setIsAboutModalOpen: state.setIsAboutModalOpen,
+    isCreateEntityModalOpen: state.isCreateEntityModalOpen,
+    isSubscriptionRulesModalOpen: state.isSubscriptionRulesModalOpen,
+    deleteEntityTarget: state.deleteEntityTarget,
+    selectedMessage: state.selectedMessage,
+    isInsightsPanelOpen: state.isInsightsPanelOpen,
+    messageContextMenu: state.messageContextMenu,
+  })));
   const hasPeekMessages = useAppStore((s) => s.peekMessages.length > 0);
 
   const showInsights = isInsightsPanelOpen && hasPeekMessages;

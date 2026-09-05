@@ -22,6 +22,12 @@ Browse messages, inspect payloads, send test messages, move dead letters back to
 
 ---
 
+## Development and operations
+
+See [development setup](docs/development.md), [operation results and recovery](docs/operations.md), [troubleshooting](docs/troubleshooting.md), and [release validation](docs/release-validation.md).
+
+The explorer now provides Body, Properties, and Failure views, explicit bulk-operation scope, bounded loaded results, and a local metadata-only operation journal.
+
 ## Getting Started
 
 1. Download the installer for your platform from the [Releases page](https://github.com/matiaspalomeque/busman/releases).
@@ -86,7 +92,7 @@ When **trend lines** are enabled in settings, a small sparkline next to each ent
 
 ### Pin Entities
 
-Right-click any queue or subscription in the sidebar and select **Pin** to keep it at the top of the list. Pinned items remain visible regardless of filtering or sorting. Unpin them the same way.
+Open the **⋯ actions** beside a queue or subscription and select **Pin** to keep it at the top of the list. Pinned items remain visible regardless of filtering or sorting. Unpin them the same way.
 
 ### Create & Delete Entities
 

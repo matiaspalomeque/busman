@@ -2,6 +2,8 @@ mod commands;
 mod crypto;
 pub mod error;
 mod models;
+mod native_smoke;
+mod operation_outcome;
 mod store;
 
 use commands::{connections::*, entities::*, files::*, logging::*, operations::*};
@@ -10,6 +12,15 @@ use tauri::{Emitter, Manager};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let context = tauri::generate_context!();
+    let mut args = std::env::args().skip(1);
+    if args.next().as_deref() == Some("--smoke-test") {
+        let report = args
+            .next()
+            .expect("--smoke-test requires a JSON report path");
+        native_smoke::run(report.into(), context);
+        return;
+    }
     tauri::Builder::default()
         .plugin(tauri_plugin_window_state::Builder::new().build())
         .setup(|app| {
@@ -116,6 +127,6 @@ pub fn run() {
             import_connections,
             log_frontend_event,
         ])
-        .run(tauri::generate_context!())
+        .run(context)
         .expect("error while running tauri application");
 }

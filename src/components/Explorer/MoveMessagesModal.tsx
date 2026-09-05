@@ -1,7 +1,9 @@
+import { useShallow } from "zustand/react/shallow";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useAppStore, selectActiveConnection } from "../../store/appStore";
 import { useScript } from "../../hooks/useScript";
+import { useDialogFocus } from "../../hooks/useDialogFocus";
 import { Icon } from "../Common/Icon";
 import { getDisplayEntity } from "./toolbarActions";
 import { extractNamespace } from "../../utils/connection";
@@ -22,19 +24,32 @@ function suggestDestQueue(sourceQueue: string): string {
 
 export function MoveMessagesModal() {
   const { t } = useTranslation();
-  const conn = useAppStore(selectActiveConnection);
+  // Capture the intent once. A background selection change must never retarget a move.
+  const [context] = useState(() => {
+    const state = useAppStore.getState();
+    return { conn: selectActiveConnection(state), explorerSelection: state.explorerSelection,
+      entities: state.entities, singleMessageMoveTarget: state.singleMessageMoveTarget,
+      mode: state.peekMode, generation: state.connectionGeneration };
+  });
+  const { conn, explorerSelection, entities, singleMessageMoveTarget } = context;
+  const generation = useAppStore((state) => state.connectionGeneration);
   const {
-    explorerSelection,
-    entities,
     isRunning,
     setIsMoveModalOpen,
-    singleMessageMoveTarget,
     setSingleMessageMoveTarget,
     pendingMessageOperations,
     addEventLogEntry,
     updateEventLogEntry,
     startMessageOperation,
-  } = useAppStore();
+  } = useAppStore(useShallow((state) => ({
+    isRunning: state.isRunning,
+    setIsMoveModalOpen: state.setIsMoveModalOpen,
+    setSingleMessageMoveTarget: state.setSingleMessageMoveTarget,
+    pendingMessageOperations: state.pendingMessageOperations,
+    addEventLogEntry: state.addEventLogEntry,
+    updateEventLogEntry: state.updateEventLogEntry,
+    startMessageOperation: state.startMessageOperation,
+  })));
 
   const { runOperation } = useScript();
 
@@ -49,9 +64,11 @@ export function MoveMessagesModal() {
   const [destQueue, setDestQueue] = useState(() =>
     isSubscriptionSource ? "" : suggestDestQueue(initialSource),
   );
-  const [mode, setMode] = useState<QueueMode>("normal");
+  const [mode, setMode] = useState<QueueMode>(context.mode);
 
   const overlayRef = useRef<HTMLDivElement>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useDialogFocus(dialogRef);
 
   // Update dest suggestion when source changes (only if dest is still empty or was auto-filled)
   const prevSourceRef = useRef(initialSource);
@@ -82,6 +99,7 @@ export function MoveMessagesModal() {
 
   const canSubmit =
     !!conn &&
+    generation === context.generation &&
     (isSingleMessage || sourceQueue.trim() !== "") &&
     (!isSingleMessage || isSingleMessageDlq) &&
     destQueue.trim() !== "" &&
@@ -143,17 +161,17 @@ export function MoveMessagesModal() {
       }
 
       void runOperation("single_message_action", params, { scope: "atomic", runId })
-        .then(({ exitCode, errorMessage }) => {
+        .then(({ exitCode, errorMessage, contextCurrent }) => {
           updateEventLogEntry(runId, exitCodeToStatus(exitCode), errorMessage);
-          if (exitCode === 0) {
+          if (exitCode === 0 && contextCurrent !== false) {
             useAppStore.getState().removePeekedMessageByKey(singleMessageKey);
           }
         })
-        .catch(() => {
-          updateEventLogEntry(runId, "error");
+        .catch((error) => {
+          updateEventLogEntry(runId, "error", String(error));
         })
         .finally(() => {
-          useAppStore.getState().finishMessageOperation(singleMessageKey);
+          useAppStore.getState().finishMessageOperation(singleMessageKey, runId);
         });
       return;
     }
@@ -185,8 +203,8 @@ export function MoveMessagesModal() {
       .then(({ exitCode, errorMessage }) => {
         updateEventLogEntry(runId, exitCodeToStatus(exitCode), errorMessage);
       })
-      .catch(() => {
-        updateEventLogEntry(runId, "error");
+      .catch((error) => {
+        updateEventLogEntry(runId, "error", String(error));
       });
   };
 
@@ -201,14 +219,15 @@ export function MoveMessagesModal() {
       }}
       onKeyDown={handleKeyDown}
     >
-      <div className="bg-white dark:bg-zinc-900 rounded-lg shadow-2xl border border-zinc-200 dark:border-zinc-700 w-full max-w-md flex flex-col">
+      <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby="move-dialog-title" className="bg-white dark:bg-zinc-900 rounded-lg shadow-2xl border border-zinc-200 dark:border-zinc-700 w-full max-w-md max-h-[90vh] overflow-auto flex flex-col">
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-3.5 border-b border-zinc-200 dark:border-zinc-700">
-          <h2 className="text-sm font-semibold text-azure-dark dark:text-azure-light flex items-center gap-2">
+          <h2 id="move-dialog-title" className="text-sm font-semibold text-azure-dark dark:text-azure-light flex items-center gap-2">
             <Icon name="move" size={14} className="text-azure-primary" />
             {isSingleMessage ? t("explorer.messageContext.moveMessageTitle") : t("explorer.moveModal.title")}
           </h2>
           <button
+            aria-label={t("explorer.moveModal.close")}
             onClick={close}
             className="p-1 rounded text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800"
           >
@@ -218,9 +237,13 @@ export function MoveMessagesModal() {
 
         {/* Body */}
         <div className="px-5 py-4 space-y-4">
+          <p className="text-xs break-words text-zinc-600 dark:text-zinc-300">
+            {conn?.environment ? `${conn.environment} · ` : ""}{conn?.name} · {conn ? extractNamespace(conn.connectionString) : ""}
+          </p>
+          {generation !== context.generation && <p role="alert" className="text-xs text-red-600">{t("explorer.moveModal.contextChanged")}</p>}
           {/* Source */}
           <div className="flex flex-col gap-1">
-            <label className="text-xs font-medium text-zinc-600 dark:text-zinc-300">
+            <label htmlFor="move-source" className="text-xs font-medium text-zinc-600 dark:text-zinc-300">
               {t(isSubscriptionSource ? "explorer.moveModal.sourceEntity" : "explorer.moveModal.sourceQueue")} <span className="text-red-500">*</span>
             </label>
             {isSingleMessage && singleMessageMoveTarget ? (
@@ -230,6 +253,7 @@ export function MoveMessagesModal() {
             ) : (
               <>
                 <input
+                  id="move-source"
                   list={isSubscriptionSource ? undefined : "move-source-queues"}
                   type="text"
                   value={sourceQueue}
@@ -254,10 +278,12 @@ export function MoveMessagesModal() {
 
           {/* Destination Queue */}
           <div className="flex flex-col gap-1">
-            <label className="text-xs font-medium text-zinc-600 dark:text-zinc-300">
+            <label htmlFor="move-destination" className="text-xs font-medium text-zinc-600 dark:text-zinc-300">
               {t("explorer.moveModal.destQueue")} <span className="text-red-500">*</span>
             </label>
             <input
+              id="move-destination"
+              data-dialog-initial-focus
               list="move-dest-queues"
               type="text"
               value={destQueue}
@@ -289,6 +315,7 @@ export function MoveMessagesModal() {
                 {MODES.map((m) => (
                   <button
                     key={m}
+                    aria-pressed={mode === m}
                     onClick={() => setMode(m)}
                     className={[
                       "px-3 py-1.5 text-xs transition-colors",
@@ -305,6 +332,9 @@ export function MoveMessagesModal() {
           )}
 
           {/* Warning / note */}
+          {!isSingleMessage && <p className="text-xs font-medium break-words text-zinc-700 dark:text-zinc-200" aria-live="polite">
+            {t("explorer.moveModal.scopeSummary", { mode: t(`modeSelector.${mode}`), source: sourceQueue, destination: destQueue || "…" })}
+          </p>}
           <div className="flex items-start gap-2 px-3 py-2 rounded bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700">
             <span className="text-amber-500 mt-0.5 shrink-0">⚠</span>
             <p className="text-[11px] text-amber-800 dark:text-amber-300">

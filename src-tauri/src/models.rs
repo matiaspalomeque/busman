@@ -39,6 +39,8 @@ pub struct ScriptOutputLine {
 /// Emitted when a \r-overwrite progress update is received.
 #[derive(Debug, Serialize, Clone)]
 pub struct ScriptProgress {
+    pub heartbeat: bool,
+    pub counts: Option<crate::operation_outcome::OperationCounts>,
     pub text: String,
     #[serde(rename = "elapsedMs")]
     pub elapsed_ms: u64,

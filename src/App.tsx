@@ -1,3 +1,4 @@
+import { useShallow } from "zustand/react/shallow";
 import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -21,7 +22,16 @@ export function App() {
     setLanguage,
     setIsAboutModalOpen,
     setIsSettingsModalOpen,
-  } = useAppStore();
+  } = useAppStore(useShallow((state) => ({
+    workerAvailable: state.workerAvailable,
+    setWorkerAvailable: state.setWorkerAvailable,
+    isDark: state.isDark,
+    setIsDark: state.setIsDark,
+    language: state.language,
+    setLanguage: state.setLanguage,
+    setIsAboutModalOpen: state.setIsAboutModalOpen,
+    setIsSettingsModalOpen: state.setIsSettingsModalOpen,
+  })));
   const [workerRetrying, setWorkerRetrying] = useState(false);
 
   const checkWorkerAvailability = useCallback(async () => {

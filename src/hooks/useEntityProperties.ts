@@ -1,3 +1,4 @@
+import { useShallow } from "zustand/react/shallow";
 import { useEffect, useRef } from "react";
 import { useAppStore, selectActiveConnection } from "../store/appStore";
 import { safeInvoke, QueuePropertiesSchema, SubscriptionPropertiesSchema } from "../schemas/ipc";
@@ -6,7 +7,9 @@ export function useEntityProperties() {
   const conn = useAppStore(selectActiveConnection);
   const explorerSelection = useAppStore((s) => s.explorerSelection);
   const requestNonce = useAppStore((s) => s.entityPropertiesRequestNonce);
-  const { setEntityPropertiesState } = useAppStore();
+  const { setEntityPropertiesState } = useAppStore(useShallow((state) => ({
+    setEntityPropertiesState: state.setEntityPropertiesState,
+  })));
 
   const fetchIdRef = useRef(0);
 

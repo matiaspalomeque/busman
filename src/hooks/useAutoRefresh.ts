@@ -1,3 +1,4 @@
+import { useShallow } from "zustand/react/shallow";
 import { useEffect, useRef } from "react";
 import { useAppStore, SUBSCRIPTION_KEY_SEP } from "../store/appStore";
 
@@ -13,7 +14,14 @@ export function useAutoRefresh(refreshAllCounts: () => boolean | void) {
     entities,
     setChangedEntities,
     recordEntityCountHistory,
-  } = useAppStore();
+  } = useAppStore(useShallow((state) => ({
+    autoRefreshEnabled: state.autoRefreshEnabled,
+    autoRefreshInterval: state.autoRefreshInterval,
+    activeConnectionId: state.activeConnectionId,
+    entities: state.entities,
+    setChangedEntities: state.setChangedEntities,
+    recordEntityCountHistory: state.recordEntityCountHistory,
+  })));
 
   const refreshInFlightRef = useRef(false);
   const snapshotRef = useRef<{

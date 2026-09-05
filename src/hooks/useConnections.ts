@@ -1,3 +1,4 @@
+import { useShallow } from "zustand/react/shallow";
 import { invoke } from "@tauri-apps/api/core";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { useCallback } from "react";
@@ -7,7 +8,10 @@ import type { Connection, ConnectionsConfig } from "../types";
 import { logHandledError } from "../utils/logging";
 
 export function useConnections() {
-  const { setConnections, setActiveConnectionId } = useAppStore();
+  const { setConnections, setActiveConnectionId } = useAppStore(useShallow((state) => ({
+    setConnections: state.setConnections,
+    setActiveConnectionId: state.setActiveConnectionId,
+  })));
 
   const applyConfig = useCallback(
     (config: ConnectionsConfig) => {

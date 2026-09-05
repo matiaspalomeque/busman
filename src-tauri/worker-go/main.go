@@ -23,14 +23,15 @@ var stdoutMu sync.Mutex
 // wg tracks in-flight handler goroutines so main() can wait for them before exiting.
 var wg sync.WaitGroup
 
-const protocolVersion = 1
+const protocolVersion = 2
 const maxConcurrentHandlers = 8
 
 var handlerSlots = make(chan struct{}, maxConcurrentHandlers)
 
 type activeRun struct {
-	cancel context.CancelFunc
-	done   chan struct{}
+	tracker *operationTracker
+	cancel  context.CancelFunc
+	done    chan struct{}
 }
 
 var activeRuns = struct {
@@ -80,15 +81,16 @@ type Response struct {
 }
 
 type Event struct {
-	Version   int    `json:"version"`
-	Type      string `json:"type"`
-	RunID     string `json:"runId,omitempty"`
-	Kind      string `json:"kind"`
-	Line      string `json:"line,omitempty"`
-	IsStderr  bool   `json:"isStderr,omitempty"`
-	Text      string `json:"text,omitempty"`
-	Match     any    `json:"match,omitempty"`
-	ElapsedMs int64  `json:"elapsedMs"`
+	Counts    *OperationCounts `json:"counts,omitempty"`
+	Version   int              `json:"version"`
+	Type      string           `json:"type"`
+	RunID     string           `json:"runId,omitempty"`
+	Kind      string           `json:"kind"`
+	Line      string           `json:"line,omitempty"`
+	IsStderr  bool             `json:"isStderr,omitempty"`
+	Text      string           `json:"text,omitempty"`
+	Match     any              `json:"match,omitempty"`
+	ElapsedMs int64            `json:"elapsedMs"`
 }
 
 // ─── Send helpers ─────────────────────────────────────────────────────────────
@@ -116,7 +118,7 @@ func emitProgress(runID, text string, elapsedMs int64) {
 	if runID == "" {
 		return
 	}
-	writeLine(Event{Version: protocolVersion, Type: "event", RunID: runID, Kind: "progress", Text: text, ElapsedMs: elapsedMs})
+	writeLine(Event{Version: protocolVersion, Type: "event", RunID: runID, Kind: "progress", Counts: operationCounts(runID), Text: text, ElapsedMs: elapsedMs})
 }
 
 func emitSearchMatch(runID string, match any, elapsedMs int64) {
@@ -181,7 +183,8 @@ func registerRun(runID string) (context.Context, *activeRun, error) {
 		return nil, nil, fmt.Errorf("runId is required for cancellable operations")
 	}
 	ctx, cancel := context.WithCancel(context.Background())
-	run := &activeRun{cancel: cancel, done: make(chan struct{})}
+	run := &activeRun{cancel: cancel, done: make(chan struct{}), tracker: newOperationTracker()}
+	ctx = context.WithValue(ctx, outcomeContextKey{}, run.tracker)
 	activeRuns.Lock()
 	defer activeRuns.Unlock()
 	if _, exists := activeRuns.runs[runID]; exists {
@@ -284,14 +287,37 @@ func dispatch(line string) {
 		go func(id string, fn cancellableHandlerFn, params json.RawMessage) {
 			defer wg.Done()
 			defer finishRun(runID, run)
+			heartbeatDone := make(chan struct{})
+			defer close(heartbeatDone)
+			go func() {
+				ticker := time.NewTicker(5 * time.Second)
+				defer ticker.Stop()
+				started := time.Now()
+				for {
+					select {
+					case <-heartbeatDone:
+						return
+					case <-ticker.C:
+						writeLine(Event{Version: protocolVersion, Type: "event", RunID: runID, Kind: "heartbeat", Counts: operationCounts(runID), ElapsedMs: elapsedSince(started)})
+					}
+				}
+			}()
 			select {
 			case handlerSlots <- struct{}{}:
 				defer func() { <-handlerSlots }()
 			case <-ctx.Done():
+				if hasStructuredOutcome(req.Method) {
+					sendResponse(id, run.tracker.finish(runID, context.Canceled))
+					return
+				}
 				sendErrorCode(id, "cancelled", "Operation cancelled.")
 				return
 			}
 			result, err := fn(ctx, params)
+			if hasStructuredOutcome(req.Method) {
+				sendResponse(id, run.tracker.finish(runID, err))
+				return
+			}
 			if err != nil && errors.Is(err, context.Canceled) {
 				sendErrorCode(id, "cancelled", "Operation cancelled.")
 				return

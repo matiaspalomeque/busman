@@ -1,8 +1,16 @@
+import { useShallow } from "zustand/react/shallow";
+import { useEffect, useState } from "react";
+import { MessageBody, ExpandedMessageBody } from "./MessageBody";
 import { useTranslation } from "react-i18next";
-import { useAppStore } from "../../store/appStore";
+import { useAppStore, selectActiveConnection } from "../../store/appStore";
 import { useResizable } from "../../hooks/useResizable";
 import { formatTimestamp as formatTime } from "./entityDetailsFormat";
-import { formatBodyJson, openResend } from "./messageActions";
+import { useScript } from "../../hooks/useScript";
+import { addSingleMessageActionMetadata, findMessageReplay, isDeadLetterMessage, messageOperationKey } from "../../utils/messageOperation";
+import { ReplayFeedback } from "./ReplayFeedback";
+import { isCanonicalSequenceNumber } from "../../utils/sequenceNumber";
+import { extractNamespace } from "../../utils/connection";
+import { exitCodeToStatus } from "../../utils/exitCode";
 
 // ─── Section header ────────────────────────────────────────────────────────────
 
@@ -38,8 +46,23 @@ export function PropertiesPanel() {
     setSelectedMessage,
     propertiesPanelWidth,
     setPropertiesPanelWidth,
-  } = useAppStore();
-  const store = useAppStore.getState;
+  } = useAppStore(useShallow((state) => ({
+    selectedMessage: state.selectedMessage,
+    setSelectedMessage: state.setSelectedMessage,
+    propertiesPanelWidth: state.propertiesPanelWidth,
+    setPropertiesPanelWidth: state.setPropertiesPanelWidth,
+  })));
+  const { runOperation, isRunning } = useScript();
+  const pending = useAppStore((state) => {
+    const key = state.selectedMessage && messageOperationKey(state.selectedMessage);
+    return key ? state.pendingMessageOperations[key] != null : false;
+  });
+  const [resendError, setResendError] = useState<string | null>(null);
+  const replayEntry = useAppStore((state) => state.selectedMessage
+    ? findMessageReplay(state.eventLog, state.activeConnectionId, state.explorerSelection, state.selectedMessage) : undefined);
+  const [tab, setTab] = useState<"body" | "properties" | "failure">("body");
+  const [expanded, setExpanded] = useState(false);
+  useEffect(() => { setTab("body"); setExpanded(false); setResendError(null); }, [selectedMessage]);
 
   const { widthRef, onPointerDown } = useResizable({
     initialWidth: propertiesPanelWidth,
@@ -53,7 +76,45 @@ export function PropertiesPanel() {
 
   const appProps = selectedMessage.applicationProperties;
 
-  const handleResend = () => openResend(selectedMessage, store());
+  const handleResend = async () => {
+    const state = useAppStore.getState();
+    const conn = selectActiveConnection(state);
+    const selection = state.explorerSelection;
+    const target = state.selectedMessage;
+    const key = target && messageOperationKey(target);
+    if (!conn || !target || !key || !isCanonicalSequenceNumber(target.sequenceNumber) || selection.kind === "none" || state.isRunning || state.pendingMessageOperations[key]) return;
+
+    const runId = crypto.randomUUID();
+    const params: Record<string, unknown> = {
+      action: "replay", connectionId: conn.id, sequenceNumber: target.sequenceNumber, isDlq: isDeadLetterMessage(target),
+      ...(selection.kind === "queue"
+        ? { queueName: selection.queueName, destQueue: selection.queueName }
+        : { topicName: selection.topicName, subscriptionName: selection.subscriptionName, destTopic: selection.topicName }),
+    };
+    addSingleMessageActionMetadata(params, target);
+    setResendError(null);
+    state.addEventLogEntry({
+      id: runId, time: new Date().toISOString(), namespace: extractNamespace(conn.connectionString),
+      entity: `${selection.kind === "queue" ? selection.queueName : `${selection.topicName}/${selection.subscriptionName}`} #${target.sequenceNumber}`,
+      entityType: selection.kind === "queue" ? "Queue" : "Subscription", operation: "ReplayMessage", status: "running",
+    });
+    state.startMessageOperation(key, { runId, operation: "ReplayMessage", startedAt: new Date().toISOString() });
+    const showError = (error: string) => {
+      const current = useAppStore.getState();
+      if (current.connectionGeneration === state.connectionGeneration && current.selectedMessage === target) setResendError(error);
+    };
+    try {
+      const { exitCode, errorMessage, contextCurrent } = await runOperation("single_message_action", params, { scope: "atomic", runId });
+      state.updateEventLogEntry(runId, exitCodeToStatus(exitCode), errorMessage);
+      if (exitCode === 0 && contextCurrent !== false) state.removePeekedMessageByKey(key);
+      else if (exitCode !== 0) showError(errorMessage ?? t("explorer.properties.resendFailed"));
+    } catch (error) {
+      state.updateEventLogEntry(runId, "error", String(error));
+      showError(String(error));
+    } finally {
+      state.finishMessageOperation(key, runId);
+    }
+  };
 
   return (
     <aside
@@ -93,7 +154,27 @@ export function PropertiesPanel() {
         </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto min-h-0">
+      {replayEntry && <ReplayFeedback entry={replayEntry} />}
+      {selectedMessage.deadLetterReason && <p className="px-3 py-2 text-xs text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/40 break-words">{selectedMessage.deadLetterReason}</p>}
+      <div role="tablist" aria-label={t("explorer.properties.messageDetail")} className="flex border-b border-zinc-200 dark:border-zinc-700 px-2">
+        {(["body", "properties", "failure"] as const).map((value, index, tabs) => <button key={value} role="tab" id={`message-tab-${value}`} aria-selected={tab === value} aria-controls={`message-panel-${value}`} tabIndex={tab === value ? 0 : -1}
+          onClick={() => setTab(value)} onKeyDown={(event) => {
+            const delta = event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0;
+            if (!delta) return;
+            event.preventDefault();
+            const next = tabs[(index + delta + tabs.length) % tabs.length];
+            setTab(next); document.getElementById(`message-tab-${next}`)?.focus();
+          }}
+          className={`px-3 py-2 text-xs border-b-2 ${tab === value ? "border-azure-primary text-azure-primary" : "border-transparent text-zinc-500"}`}>{t(`explorer.properties.${value}`)}</button>)}
+      </div>
+      <div role="tabpanel" id={`message-panel-${tab}`} aria-labelledby={`message-tab-${tab}`} className="flex-1 overflow-y-auto min-h-0 flex flex-col">
+        {tab === "body" && <MessageBody key={selectedMessage.messageId ?? selectedMessage.sequenceNumber} body={selectedMessage.body} onExpand={() => setExpanded(true)} />}
+        {tab === "failure" && <div>
+          <PropRow label={t("explorer.properties.deadLetterReason")} value={selectedMessage.deadLetterReason || t("explorer.properties.noFailure")} />
+          <PropRow label={t("explorer.properties.deadLetterDescription")} value={selectedMessage.deadLetterErrorDescription || "—"} />
+          <PropRow label={t("explorer.properties.source")} value={selectedMessage._source} />
+        </div>}
+        {tab === "properties" && <div>
           <PropRow label={t("explorer.properties.messageId")} value={selectedMessage.messageId ?? "—"} />
           {selectedMessage.sequenceNumber != null && (
             <PropRow label={t("explorer.properties.sequenceNumber")} value={String(selectedMessage.sequenceNumber)} />
@@ -139,27 +220,22 @@ export function PropertiesPanel() {
             </>
           )}
 
-          {/* Body */}
-          <SectionHeader label={t("explorer.properties.body")} />
-          <div className="relative">
-            <pre className="selectable px-3 py-2 text-[10px] leading-relaxed font-mono text-azure-dark dark:text-zinc-200 overflow-x-auto whitespace-pre-wrap break-words">
-              {formatBodyJson(selectedMessage.body) || (
-                <span className="text-zinc-400">{t("explorer.properties.bodyEmpty")}</span>
-              )}
-            </pre>
-          </div>
-
+        </div>}
           {/* Resend action */}
           <div className="px-3 pb-3">
+            {resendError && <p role="alert" className="mb-2 text-xs text-red-600 dark:text-red-400 break-words">{resendError}</p>}
             <button
               type="button"
-              onClick={handleResend}
-              className="w-full flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs rounded border border-azure-primary text-azure-primary hover:bg-azure-primary/10 focus:outline-none focus:ring-1 focus:ring-azure-primary transition-colors"
+              onClick={() => void handleResend()}
+              disabled={pending || isRunning || !isCanonicalSequenceNumber(selectedMessage.sequenceNumber)}
+              aria-busy={pending}
+              className="disabled:opacity-40 disabled:cursor-not-allowed w-full flex items-center justify-center gap-1.5 px-3 py-1.5 text-xs rounded border border-azure-primary text-azure-primary hover:bg-azure-primary/10 focus:outline-none focus:ring-1 focus:ring-azure-primary transition-colors"
             >
-              {t("explorer.properties.resend")}
+              {t(pending ? "explorer.properties.resending" : "explorer.properties.resend")}
             </button>
           </div>
       </div>
+      {expanded && <ExpandedMessageBody body={selectedMessage.body} onClose={() => setExpanded(false)} />}
     </aside>
   );
 }

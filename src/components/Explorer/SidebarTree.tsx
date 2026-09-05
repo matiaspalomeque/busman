@@ -1,3 +1,4 @@
+import { useShallow } from "zustand/react/shallow";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useAppStore } from "../../store/appStore";
@@ -182,6 +183,7 @@ function treeItemAreEqual(prev: TreeItemProps, next: TreeItemProps): boolean {
 export const TreeItem = memo(function TreeItem({ label, itemTitle, icon, isSelected, onClick, indent = false, counts, pinKey, isPinned = false, onTogglePin, onDelete, threshold, onSetThreshold, onRefreshCount, flash = false, sparkline }: TreeItemProps) {
   const { t } = useTranslation();
   const [showPopover, setShowPopover] = useState(false);
+  const countStatus = useAppStore((state) => pinKey ? state.countRefresh[pinKey] : undefined);
   const [refreshing, setRefreshing] = useState(false);
   const breached = threshold != null && counts != null && counts.dlq > threshold;
 
@@ -198,8 +200,9 @@ export const TreeItem = memo(function TreeItem({ label, itemTitle, icon, isSelec
 
   return (
     <div
+      onClick={onClick}
       className={[
-        "group relative flex items-center w-full rounded-sm",
+        "group relative flex flex-col items-stretch w-full rounded-sm cursor-pointer",
         isSelected
           ? "bg-azure-primary/10"
           : "hover:bg-zinc-100 dark:hover:bg-zinc-800",
@@ -208,10 +211,9 @@ export const TreeItem = memo(function TreeItem({ label, itemTitle, icon, isSelec
     >
       <button
         type="button"
-        onClick={onClick}
         title={itemTitle ?? label}
         className={[
-          "flex items-center gap-2 flex-1 min-w-0 text-left text-xs py-1",
+          "flex items-center gap-2 w-full min-w-0 text-left text-xs pt-1.5 pb-0.5",
           indent ? "pl-7" : "pl-4",
           pinKey != null || onDelete != null || onSetThreshold != null ? "pr-1" : "pr-2",
           isSelected
@@ -224,18 +226,20 @@ export const TreeItem = memo(function TreeItem({ label, itemTitle, icon, isSelec
           size={13}
           className={isSelected ? "text-azure-primary" : "text-zinc-400 dark:text-zinc-500 shrink-0"}
         />
-        <span className="truncate min-w-0 flex-1">{label}</span>
+        <span className="min-w-0 flex-1 break-all">{label}</span>
+      </button>
+      <div className={`flex flex-wrap items-center gap-x-1 gap-y-1 pb-1 pr-1 ${indent ? "pl-12" : "pl-[37px]"}`}>
         {counts != null && (
           <span
-            className="ml-auto flex items-center gap-1 shrink-0 text-[10px] tabular-nums"
+            className="flex shrink-0 items-center gap-1 text-[10px] tabular-nums"
             title={
-              breached
+              countStatus?.error ? `${t("explorer.sidebar.countStale")} ${countStatus.error}` : countStatus?.updatedAt ? t("explorer.sidebar.countUpdated", { time: new Date(countStatus.updatedAt).toLocaleTimeString() }) : breached
                 ? t("explorer.sidebar.dlqThresholdBreached", { count: counts.dlq, threshold })
                 : `${counts.active} · ${counts.dlq}`
             }
           >
             {/* Trend column — only rendered when the sparkline prop is provided (feature enabled) */}
-            {sparkline !== undefined && (
+            {sparkline != null && sparkline.length > 1 && (
               <span className="w-8 inline-flex items-center justify-center">
                 {sparkline != null && <Sparkline data={sparkline} />}
               </span>
@@ -260,7 +264,8 @@ export const TreeItem = memo(function TreeItem({ label, itemTitle, icon, isSelec
             </span>
           </span>
         )}
-      </button>
+      {countStatus?.error && <span className="text-amber-600 text-xs" role="status" title={`${t("explorer.sidebar.countStale")} ${countStatus.error}`}>!</span>}
+      <div className="ml-auto flex shrink-0 items-center" role="group" aria-label={t("explorer.sidebar.actions", { name: label })}>
       {onRefreshCount != null && (
         <button
           type="button"
@@ -268,9 +273,9 @@ export const TreeItem = memo(function TreeItem({ label, itemTitle, icon, isSelec
           title={t("explorer.sidebar.refreshCountTitle")}
           aria-label={t("explorer.sidebar.refreshCountTitle")}
           disabled={refreshing}
-          className="shrink-0 p-0.5 rounded text-zinc-400 opacity-0 group-hover:opacity-100 focus:opacity-100 hover:text-azure-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-azure-primary transition-opacity disabled:opacity-40"
+          className="shrink-0 p-1 rounded text-zinc-400 opacity-100 hover:text-azure-primary focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-azure-primary transition-opacity disabled:opacity-40"
         >
-          <Icon name="refresh" size={11} className={refreshing ? "animate-spin" : undefined} />
+          <Icon name="refresh" size={12} className={refreshing ? "animate-spin" : undefined} />
         </button>
       )}
       {onDelete != null && (
@@ -279,9 +284,9 @@ export const TreeItem = memo(function TreeItem({ label, itemTitle, icon, isSelec
           onClick={(e) => { e.stopPropagation(); onDelete(); }}
           title={t("explorer.sidebar.deleteTitle")}
           aria-label={t("explorer.sidebar.deleteTitle")}
-          className="shrink-0 p-0.5 rounded text-zinc-400 opacity-0 group-hover:opacity-100 focus:opacity-100 hover:text-red-500 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-red-500 transition-opacity"
+          className="shrink-0 p-1 rounded text-zinc-400 opacity-100 hover:text-red-500 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-red-500 transition-opacity"
         >
-          <Icon name="trash" size={11} />
+          <Icon name="trash" size={12} />
         </button>
       )}
       {onSetThreshold != null && (
@@ -292,13 +297,13 @@ export const TreeItem = memo(function TreeItem({ label, itemTitle, icon, isSelec
           aria-label={t("explorer.sidebar.dlqThresholdSet")}
           aria-expanded={showPopover}
           className={[
-            "shrink-0 p-0.5 rounded transition-opacity",
+            "shrink-0 p-1 rounded transition-opacity",
             threshold != null
               ? "text-amber-500 dark:text-amber-400 opacity-100"
-              : "text-zinc-400 opacity-0 group-hover:opacity-100 focus:opacity-100 hover:text-amber-500 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-amber-500",
+              : "text-zinc-400 opacity-100 hover:text-amber-500 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-amber-500",
           ].join(" ")}
         >
-          <Icon name={threshold != null ? "bellFilled" : "bell"} size={11} />
+          <Icon name={threshold != null ? "bellFilled" : "bell"} size={12} />
         </button>
       )}
       {pinKey != null && (
@@ -308,15 +313,17 @@ export const TreeItem = memo(function TreeItem({ label, itemTitle, icon, isSelec
           title={isPinned ? t("explorer.sidebar.unpin") : t("explorer.sidebar.pin")}
           aria-label={isPinned ? t("explorer.sidebar.unpin") : t("explorer.sidebar.pin")}
           className={[
-            "shrink-0 p-0.5 mr-1 rounded transition-opacity",
+            "shrink-0 p-1 mr-1 rounded transition-opacity",
             isPinned
               ? "text-amber-400 opacity-100"
-              : "text-zinc-400 opacity-0 group-hover:opacity-100 focus:opacity-100 hover:text-amber-400 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-amber-400",
+              : "text-zinc-400 opacity-100 hover:text-amber-400 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-amber-400",
           ].join(" ")}
         >
-          <Icon name={isPinned ? "starFilled" : "star"} size={11} />
+          <Icon name={isPinned ? "starFilled" : "star"} size={12} />
         </button>
       )}
+      </div>
+      </div>
       {showPopover && onSetThreshold != null && (
         <ThresholdPopover
           current={threshold ?? null}
@@ -343,7 +350,13 @@ interface TopicNodeProps {
 
 export function TopicNode({ topic, subscriptions, subCounts, dlqThresholds, onSetThreshold, onRefreshSubscriptionCount, changedSet, subSparklines }: TopicNodeProps) {
   const { t } = useTranslation();
-  const { explorerSelection, setExplorerSubscription, pinnedEntities, togglePin, setDeleteEntityTarget } = useAppStore();
+  const { explorerSelection, setExplorerSubscription, pinnedEntities, togglePin, setDeleteEntityTarget } = useAppStore(useShallow((state) => ({
+    explorerSelection: state.explorerSelection,
+    setExplorerSubscription: state.setExplorerSubscription,
+    pinnedEntities: state.pinnedEntities,
+    togglePin: state.togglePin,
+    setDeleteEntityTarget: state.setDeleteEntityTarget,
+  })));
   const pinnedSet = useMemo(() => new Set(pinnedEntities), [pinnedEntities]);
   const [expanded, setExpanded] = useState(true);
 

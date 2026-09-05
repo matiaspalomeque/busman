@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { useConnections } from "../../hooks/useConnections";
 import { useEscapeKey } from "../../hooks/useEscapeKey";
+import { useDialogFocus } from "../../hooks/useDialogFocus";
 import { selectActiveConnection, useAppStore } from "../../store/appStore";
 import type { Connection, QueueMode } from "../../types";
 import { safeColor } from "../../utils/color";
@@ -63,6 +64,9 @@ interface ConfirmModalProps {
 
 export function ConfirmModal({ title, message, danger, onConfirm, onCancel }: ConfirmModalProps) {
   const { t } = useTranslation();
+  const dialog = useRef<HTMLDivElement>(null);
+  const titleId = useId();
+  useDialogFocus(dialog);
   useEscapeKey(onCancel);
 
   return (
@@ -70,9 +74,9 @@ export function ConfirmModal({ title, message, danger, onConfirm, onCancel }: Co
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
       onClick={(e) => e.target === e.currentTarget && onCancel()}
     >
-      <div role="dialog" aria-modal="true" className="bg-white dark:bg-zinc-900 rounded-lg shadow-xl w-full max-w-sm mx-4 overflow-hidden border border-zinc-200 dark:border-zinc-700">
+      <div ref={dialog} role="dialog" aria-modal="true" aria-labelledby={titleId} className="bg-white dark:bg-zinc-900 rounded-lg shadow-xl w-full max-w-sm mx-4 max-h-[90vh] overflow-auto border border-zinc-200 dark:border-zinc-700">
         <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-200 dark:border-zinc-700">
-          <h2 className={[
+          <h2 id={titleId} className={[
             "text-sm font-semibold flex items-center gap-2",
             danger ? "text-red-600 dark:text-red-400" : "text-amber-600 dark:text-amber-400",
           ].join(" ")}>

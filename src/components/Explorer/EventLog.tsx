@@ -1,14 +1,50 @@
-import { useState } from "react";
+import { useShallow } from "zustand/react/shallow";
+import { save } from "@tauri-apps/plugin-dialog";
+import { invoke } from "@tauri-apps/api/core";
+import { journalMetadata } from "../../store/operationJournal";
+import { ReplayFeedback } from "./ReplayFeedback";
+import { OperationOutcomeSummary } from "./OperationOutcomeSummary";
+import { useRef, useState } from "react";
+import { useDialogFocus } from "../../hooks/useDialogFocus";
+import { useEscapeKey } from "../../hooks/useEscapeKey";
 import { useTranslation } from "react-i18next";
 import { useAppStore } from "../../store/appStore";
 import type { EventLogEntry } from "../../types";
 
 const PAGE_SIZES = [10, 25, 50] as const;
 
-function StatusBadge({ status }: { status: EventLogEntry["status"] }) {
+function OperationDetails({ entry, onClose }: { entry: EventLogEntry; onClose: () => void }) {
+  const { t } = useTranslation();
+  const dialog = useRef<HTMLDivElement>(null);
+  useDialogFocus(dialog);
+  useEscapeKey(onClose);
+  const counts = entry.outcome?.counts ?? entry.checkpoint?.counts;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+      <div ref={dialog} role="dialog" aria-modal="true" aria-labelledby="operation-details-title" className="w-full max-w-xl max-h-[90vh] overflow-auto rounded-lg border border-zinc-300 bg-white p-5 text-sm text-zinc-800 shadow-xl dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100">
+        <div className="mb-4 flex items-center justify-between gap-3">
+          <h2 id="operation-details-title" className="font-semibold">{t("explorer.eventLog.result")}</h2>
+          <button type="button" onClick={onClose} className="rounded border border-zinc-300 px-3 py-1 dark:border-zinc-600">{t("explorer.sendModal.close")}</button>
+        </div>
+        <p className="break-words font-medium">{entry.namespace} · {entry.entity}</p>
+        <div className="my-3"><StatusBadge status={entry.status} replayed={!!entry.scope?.replaySource} returned={!!entry.replayReturn} /></div>
+        <ReplayFeedback entry={entry} />
+        {counts && <OperationOutcomeSummary counts={counts} />}
+        <p className="mt-3 text-xs text-zinc-500 dark:text-zinc-400">{entry.outcome?.finishedAt ? new Date(entry.outcome.finishedAt).toLocaleString() : t("explorer.eventLog.lastObserved", { time: entry.checkpoint?.at })}</p>
+        {entry.scope && <p className="mt-2 break-words">{entry.scope.mode} → {entry.scope.destination || "—"}</p>}
+        {entry.status === "unknown" && <p className="mt-3 text-amber-700 dark:text-amber-300">{t("explorer.eventLog.reconcile")}</p>}
+        {entry.errorMessage && <p className="mt-3 break-words text-red-600 dark:text-red-400">{entry.errorMessage}</p>}
+      </div>
+    </div>
+  );
+}
+
+function StatusBadge({ status, replayed = false, returned = false }: { status: EventLogEntry["status"]; replayed?: boolean; returned?: boolean }) {
   const { t } = useTranslation();
   const styles =
-    status === "success"
+    status === "success" && returned
+      ? "bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-300"
+      : status === "success"
       ? "bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400"
       : status === "running"
         ? "bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 animate-pulse"
@@ -21,10 +57,10 @@ function StatusBadge({ status }: { status: EventLogEntry["status"] }) {
       title={status}
       className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold ${styles}`}
     >
-      {status === "running"
+      {status === "unknown" ? t("explorer.eventLog.statusUnknown") : status === "running"
         ? t("explorer.eventLog.statusRunning")
         : status === "success"
-          ? t("explorer.eventLog.statusOk")
+          ? t(returned ? "explorer.replayFeedback.returnedBadge" : replayed ? "explorer.replayFeedback.sentBadge" : "explorer.eventLog.statusOk")
           : status === "stopped"
             ? t("explorer.eventLog.statusStopped")
             : t("explorer.eventLog.statusError")}
@@ -47,15 +83,34 @@ function formatLogTime(iso: string): string {
 
 export function EventLog() {
   const { t } = useTranslation();
-  const { eventLog, isRunning } = useAppStore();
+  const { eventLog, clearEventLog, isRunning, journalError, reconcileOperation } = useAppStore(useShallow((state) => ({
+    eventLog: state.eventLog,
+    clearEventLog: state.clearEventLog,
+    isRunning: state.isRunning,
+    journalError: state.journalError,
+    reconcileOperation: state.reconcileOperation,
+  })));
+  const [exportError, setExportError] = useState<string | null>(null);
+  const exportJournal = async () => {
+    try {
+      const path = await save({ defaultPath: "busman-operation-journal.json", filters: [{ name: "JSON", extensions: ["json"] }] });
+      if (!path) return;
+      await invoke("write_json_file", { path, content: JSON.stringify({ version: 1, entries: journalMetadata(eventLog) }, null, 2) });
+      setExportError(null);
+    } catch (error) { setExportError(String(error)); }
+  };
 
   const [collapsed, setCollapsed] = useState(true);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState<(typeof PAGE_SIZES)[number]>(25);
+  const [detailsId, setDetailsId] = useState<string | null>(null);
+  const detailsEntry = eventLog.find((entry) => entry.id === detailsId);
 
   const totalPages = Math.max(1, Math.ceil(eventLog.length / pageSize));
   const safePage = Math.min(page, totalPages);
   const rows = eventLog.slice((safePage - 1) * pageSize, safePage * pageSize);
+  const returnedEntries = eventLog.filter((entry) => entry.status === "success" && entry.replayReturn);
+  const unknownCount = eventLog.filter((entry) => entry.status === "unknown" && !entry.reconciledAt).length;
 
   return (
     <footer
@@ -94,6 +149,17 @@ export function EventLog() {
           )}
         </button>
 
+        {unknownCount > 0 && <button type="button" onClick={() => setCollapsed(false)} className="text-[10px] text-amber-700 dark:text-amber-300 hover:underline">{unknownCount} · {t("explorer.eventLog.needsReview")}</button>}
+        {returnedEntries.length > 0 && <button type="button" onClick={() => setDetailsId(returnedEntries[0].id)} className="text-[10px] text-amber-700 dark:text-amber-300 hover:underline">{t("explorer.replayFeedback.returnedCount", { count: returnedEntries.length })}</button>}
+        <button type="button" onClick={() => void exportJournal()} className="ml-auto text-[10px] text-azure-primary hover:underline">{t("explorer.eventLog.export")}</button>
+        <button
+          type="button"
+          onClick={() => { clearEventLog(); setPage(1); setDetailsId(null); }}
+          disabled={eventLog.length === 0 || isRunning || unknownCount > 0 || eventLog.some((entry) => entry.status === "running")}
+          title={t("explorer.eventLog.clearHelp")}
+          className="text-[10px] text-azure-primary hover:underline disabled:opacity-50 disabled:cursor-not-allowed disabled:no-underline"
+        >{t("explorer.eventLog.clear")}</button>
+        {(journalError || exportError) && <span role="alert" className="text-[10px] text-red-600" title={journalError ?? exportError ?? ""}>{t("explorer.eventLog.saveError")}</span>}
         {/* Running indicator */}
         {isRunning && (
           <span className="flex items-center gap-1.5 ml-1" role="status">
@@ -211,16 +277,19 @@ export function EventLog() {
                       {entry.entityType}
                     </td>
                     <td className="px-3 py-1 text-zinc-600 dark:text-zinc-300">
-                      {entry.operation}
+                      {entry.operation === "Receive" ? t("explorer.toolbar.receive") : entry.operation}
                     </td>
                     <td className="px-3 py-1">
-                      <StatusBadge status={entry.status} />
+                      <StatusBadge status={entry.status} replayed={!!entry.scope?.replaySource} returned={!!entry.replayReturn} />
+                      {entry.status === "unknown" && !entry.reconciledAt && <button onClick={() => reconcileOperation(entry.id)} title={t("explorer.eventLog.reviewedHelp")} className="block mt-1 text-azure-primary underline">{t("explorer.eventLog.reviewed")}</button>}
+                      {entry.reconciledAt && <span className="block text-zinc-500">{t("explorer.eventLog.reviewedAt", { time: new Date(entry.reconciledAt).toLocaleString() })}</span>}
                     </td>
                     <td
                       className="px-3 py-1 text-red-500 dark:text-red-400 truncate"
                       title={entry.errorMessage}
                     >
-                      {entry.errorMessage ?? <span className="text-zinc-300 dark:text-zinc-600">—</span>}
+                      {(entry.outcome || entry.checkpoint || entry.scope?.replaySource) && <button type="button" aria-haspopup="dialog" onClick={() => setDetailsId(entry.id)} className="block text-azure-primary underline">{t("explorer.eventLog.result")}</button>}
+                      {entry.status === "unknown" ? <span title={t("explorer.eventLog.reconcile")}>{t("explorer.eventLog.reconcile")}</span> : entry.errorMessage ?? (entry.outcome ? null : <span className="text-zinc-300 dark:text-zinc-600">—</span>)}
                     </td>
                   </tr>
                 ))}
@@ -229,6 +298,7 @@ export function EventLog() {
           )}
         </div>
       )}
+      {detailsEntry && <OperationDetails entry={detailsEntry} onClose={() => setDetailsId(null)} />}
     </footer>
   );
 }

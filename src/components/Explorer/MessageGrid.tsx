@@ -1,7 +1,12 @@
+import { filterMessages } from "../../utils/messageSearch";
+import { MAX_LOADED_MESSAGES, MAX_LOADED_BYTES } from "../../store/messageSlice";
+import { useShallow } from "zustand/react/shallow";
+import { OperationOutcomeSummary } from "./OperationOutcomeSummary";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { save } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
+import { useScript } from "../../hooks/useScript";
 import { useAppStore } from "../../store/appStore";
 import type { PeekedMessage } from "../../types";
 import { EntityDetailsPanel } from "./EntityDetailsPanel";
@@ -11,12 +16,6 @@ import { logHandledError } from "../../utils/logging";
 import { BodyFilterBar, ColHeader, EmptyState, FilterRow, FirstRunState, bodyString, formatTime } from "./MessageGridPresentation";
 
 // ─── Operation progress ───────────────────────────────────────────────────────
-
-function parseProgressText(text: string): { count: number; rate: number } | null {
-  const match = text.match(/(\d+)\s*\|\s*Avg Rate:\s*(\d+)/);
-  if (!match) return null;
-  return { count: parseInt(match[1], 10), rate: parseInt(match[2], 10) };
-}
 
 function formatElapsed(ms: number): string {
   const totalSec = Math.floor(ms / 1000);
@@ -29,11 +28,15 @@ function formatElapsed(ms: number): string {
 
 function AtomicOperationBanner() {
   const { t } = useTranslation();
-  const pendingCount = useAppStore((s) => Object.keys(s.pendingMessageOperations).length);
+  const runs = useAppStore((s) => s.activeOperationRuns);
+  const { stop } = useScript();
+  const atomicRuns = Object.entries(runs).filter(([, run]) => run.scope === "atomic");
+  const pendingCount = atomicRuns.length;
+  const error = atomicRuns.find(([, run]) => run.error)?.[1].error;
   if (pendingCount === 0) return null;
 
   return (
-    <div className="shrink-0 flex items-center gap-2 px-3 py-2 border-b border-azure-primary/20 bg-azure-primary/5 dark:bg-azure-primary/10 text-xs">
+    <div role="status" className="shrink-0 flex flex-wrap items-center gap-2 px-3 py-2 border-b border-azure-primary/20 bg-azure-primary/5 dark:bg-azure-primary/10 text-xs">
       <svg
         className="animate-spin shrink-0 text-azure-primary"
         width={12}
@@ -47,6 +50,10 @@ function AtomicOperationBanner() {
       <span className="font-medium text-azure-primary">
         {t("explorer.grid.messageOperationsRunning", { count: pendingCount })}
       </span>
+      <button type="button" disabled={atomicRuns.every(([, run]) => run.phase === "stopRequested")} onClick={() => { for (const [id] of atomicRuns) void stop(id); }} className="ml-auto rounded border border-zinc-300 px-2 py-1 dark:border-zinc-600">
+        {t("explorer.grid.stopMessageOperations")}
+      </button>
+      {error && <p role="alert" className="w-full text-amber-700 dark:text-amber-300">{error}</p>}
     </div>
   );
 }
@@ -62,7 +69,16 @@ function pendingOperationLabel(t: ReturnType<typeof useTranslation>["t"], operat
 
 function OperationStatusTray() {
   const { t } = useTranslation();
-  const { progress, eventLog, runId, isRunning, operationScope } = useAppStore();
+  const { progress, eventLog, runId, isRunning, operationScope, operationPhase, operationError } = useAppStore(useShallow((state) => ({
+    progress: state.progress,
+    eventLog: state.eventLog,
+    runId: state.runId,
+    isRunning: state.isRunning,
+    operationScope: state.operationScope,
+    operationPhase: state.operationPhase,
+    operationError: state.operationError,
+  })));
+  const { stop } = useScript();
   const [trackedRunId, setTrackedRunId] = useState<string | null>(null);
   const [dismissedRunId, setDismissedRunId] = useState<string | null>(null);
 
@@ -89,9 +105,9 @@ function OperationStatusTray() {
   const operation = entry?.operation ?? "Operation";
   const entity = entry?.entity ?? "";
 
-  const parsed = progress ? parseProgressText(progress.text) : null;
-  const count = parsed?.count ?? 0;
-  const rate = parsed?.rate ?? 0;
+  const counts = operationRunning ? progress?.counts : entry?.outcome?.counts;
+  const count = counts?.settled ?? 0;
+  const rate = progress && progress.elapsedMs > 0 ? Math.round(count * 1000 / progress.elapsedMs) : 0;
   const elapsed = progress ? formatElapsed(progress.elapsedMs) : "0:00";
 
   const isReceive = operation === "Receive";
@@ -115,17 +131,9 @@ function OperationStatusTray() {
       ? "bg-amber-500"
       : "bg-azure-primary";
 
-  const handleCancel = async () => {
-    if (!visibleRunId) return;
-    try {
-      await invoke("stop_current_operation", { runId: visibleRunId });
-    } catch (error) {
-      logHandledError("Failed to cancel running operation", error, { runId: visibleRunId });
-      // Non-fatal
-    }
-  };
+  const handleCancel = stop;
 
-  const statusLabel =
+  const statusLabel = entry?.status === "unknown" ? t("explorer.eventLog.statusUnknown") :
     entry?.status === "success"
       ? t("explorer.eventLog.statusOk")
       : entry?.status === "error"
@@ -159,6 +167,9 @@ function OperationStatusTray() {
             </div>
           )}
 
+          {counts && <div className="mt-2"><OperationOutcomeSummary counts={counts} /></div>}
+          {entry?.status === "unknown" && <p className="mt-2 text-xs text-amber-700 dark:text-amber-300">{t("explorer.eventLog.reconcile")}</p>}
+          {operationError && <p role="alert" className="mt-2 text-xs text-amber-700 dark:text-amber-300">{operationError}</p>}
           {operationRunning ? (
             <>
               <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[10px] text-zinc-500 dark:text-zinc-400">
@@ -184,9 +195,10 @@ function OperationStatusTray() {
           <button
             type="button"
             onClick={() => void handleCancel()}
+            disabled={operationPhase === "stopRequested"}
             className="shrink-0 rounded border border-zinc-300 px-2.5 py-1 text-[10px] font-medium text-zinc-600 hover:border-red-400 hover:bg-red-50 hover:text-red-600 dark:border-zinc-600 dark:text-zinc-300 dark:hover:border-red-600 dark:hover:bg-red-900/20 dark:hover:text-red-400"
           >
-            {t("explorer.toolbar.stop")}
+            {t(operationPhase === "stopRequested" ? "explorer.progress.stopRequested" : "explorer.toolbar.stop")}
           </button>
         ) : completed ? (
           <button
@@ -210,6 +222,9 @@ export function MessageGrid() {
   const { t } = useTranslation();
   const {
     peekMessages,
+    loadedMessageBytes,
+    messageBudgetReached,
+    clearPeekResults,
     hasBrowsed,
     explorerSelection,
     selectedMessage,
@@ -226,7 +241,28 @@ export function MessageGrid() {
     setLastBrowseError,
     connections,
     setIsSettingsModalOpen,
-  } = useAppStore();
+  } = useAppStore(useShallow((state) => ({
+    peekMessages: state.peekMessages,
+    loadedMessageBytes: state.loadedMessageBytes,
+    messageBudgetReached: state.messageBudgetReached,
+    clearPeekResults: state.clearPeekResults,
+    hasBrowsed: state.hasBrowsed,
+    explorerSelection: state.explorerSelection,
+    selectedMessage: state.selectedMessage,
+    setSelectedMessage: state.setSelectedMessage,
+    setMessageContextMenu: state.setMessageContextMenu,
+    gridFilters: state.gridFilters,
+    setGridFilter: state.setGridFilter,
+    gridPage: state.gridPage,
+    gridPageSize: state.gridPageSize,
+    setGridPage: state.setGridPage,
+    setGridPageSize: state.setGridPageSize,
+    pendingMessageOperations: state.pendingMessageOperations,
+    lastBrowseError: state.lastBrowseError,
+    setLastBrowseError: state.setLastBrowseError,
+    connections: state.connections,
+    setIsSettingsModalOpen: state.setIsSettingsModalOpen,
+  })));
 
   // Track which column filter inputs are visible
   const [visibleFilters, setVisibleFilters] = useState<Set<string>>(new Set());
@@ -305,25 +341,7 @@ export function MessageGrid() {
   };
 
   // Apply client-side filters to sorted messages
-  const filtered = sortedMessages.filter((msg) => {
-    const { messageId, deadLetterReason, deadLetterErrorDescription, body } = gridFilters;
-    if (messageId && !String(msg.messageId ?? "").toLowerCase().includes(messageId.toLowerCase()))
-      return false;
-    if (
-      deadLetterReason &&
-      !String(msg.deadLetterReason ?? "").toLowerCase().includes(deadLetterReason.toLowerCase())
-    )
-      return false;
-    if (
-      deadLetterErrorDescription &&
-      !String(msg.deadLetterErrorDescription ?? "")
-        .toLowerCase()
-        .includes(deadLetterErrorDescription.toLowerCase())
-    )
-      return false;
-    if (body && !bodyString(msg.body).toLowerCase().includes(body.toLowerCase())) return false;
-    return true;
-  });
+  const filtered = useMemo(() => filterMessages(sortedMessages, gridFilters), [sortedMessages, gridFilters]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / gridPageSize));
   const safePage = Math.min(gridPage, totalPages);
@@ -339,6 +357,11 @@ export function MessageGrid() {
 
   return (
     <div className="relative flex-1 flex flex-col min-w-0 overflow-hidden">
+      {hasBrowsed && <div className="flex flex-wrap items-center gap-2 px-3 py-1.5 text-[10px] text-zinc-500 border-b border-zinc-200 dark:border-zinc-700">
+        <span>{t("explorer.grid.loadedBudget", { count: peekMessages.length, max: MAX_LOADED_MESSAGES, size: (loadedMessageBytes / 1024 / 1024).toFixed(1), bytes: MAX_LOADED_BYTES / 1024 / 1024 })}</span>
+        <button onClick={clearPeekResults} className="ml-auto text-azure-primary hover:underline">{t("explorer.grid.clearLoaded")}</button>
+        {messageBudgetReached && <p role="status" className="w-full text-amber-700 dark:text-amber-300">{t("explorer.grid.budgetReached")}</p>}
+      </div>}
       {/* Error banner */}
       {lastBrowseError && (
         <div className="shrink-0 flex items-start gap-2 px-3 py-2 bg-red-50 dark:bg-red-900/20 border-b border-red-200 dark:border-red-800 text-xs text-red-700 dark:text-red-400">
@@ -481,9 +504,9 @@ export function MessageGrid() {
       </div>
 
       {/* Pagination */}
-      <div className="shrink-0 flex items-center justify-between px-3 py-2 border-t border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800/60">
+      <div className="shrink-0 flex flex-wrap gap-2 items-center justify-between px-3 py-2 border-t border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800/60">
         <div className="flex items-center gap-2 text-xs text-zinc-500 dark:text-zinc-400">
-          <span>{t("explorer.grid.rowsPerPage")}</span>
+          <span className="whitespace-nowrap">{t("explorer.grid.rowsPerPage")}</span>
           <select
             value={gridPageSize}
             onChange={(e) => setGridPageSize(Number(e.target.value))}
@@ -498,7 +521,7 @@ export function MessageGrid() {
           </select>
         </div>
 
-        <div className="flex items-center gap-3 text-xs text-zinc-500 dark:text-zinc-400">
+        <div className="flex flex-wrap items-center gap-3 text-xs text-zinc-500 dark:text-zinc-400">
           <span className="whitespace-nowrap tabular-nums">
             {filtered.length === 0
               ? t("explorer.grid.zeroMessages")
@@ -532,7 +555,7 @@ export function MessageGrid() {
             >
               ‹
             </button>
-            <span className="px-2">
+            <span className="px-2 whitespace-nowrap">
               {safePage} / {totalPages}
             </span>
             <button

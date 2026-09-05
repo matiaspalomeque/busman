@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, act, waitFor } from "@testing-library/react";
-import { useScript } from "./useScript";
+import { OPERATION_INACTIVITY_MS, useScript } from "./useScript";
 import { useAppStore } from "../store/appStore";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
@@ -38,6 +38,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.restoreAllMocks();
 });
 
@@ -51,6 +52,148 @@ function emit(eventName: string, payload: unknown) {
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
 describe("useScript", () => {
+  it("records the source of a single resend for later return detection", async () => {
+    const state = useAppStore.getState();
+    state.addEventLogEntry({ id: RUN_ID, time: new Date().toISOString(), namespace: "test", entity: "orders #1", entityType: "Queue", operation: "ReplayMessage", status: "running" });
+    mockInvoke.mockResolvedValue({ exitCode: 0 });
+    const { result } = renderHook(() => useScript());
+    await act(async () => { await result.current.runOperation("single_message_action", {
+      action: "replay", connectionId: "conn-1", queueName: "orders", destQueue: "orders", isDlq: true, sequenceNumber: "1",
+    }, { scope: "atomic", runId: RUN_ID }); });
+    expect(useAppStore.getState().eventLog[0].scope).toEqual({ connectionId: "conn-1", mode: "dlq", destination: "orders", replaySource: '["queue","orders"]' });
+  });
+
+  it("keeps single-message uncertainty visible and allows Stop after navigation", async () => {
+    vi.useFakeTimers();
+    mockInvoke.mockImplementationOnce(() => new Promise(() => {}));
+    const store = useAppStore.getState();
+    store.setExplorerQueue("orders");
+    const { result } = renderHook(() => useScript());
+    const params = { connectionId: "conn-1", queueName: "orders", sequenceNumber: "9007199254740993", isDlq: true };
+    let pending!: Promise<OpResult>;
+    await act(async () => { pending = result.current.runOperation("single_message_action", params, { scope: "atomic", runId: RUN_ID }); });
+    act(() => { store.setExplorerQueue("billing"); });
+    await expect(result.current.runOperation("single_message_action", params, { scope: "atomic", runId: "other" })).rejects.toThrow("this message");
+    await act(async () => { vi.advanceTimersByTime(OPERATION_INACTIVITY_MS + 1); });
+    expect(useAppStore.getState().activeOperationRuns[RUN_ID]).toMatchObject({ phase: "unknown", error: expect.stringContaining("Outcome unknown") });
+    await expect(result.current.runOperation("single_message_action", { ...params, sequenceNumber: "2" }, { scope: "atomic", runId: "other" })).rejects.toThrow("unknown outcome");
+    mockInvoke.mockResolvedValueOnce(undefined);
+    await act(async () => { await result.current.stop(RUN_ID); });
+    expect(mockInvoke).toHaveBeenLastCalledWith("stop_current_operation", { runId: RUN_ID });
+    expect(useAppStore.getState().activeOperationRuns[RUN_ID].phase).toBe("stopRequested");
+    await act(async () => { emit(`script-done:${RUN_ID}`, { exitCode: 130 }); await pending; });
+    expect(useAppStore.getState().activeOperationRuns[RUN_ID]).toBeUndefined();
+  });
+
+  it("saves throttled progress checkpoints for interrupted-history recovery", async () => {
+    vi.useFakeTimers();
+    mockInvoke.mockImplementationOnce(() => new Promise(() => {}));
+    const store = useAppStore.getState();
+    store.addEventLogEntry({ id: RUN_ID, time: new Date().toISOString(), namespace: "demo", entity: "orders", entityType: "Queue", operation: "Move", status: "running" });
+    const { result } = renderHook(() => useScript());
+    let pending!: Promise<OpResult>;
+    await act(async () => { pending = result.current.runOperation("move_messages", {}); });
+    const counts = { sent: 3, settled: 2, sendUnconfirmed: 0, settlementUnconfirmed: 1, sources: {} };
+    await act(async () => { emit(`script-progress:${RUN_ID}`, { text: "", heartbeat: true, elapsedMs: 0, counts }); });
+    expect(useAppStore.getState().eventLog[0].checkpoint?.counts.sent).toBe(3);
+    await act(async () => { emit(`script-progress:${RUN_ID}`, { text: "", elapsedMs: 100, counts: { ...counts, sent: 4 } }); });
+    expect(useAppStore.getState().eventLog[0].checkpoint?.counts.sent).toBe(3);
+    await act(async () => { vi.advanceTimersByTime(5000); emit(`script-progress:${RUN_ID}`, { text: "", elapsedMs: 5000, counts: { ...counts, sent: 5 } }); });
+    expect(useAppStore.getState().eventLog[0].checkpoint?.counts.sent).toBe(5);
+    await act(async () => { emit(`script-done:${RUN_ID}`, { exitCode: 130 }); await pending; });
+  });
+
+  it("retains atomic ownership across navigation and ignores late changes to another view", async () => {
+    mockInvoke.mockImplementationOnce(() => new Promise(() => {}));
+    const store = useAppStore.getState();
+    store.setExplorerQueue("orders");
+    const { result } = renderHook(() => useScript());
+    let pending!: Promise<OpResult & { contextCurrent?: boolean }>;
+    await act(async () => { pending = result.current.runOperation("single_message_action", { queueName: "orders" }, { scope: "atomic", runId: RUN_ID }); });
+    act(() => { store.setExplorerQueue("billing"); });
+    await expect(result.current.runOperation("move_messages", {})).rejects.toThrow("Wait for message operations");
+    await act(async () => { emit(`script-done:${RUN_ID}`, { exitCode: 0 }); });
+    expect((await pending).contextCurrent).toBe(false);
+    expect(Object.keys(useAppStore.getState().activeOperationRuns)).toHaveLength(0);
+  });
+
+  it("requires review of a prior unknown outcome before another operation", async () => {
+    useAppStore.getState().addEventLogEntry({ id: "unknown", time: new Date().toISOString(), namespace: "demo", entity: "orders", entityType: "Queue", operation: "Move", status: "unknown", scope: { connectionId: "conn-1", mode: "dlq", destination: "dest" } });
+    const { result } = renderHook(() => useScript());
+    await expect(result.current.runOperation("move_messages", { connectionId: "conn-1" })).rejects.toThrow("unknown outcome");
+    act(() => { useAppStore.getState().reconcileOperation("unknown"); });
+    mockInvoke.mockResolvedValueOnce({ exitCode: 0, elapsedMs: 1 });
+    await act(async () => { expect((await result.current.runOperation("move_messages", { connectionId: "conn-1" })).exitCode).toBe(0); });
+    expect(useAppStore.getState().eventLog.find((entry) => entry.id === "unknown")?.status).toBe("unknown");
+  });
+
+  it("settles from the command response when the completion event is lost", async () => {
+    mockInvoke.mockResolvedValueOnce({ exitCode: 130, elapsedMs: 50 });
+    const { result } = renderHook(() => useScript());
+    let outcome!: OpResult;
+    await act(async () => { outcome = await result.current.runOperation("move_messages", {}); });
+    expect(outcome.exitCode).toBe(130);
+    expect(useAppStore.getState().isRunning).toBe(false);
+  });
+
+  it("settles from an authoritative event even if the command response never arrives", async () => {
+    mockInvoke.mockImplementationOnce(() => new Promise(() => {}));
+    const { result } = renderHook(() => useScript());
+    let pending!: Promise<OpResult>;
+    await act(async () => { pending = result.current.runOperation("move_messages", {}); });
+    await act(async () => { emit(`script-done:${RUN_ID}`, { exitCode: 0 }); await pending; });
+    expect(useAppStore.getState().isRunning).toBe(false);
+  });
+
+  it("reports an unobserved outcome without unlocking another destructive operation", async () => {
+    vi.useFakeTimers();
+    mockInvoke.mockImplementationOnce(() => new Promise(() => {}));
+    const { result } = renderHook(() => useScript());
+    let pending!: Promise<OpResult>;
+    await act(async () => { pending = result.current.runOperation("move_messages", {}); });
+    await act(async () => { vi.advanceTimersByTime(OPERATION_INACTIVITY_MS + 1); });
+    expect(useAppStore.getState().operationPhase).toBe("unknown");
+    expect(useAppStore.getState().isRunning).toBe(true);
+    await expect(result.current.runOperation("empty_messages", {})).rejects.toThrow("unknown outcome");
+    await act(async () => { emit(`script-done:${RUN_ID}`, { exitCode: 130 }); await pending; });
+  });
+
+  it("keeps a healthy transfer running beyond the old 30-minute limit", async () => {
+    vi.useFakeTimers();
+    mockInvoke.mockImplementationOnce(() => new Promise(() => {}));
+    const { result } = renderHook(() => useScript());
+    let pending!: Promise<OpResult>;
+    await act(async () => { pending = result.current.runOperation("move_messages", {}); });
+    for (let minute = 0; minute < 35; minute++) await act(async () => {
+      vi.advanceTimersByTime(60_000);
+      emit(`script-progress:${RUN_ID}`, { heartbeat: true, text: "", elapsedMs: minute * 60_000 });
+    });
+    expect(useAppStore.getState().operationPhase).toBe("running");
+    expect(useAppStore.getState().operationError).toBeNull();
+    await act(async () => { emit(`script-done:${RUN_ID}`, { exitCode: 0 }); await pending; });
+  });
+
+  it("shows cancellation rejection and keeps the operation locked", async () => {
+    mockInvoke.mockImplementationOnce(() => new Promise(() => {}));
+    const { result } = renderHook(() => useScript());
+    let pending!: Promise<OpResult>;
+    await act(async () => { pending = result.current.runOperation("move_messages", {}); });
+    mockInvoke.mockRejectedValueOnce(new Error("worker did not stop"));
+    await act(async () => { await result.current.stop(); });
+    expect(useAppStore.getState().operationError).toContain("Stop failed");
+    expect(useAppStore.getState().isRunning).toBe(true);
+    await act(async () => { emit(`script-done:${RUN_ID}`, { exitCode: 130 }); await pending; });
+  });
+
+  it("releases listeners when a later listener registration fails before dispatch", async () => {
+    const unlisten = vi.fn();
+    mockListen.mockResolvedValueOnce(unlisten).mockRejectedValueOnce(new Error("event bridge unavailable"));
+    const { result } = renderHook(() => useScript());
+    await act(async () => { await result.current.runOperation("move_messages", {}); });
+    expect(unlisten).toHaveBeenCalledOnce();
+    expect(mockInvoke).not.toHaveBeenCalled();
+  });
+
   it("resolves with exitCode 0 and no errorMessage on success", async () => {
     mockInvoke.mockResolvedValueOnce(undefined);
 

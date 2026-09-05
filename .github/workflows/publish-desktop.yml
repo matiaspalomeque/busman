@@ -9,6 +9,9 @@ jobs:
   verify:
     uses: ./.github/workflows/verify.yml
 
+  native-smoke:
+    uses: ./.github/workflows/native-smoke.yml
+
   changelog:
     runs-on: ubuntu-latest
     permissions:
@@ -42,7 +45,7 @@ jobs:
           echo "EOF_CHANGELOG" >> "$GITHUB_OUTPUT"
 
   publish-tauri:
-    needs: [verify, changelog]
+    needs: [verify, changelog, native-smoke]
     strategy:
       fail-fast: false
       matrix:
@@ -102,6 +105,22 @@ jobs:
       - name: Install frontend dependencies
         run: bun install --frozen-lockfile
 
+      - name: Configure Apple signing and notarization
+        if: runner.os == 'macOS' && vars.MACOS_SIGNING_ENABLED == 'true'
+        shell: bash
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          for name in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
+            test -n "${!name}" || { echo "Required signing secret $name is missing"; exit 1; }
+            printf '%s=%s\n' "$name" "${!name}" >> "$GITHUB_ENV"
+          done
+
       - name: Build and publish release
         uses: tauri-apps/tauri-action@v0
         env:
@@ -114,12 +133,20 @@ jobs:
           tagName: ${{ github.ref_name }}
           releaseName: Busman ${{ github.ref_name }}
           releaseBody: "${{ needs.changelog.outputs.body }}"
-          releaseDraft: false
+          releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}
           tauriScript: bun run tauri
           includeUpdaterJson: true
           updaterJsonPreferNsis: true
+
+      - name: Verify macOS signature and notarization ticket
+        if: runner.os == 'macOS' && vars.MACOS_SIGNING_ENABLED == 'true'
+        run: |
+          APP_PATH="src-tauri/target/aarch64-apple-darwin/release/bundle/macos/Busman.app"
+          codesign --verify --deep --strict --verbose=2 "$APP_PATH"
+          xcrun stapler validate "$APP_PATH"
+          spctl --assess --type execute --verbose=2 "$APP_PATH"
 
       - name: Create portable Windows executable
         if: matrix.platform == 'windows-latest'
@@ -178,6 +205,12 @@ jobs:
           jq --arg sig "$SIGNATURE" --arg url "$PORTABLE_URL" \
             '.platforms["windows-x86_64-portable"] = { "signature": $sig, "url": $url }' \
             latest.json > latest.json.tmp && mv latest.json.tmp latest.json
+
+      - name: Publish the verified release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: gh release edit "$RELEASE_TAG" --draft=false --repo "$GITHUB_REPOSITORY"
 
       - name: Push latest.json to update-channel branch
         run: |

@@ -1,3 +1,4 @@
+import { useShallow } from "zustand/react/shallow";
 import { useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useAppStore, selectActiveConnection } from "../../store/appStore";
@@ -7,7 +8,7 @@ import { extractNamespace } from "../../utils/connection";
 import { exitCodeToStatus } from "../../utils/exitCode";
 import { incrementSequenceNumber } from "../../utils/sequenceNumber";
 import { PeekResultSchema, safeInvoke } from "../../schemas/ipc";
-import type { ExplorerSelection, QueueMode } from "../../types";
+import type { ExplorerSelection } from "../../types";
 import {
   buildEmptyMessagesParams,
   buildReplayParams,
@@ -35,6 +36,8 @@ export function Toolbar() {
   const conn = useAppStore(selectActiveConnection);
   const {
     explorerSelection,
+    peekMode,
+    setPeekMode,
     peekMessages,
     lastPeekNormalMaxSeqNum,
     lastPeekDlqMaxSeqNum,
@@ -55,11 +58,34 @@ export function Toolbar() {
     addEventLogEntry,
     updateEventLogEntry,
     setLastBrowseError,
-  } = useAppStore();
+  } = useAppStore(useShallow((state) => ({
+    explorerSelection: state.explorerSelection,
+    peekMode: state.peekMode,
+    setPeekMode: state.setPeekMode,
+    peekMessages: state.peekMessages,
+    lastPeekNormalMaxSeqNum: state.lastPeekNormalMaxSeqNum,
+    lastPeekDlqMaxSeqNum: state.lastPeekDlqMaxSeqNum,
+    isRunning: state.isRunning,
+    isSendModalOpen: state.isSendModalOpen,
+    setIsSendModalOpen: state.setIsSendModalOpen,
+    setIsMoveModalOpen: state.setIsMoveModalOpen,
+    setIsSettingsModalOpen: state.setIsSettingsModalOpen,
+    setIsSubscriptionRulesModalOpen: state.setIsSubscriptionRulesModalOpen,
+    isInsightsPanelOpen: state.isInsightsPanelOpen,
+    setIsInsightsPanelOpen: state.setIsInsightsPanelOpen,
+    clearPeekResults: state.clearPeekResults,
+    setPeekResults: state.setPeekResults,
+    appendPeekResults: state.appendPeekResults,
+    setSelectedMessage: state.setSelectedMessage,
+    clearGridFilters: state.clearGridFilters,
+    setGridPage: state.setGridPage,
+    addEventLogEntry: state.addEventLogEntry,
+    updateEventLogEntry: state.updateEventLogEntry,
+    setLastBrowseError: state.setLastBrowseError,
+  })));
   const { runOperation } = useScript();
-  const atomicOperationCount = useAppStore((state) => Object.keys(state.pendingMessageOperations).length);
+  const atomicOperationCount = useAppStore((state) => Object.values(state.activeOperationRuns).filter((run) => run.scope === "atomic").length);
 
-  const [peekMode, setPeekMode] = useState<QueueMode>("dlq");
   const [peekCount, setPeekCount] = useState(100);
   const [browsing, setBrowsing] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -93,10 +119,11 @@ export function Toolbar() {
     const runId = crypto.randomUUID();
     const namespace = extractNamespace(conn.connectionString);
     const requestConnId = conn.id;
+    const requestGeneration = useAppStore.getState().connectionGeneration;
     const requestSelectionKey = selectionKey(explorerSelection);
     const isCurrentRequest = () => {
       const state = useAppStore.getState();
-      return state.activeConnectionId === requestConnId && selectionKey(state.explorerSelection) === requestSelectionKey;
+      return state.connectionGeneration === requestGeneration && state.activeConnectionId === requestConnId && selectionKey(state.explorerSelection) === requestSelectionKey;
     };
 
     // argv format must match the Go worker's peekMessages parser.
@@ -162,10 +189,11 @@ export function Toolbar() {
     const runId = crypto.randomUUID();
     const namespace = extractNamespace(conn.connectionString);
     const requestConnId = conn.id;
+    const requestGeneration = useAppStore.getState().connectionGeneration;
     const requestSelectionKey = selectionKey(explorerSelection);
     const isCurrentRequest = () => {
       const state = useAppStore.getState();
-      return state.activeConnectionId === requestConnId && selectionKey(state.explorerSelection) === requestSelectionKey;
+      return state.connectionGeneration === requestGeneration && state.activeConnectionId === requestConnId && selectionKey(state.explorerSelection) === requestSelectionKey;
     };
 
     addEventLogEntry({
@@ -287,8 +315,12 @@ export function Toolbar() {
 
     const params = buildEmptyMessagesParams(explorerSelection, peekMode, conn.id);
     if (!params) return;
-    const { exitCode, errorMessage } = await runOperation("empty_messages", params, { runId });
-    updateEventLogEntry(runId, exitCodeToStatus(exitCode), errorMessage);
+    try {
+      const { exitCode, errorMessage } = await runOperation("empty_messages", params, { runId });
+      updateEventLogEntry(runId, exitCodeToStatus(exitCode), errorMessage);
+    } catch (error) {
+      updateEventLogEntry(runId, "error", String(error));
+    }
   };
 
   // ── Replay (DLQ → main) ────────────────────────────────────────────────────
@@ -311,8 +343,12 @@ export function Toolbar() {
 
     const params = buildReplayParams(explorerSelection, conn.id);
     if (!params) return;
-    const { exitCode, errorMessage } = await runOperation("move_messages", params, { runId });
-    updateEventLogEntry(runId, exitCodeToStatus(exitCode), errorMessage);
+    try {
+      const { exitCode, errorMessage } = await runOperation("move_messages", params, { runId });
+      updateEventLogEntry(runId, exitCodeToStatus(exitCode), errorMessage);
+    } catch (error) {
+      updateEventLogEntry(runId, "error", String(error));
+    }
   };
 
   // ── Republish subscription DLQ → topic ────────────────────────────────────
@@ -335,8 +371,12 @@ export function Toolbar() {
 
     const params = buildRepublishSubscriptionDlqParams(explorerSelection, conn.id);
     if (!params) return;
-    const { exitCode, errorMessage } = await runOperation("republish_subscription_dlq", params, { runId });
-    updateEventLogEntry(runId, exitCodeToStatus(exitCode), errorMessage);
+    try {
+      const { exitCode, errorMessage } = await runOperation("republish_subscription_dlq", params, { runId });
+      updateEventLogEntry(runId, exitCodeToStatus(exitCode), errorMessage);
+    } catch (error) {
+      updateEventLogEntry(runId, "error", String(error));
+    }
   };
 
   const nextNormalSequenceNumber =
@@ -344,7 +384,8 @@ export function Toolbar() {
   const nextDlqSequenceNumber =
     lastPeekDlqMaxSeqNum === null ? null : incrementSequenceNumber(lastPeekDlqMaxSeqNum);
 
-  const loadMoreDisabled =
+  const messageBudgetReached = useAppStore((state) => state.messageBudgetReached);
+  const loadMoreDisabled = messageBudgetReached ||
     !hasSelection ||
     busy ||
     (peekMode === "normal"

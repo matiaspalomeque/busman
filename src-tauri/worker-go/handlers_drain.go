@@ -78,7 +78,7 @@ func handleEmptyMessages(requestCtx context.Context, raw json.RawMessage) (any, 
 
 	grandTotal := 0
 
-	runOne := func(receiver destructiveMessageReceiver, queueType string, settlementConcurrency int) (int, error) {
+	runOne := func(receiver destructiveMessageReceiver, queueType string, sourceMode string, settlementConcurrency int) (int, error) {
 		totalDeleted := 0
 		stageStart := time.Now()
 		lastProgressEmitAt := time.Time{}
@@ -110,6 +110,7 @@ func handleEmptyMessages(requestCtx context.Context, raw json.RawMessage) (any, 
 				break
 			}
 
+			recordOperation(requestCtx, sourceMode, 0, 0, 0, len(messages))
 			completed, err := completeReceivedMessages(
 				requestCtx,
 				receiver,
@@ -118,6 +119,7 @@ func handleEmptyMessages(requestCtx context.Context, raw json.RawMessage) (any, 
 				maxWaitMs,
 				settlementConcurrency,
 			)
+			recordOperation(requestCtx, sourceMode, 0, completed, 0, -completed)
 			totalDeleted += completed
 			if err != nil {
 				return totalDeleted, err
@@ -154,6 +156,10 @@ func handleEmptyMessages(requestCtx context.Context, raw json.RawMessage) (any, 
 		return client.NewReceiverForQueue(p.QueueName, opts)
 	}
 	runSource := func(subQueue azservicebus.SubQueue, label string) (int, error) {
+		sourceMode := "normal"
+		if subQueue != 0 {
+			sourceMode = "dlq"
+		}
 		if requiresSession {
 			return consumeAvailableSessions(
 				requestCtx,
@@ -165,7 +171,7 @@ func handleEmptyMessages(requestCtx context.Context, raw json.RawMessage) (any, 
 				},
 				func(receiver managedSessionReceiver, sessionLabel string) (int, error) {
 					// Session messages are settled in receive order.
-					return runOne(receiver, sessionLabel, 1)
+					return runOne(receiver, sessionLabel, sourceMode, 1)
 				},
 			)
 		}
@@ -179,7 +185,7 @@ func handleEmptyMessages(requestCtx context.Context, raw json.RawMessage) (any, 
 			return 0, err
 		}
 		defer closeWithTimeout(receiver)
-		return runOne(receiver, label, completeConcurrency)
+		return runOne(receiver, label, sourceMode, completeConcurrency)
 	}
 
 	entityKind := "queue"

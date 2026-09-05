@@ -71,6 +71,7 @@ type fakeSingleMessageActionReceiver struct {
 
 	receiveSteps     []fakeSingleReceiveStep
 	receiveCalls     int
+	receiveCounts    []int
 	events           []string
 	abandoned        []int64
 	completed        []int64
@@ -90,10 +91,11 @@ func messageSequence(msg *azservicebus.ReceivedMessage) int64 {
 	return *msg.SequenceNumber
 }
 
-func (f *fakeSingleMessageActionReceiver) ReceiveMessages(ctx context.Context, _ int, _ *azservicebus.ReceiveMessagesOptions) ([]*azservicebus.ReceivedMessage, error) {
+func (f *fakeSingleMessageActionReceiver) ReceiveMessages(ctx context.Context, count int, _ *azservicebus.ReceiveMessagesOptions) ([]*azservicebus.ReceivedMessage, error) {
 	f.mu.Lock()
 	call := f.receiveCalls
 	f.receiveCalls++
+	f.receiveCounts = append(f.receiveCounts, count)
 	f.events = append(f.events, fmt.Sprintf("receive:%d", call+1))
 	if call >= len(f.receiveSteps) {
 		f.mu.Unlock()
@@ -2454,4 +2456,34 @@ func TestCompleteReceivedMessagesPreservesOrderWhenSequential(t *testing.T) {
 
 func strPtr(value string) *string {
 	return &value
+}
+
+func TestKnownSingleMessageScanLeavesNoUnusedCreditsDuringAction(t *testing.T) {
+	// Service Bus may return fewer messages than the requested credit. Extra
+	// credit remains on the link and can capture unrelated arrivals during send
+	// and cleanup, even though the application already found its target.
+	receiver := &fakeSingleMessageActionReceiver{receiveSteps: []fakeSingleReceiveStep{
+		{messages: peekTestMessages("active", 1)},
+		{messages: peekTestMessages("active", 2)},
+	}}
+	result, err := scanActiveSingleMessage(context.Background(), receiver, receiver, nil, 2,
+		activeSingleMessageScanConfig{ScanBudget: 50, BatchSize: 50, MaxWaitMs: 1000, CleanupConcurrency: 1, TargetKnown: true},
+		func(ctx context.Context, target *azservicebus.ReceivedMessage) error {
+			for _, count := range receiver.receiveCounts {
+				if count != 1 {
+					return fmt.Errorf("%d unused receive credits can lock unrelated messages", count-1)
+				}
+			}
+			return receiver.CompleteMessage(ctx, target, nil)
+		})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.TargetHandled {
+		t.Fatal("target was not handled")
+	}
+	_, abandoned, completed, _ := receiver.snapshot()
+	if fmt.Sprint(abandoned) != "[1]" || fmt.Sprint(completed) != "[2]" {
+		t.Fatalf("unexpected settlement: abandoned=%v completed=%v", abandoned, completed)
+	}
 }

@@ -21,11 +21,7 @@ export function formatTime(iso: string | null | undefined): string {
   }
 }
 
-export function bodyString(body: unknown): string {
-  if (body === null || body === undefined) return "";
-  if (typeof body === "string") return body;
-  return JSON.stringify(body, null, 2);
-}
+export { bodyString } from "../../utils/messageSearch";
 
 // ─── Column filter row ────────────────────────────────────────────────────────
 

@@ -91,7 +91,7 @@
       "browse": "Explorar",
       "loadMore": "Cargar Más",
       "send": "Enviar",
-      "receive": "Recibir",
+      "receive": "Vaciar / eliminar mensajes",
       "replay": "Reenviar DLQ",
       "republish": "Republicar",
       "stop": "Detener",
@@ -130,7 +130,21 @@
       "inProgress": "{{operation}} en progreso",
       "processed": "Procesados",
       "rate": "Tasa",
-      "elapsed": "Transcurrido"
+      "elapsed": "Transcurrido",
+      "stopRequested": "Deteniendo…",
+      "confirmedCounts": "Enviados confirmados: {{sent}} · Eliminados: {{settled}}",
+      "unconfirmedCounts": "Sin confirmar (hasta): {{sent}} envíos · {{settled}} eliminaciones. Verificá antes de reintentar; puede haber duplicados.",
+      "bySource": "Conteos por origen"
+    },
+    "replayFeedback": {
+      "returned": "Se reenvió correctamente, pero el procesamiento volvió a fallar.",
+      "sent": "Se reenvió correctamente. Aún no se conoce el resultado del procesamiento.",
+      "observed": "Se encontró nuevamente en la cola de mensajes fallidos el {{time}} (secuencia {{sequence}}). Revisa los detalles del error antes de volver a reenviarlo.",
+      "checkOnBrowse": "Busman comprueba si volvió al explorar o cargar más mensajes fallidos. No encontrarlo no confirma que se haya procesado correctamente.",
+      "returnedBadge": "Volvió a la cola de fallidos",
+      "sentBadge": "Reenviado",
+      "returnedCount_one": "{{count}} reenvío volvió a la cola de fallidos",
+      "returnedCount_other": "{{count}} reenvíos volvieron a la cola de fallidos"
     },
     "eventLog": {
       "title": "Registro de Eventos",
@@ -148,7 +162,19 @@
       "colStatus": "Estado",
       "colError": "Error",
       "previousPage": "Página anterior del registro",
-      "nextPage": "Página siguiente del registro"
+      "nextPage": "Página siguiente del registro",
+      "needsReview": "Revisar resultados desconocidos",
+      "statusUnknown": "Resultado desconocido",
+      "reconcile": "Verificá el origen y el destino antes de reintentar. Parte del trabajo puede haberse completado.",
+      "export": "Exportar historial",
+      "clear": "Limpiar registro",
+      "clearHelp": "Borrar el historial guardado cuando terminen las operaciones en curso y se revisen los resultados desconocidos.",
+      "saveError": "No se pudo guardar el historial",
+      "result": "Ver resultado",
+      "reviewed": "Verifiqué el servicio",
+      "reviewedHelp": "Solo después de verificar el origen y el destino: reconocer la incertidumbre y permitir nuevas operaciones.",
+      "reviewedAt": "Verificado {{time}}",
+      "lastObserved": "Última observación {{time}}; totales finales desconocidos"
     },
     "sidebar": {
       "namespace": "Namespace",
@@ -181,7 +207,10 @@
       "autoRefreshEnabled": "Auto-actualización habilitada",
       "autoRefreshDisabled": "Auto-actualización deshabilitada",
       "autoRefreshInterval": "Intervalo de actualización",
-      "resizeSidebar": "Redimensionar barra lateral"
+      "resizeSidebar": "Redimensionar barra lateral",
+      "countStale": "Los conteos pueden estar desactualizados. Falló la actualización.",
+      "countUpdated": "Conteos actualizados {{time}}",
+      "actions": "Acciones para {{name}}"
     },
     "entityManagement": {
       "createEntity": "Crear Entidad",
@@ -193,7 +222,7 @@
       "maxSizeMb": "Tamaño Máximo (MB)",
       "defaultTtl": "TTL de Mensaje Predeterminado",
       "ttlPlaceholder": "P14D (14 días)",
-      "lockDuration": "Duración del Bloqueo",
+      "lockDuration": "Duraci\u00f3n del Bloqueo",
       "lockDurationPlaceholder": "PT1M (1 minuto)",
       "enablePartitioning": "Habilitar Particionamiento",
       "requiresSession": "Requiere Sesión",
@@ -235,9 +264,23 @@
       "body": "Cuerpo",
       "bodyEmpty": "(vacío)",
       "resend": "Reenviar este mensaje",
+      "resending": "Reenviando…",
+      "resendFailed": "No se pudo reenviar el mensaje. Consulta el registro de eventos.",
       "resizePanel": "Redimensionar panel de detalle del mensaje",
       "typeQueue": "Cola",
-      "typeSubscription": "Suscripción"
+      "typeSubscription": "Suscripci\u00f3n",
+      "properties": "Propiedades",
+      "failure": "Error",
+      "noFailure": "Este mensaje no tiene detalles de error",
+      "raw": "Original",
+      "formatted": "Formateado",
+      "copyBody": "Copiar",
+      "copied": "Copiado",
+      "copyFailed": "Error al copiar",
+      "expand": "Expandir",
+      "findBody": "Buscar en el cuerpo",
+      "findNext": "Siguiente",
+      "matches": "{{count}} coincidencias"
     },
     "entityDetails": {
       "configuration": "Configuraci\u00f3n",
@@ -350,6 +393,7 @@
       "filteredFrom": "(filtrado de {{total}})",
       "sortTitle": "Clic para ordenar",
       "filterTitle": "Clic para filtrar",
+      "stopMessageOperations": "Detener operaciones de mensajes",
       "messageOperationsRunning": "{{count}} operación de mensaje en curso",
       "messageOperationsRunning_other": "{{count}} operaciones de mensaje en curso",
       "pendingDelete": "Eliminando…",
@@ -360,7 +404,10 @@
       "firstPage": "Primera página",
       "previousPage": "Página anterior",
       "nextPage": "Página siguiente",
-      "lastPage": "Última página"
+      "lastPage": "Última página",
+      "loadedBudget": "Filtrando {{count}} / {{max}} mensajes cargados · {{size}} / {{bytes}} MiB de datos",
+      "clearLoaded": "Limpiar resultados cargados",
+      "budgetReached": "Se alcanzó el límite de datos cargados. No se conservaron algunos resultados. Exportá o limpiá los resultados antes de explorar otra vez."
     },
     "sendModal": {
       "title": "Enviar Mensaje",
@@ -452,7 +499,9 @@
       "warning": "Esta operación consume y elimina todos los mensajes de la entidad de origen. No se puede deshacer.",
       "move": "Mover",
       "close": "Cerrar",
-      "errorSameQueue": "Origen y destino deben ser diferentes."
+      "errorSameQueue": "Origen y destino deben ser diferentes.",
+      "contextChanged": "La conexión cambió. Cerrá este diálogo y volvé a abrir Mover.",
+      "scopeSummary": "Mover todos los mensajes disponibles de {{mode}}: {{source}} → {{destination}}. La cantidad de exploración y los filtros locales no limitan esta operación."
     },
     "connectionsModal": {
       "title": "Administrar Conexiones",

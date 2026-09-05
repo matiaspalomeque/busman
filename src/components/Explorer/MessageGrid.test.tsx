@@ -68,6 +68,7 @@ describe("MessageGrid", () => {
       operation: "ReplayMessage",
       startedAt: "2026-01-01T00:00:00.000Z",
     });
+    store.startOperationRun("run-1", "atomic");
 
     render(<MessageGrid />);
 
@@ -100,7 +101,8 @@ describe("MessageGrid", () => {
       status: "running",
     });
     store.setRunning(true, "bulk-run-1", "bulk");
-    store.setProgress({ text: "12 | Avg Rate: 4", elapsedMs: 3_000 });
+    store.setProgress({ text: "Localized progress without numeric parsing", elapsedMs: 3_000,
+      counts: { sent: 12, settled: 12, sendUnconfirmed: 0, settlementUnconfirmed: 0, sources: {} } });
 
     render(<MessageGrid />);
 

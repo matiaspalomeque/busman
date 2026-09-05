@@ -91,7 +91,7 @@
       "browse": "Browse",
       "loadMore": "Load More",
       "send": "Send",
-      "receive": "Receive",
+      "receive": "Drain / delete messages",
       "replay": "Replay",
       "republish": "Republish",
       "stop": "Stop",
@@ -130,7 +130,21 @@
       "inProgress": "{{operation}} in progress",
       "processed": "Processed",
       "rate": "Rate",
-      "elapsed": "Elapsed"
+      "elapsed": "Elapsed",
+      "stopRequested": "Stopping…",
+      "confirmedCounts": "Confirmed sent: {{sent}} · Removed: {{settled}}",
+      "unconfirmedCounts": "Unconfirmed (up to): {{sent}} sends · {{settled}} removals. Reconcile before retrying; duplicates are possible.",
+      "bySource": "Counts by source"
+    },
+    "replayFeedback": {
+      "returned": "Resent successfully, but processing failed again.",
+      "sent": "Resent successfully. Processing outcome is not yet known.",
+      "observed": "Found back in the dead-letter queue on {{time}} (sequence {{sequence}}). Check the failure details before resending again.",
+      "checkOnBrowse": "Busman checks for a return when you browse or load more dead-letter messages. Not finding a return does not confirm successful processing.",
+      "returnedBadge": "Returned to DLQ",
+      "sentBadge": "Resent",
+      "returnedCount_one": "{{count}} resend returned to DLQ",
+      "returnedCount_other": "{{count}} resends returned to DLQ"
     },
     "eventLog": {
       "title": "Event Log",
@@ -148,7 +162,19 @@
       "colStatus": "Status",
       "colError": "Error",
       "previousPage": "Previous event log page",
-      "nextPage": "Next event log page"
+      "nextPage": "Next event log page",
+      "needsReview": "Review unknown outcomes",
+      "statusUnknown": "Outcome unknown",
+      "reconcile": "Verify the source and destination before retrying. Some work may have completed.",
+      "export": "Export history",
+      "clear": "Clear log",
+      "clearHelp": "Clear saved history after running operations finish and unknown outcomes are reviewed.",
+      "saveError": "History could not be saved",
+      "result": "View result",
+      "reviewed": "I checked the broker",
+      "reviewedHelp": "Only after checking the source and destination: acknowledge the uncertainty and allow new operations.",
+      "reviewedAt": "Reviewed {{time}}",
+      "lastObserved": "Last observed {{time}}; final totals unknown"
     },
     "sidebar": {
       "namespace": "Namespace",
@@ -181,7 +207,10 @@
       "autoRefreshEnabled": "Auto-refresh enabled",
       "autoRefreshDisabled": "Auto-refresh disabled",
       "autoRefreshInterval": "Refresh interval",
-      "resizeSidebar": "Resize sidebar"
+      "resizeSidebar": "Resize sidebar",
+      "countStale": "Counts may be stale. Refresh failed.",
+      "countUpdated": "Counts updated {{time}}",
+      "actions": "Actions for {{name}}"
     },
     "entityManagement": {
       "createEntity": "Create Entity",
@@ -235,9 +264,23 @@
       "body": "Body",
       "bodyEmpty": "(empty)",
       "resend": "Resend this message",
+      "resending": "Resending…",
+      "resendFailed": "Could not resend the message. See Event Log for details.",
       "resizePanel": "Resize message details panel",
       "typeQueue": "Queue",
-      "typeSubscription": "Subscription"
+      "typeSubscription": "Subscription",
+      "properties": "Properties",
+      "failure": "Failure",
+      "noFailure": "No failure details on this message",
+      "raw": "Raw",
+      "formatted": "Formatted",
+      "copyBody": "Copy",
+      "copied": "Copied",
+      "copyFailed": "Copy failed",
+      "expand": "Expand",
+      "findBody": "Find in body",
+      "findNext": "Next",
+      "matches": "{{count}} matches"
     },
     "entityDetails": {
       "configuration": "Configuration",
@@ -350,6 +393,7 @@
       "filteredFrom": "(filtered from {{total}})",
       "sortTitle": "Click to sort",
       "filterTitle": "Click to filter",
+      "stopMessageOperations": "Stop message operations",
       "messageOperationsRunning": "{{count}} message operation running",
       "messageOperationsRunning_other": "{{count}} message operations running",
       "pendingDelete": "Deleting…",
@@ -360,7 +404,10 @@
       "firstPage": "First page",
       "previousPage": "Previous page",
       "nextPage": "Next page",
-      "lastPage": "Last page"
+      "lastPage": "Last page",
+      "loadedBudget": "Filtering {{count}} / {{max}} loaded messages · {{size}} / {{bytes}} MiB payload",
+      "clearLoaded": "Clear loaded results",
+      "budgetReached": "The loaded-data limit was reached. Some peek results were not retained. Export or clear these results before browsing again."
     },
     "sendModal": {
       "title": "Send Message",
@@ -452,7 +499,9 @@
       "warning": "This operation consumes and removes all messages from the source entity. It cannot be undone.",
       "move": "Move",
       "close": "Close",
-      "errorSameQueue": "Source and destination must be different."
+      "errorSameQueue": "Source and destination must be different.",
+      "contextChanged": "The connection changed. Close this dialog and open Move again.",
+      "scopeSummary": "Move all available {{mode}} messages: {{source}} → {{destination}}. Browse count and loaded-message filters do not limit this operation."
     },
     "connectionsModal": {
       "title": "Manage Connections",

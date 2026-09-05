@@ -1,0 +1,60 @@
+name: Azure integration (isolated namespace)
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_test_resources:
+        description: Create and delete temporary queues/topics in the dedicated test namespace
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: azure-integration
+  cancel-in-progress: false
+
+jobs:
+  integration:
+    if: inputs.confirm_test_resources
+    environment: azure-integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.25.13"
+          cache-dependency-path: src-tauri/worker-go/go.sum
+      - name: Run isolated broker scenarios
+        shell: bash
+        working-directory: src-tauri/worker-go
+        env:
+          BUSMAN_AZURE_INTEGRATION_CONNECTION_STRING: ${{ secrets.BUSMAN_AZURE_INTEGRATION_CONNECTION_STRING }}
+          BUSMAN_AZURE_INTEGRATION_EXPECTED_NAMESPACE: ${{ vars.BUSMAN_AZURE_INTEGRATION_EXPECTED_NAMESPACE }}
+        run: |
+          test -n "$BUSMAN_AZURE_INTEGRATION_CONNECTION_STRING" || { echo 'Test namespace connection secret is missing'; exit 1; }
+          test -n "$BUSMAN_AZURE_INTEGRATION_EXPECTED_NAMESPACE" || { echo 'Expected test namespace is missing'; exit 1; }
+          go test -race -count=1 -timeout=20m -run '^TestAzureServiceBusIntegration$' -json ./... | tee "$RUNNER_TEMP/azure-integration.jsonl"
+      - name: Report passed, failed and skipped scenarios
+        if: always()
+        shell: python
+        run: |
+          import json, os, pathlib
+          path = pathlib.Path(os.environ['RUNNER_TEMP']) / 'azure-integration.jsonl'
+          events = [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as summary:
+              summary.write('Commit: ' + os.environ['GITHUB_SHA'] + '\n\n')
+              for event in events:
+                  if event.get('Action') in ('pass', 'fail', 'skip') and event.get('Test'):
+                      summary.write('- ' + event['Action'].upper() + ': ' + event['Test'] + '\n')
+              if not events:
+                  summary.write('No broker test evidence was produced. Check environment setup.\n')
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: azure-integration-${{ github.sha }}
+          path: ${{ runner.temp }}/azure-integration.jsonl
+          retention-days: 14

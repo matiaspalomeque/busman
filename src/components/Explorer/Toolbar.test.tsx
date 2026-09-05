@@ -6,6 +6,8 @@ import { useAppStore } from "../../store/appStore";
 import type { PeekedMessage } from "../../types";
 import { Toolbar } from "./Toolbar";
 
+const mocks = vi.hoisted(() => ({ runOperation: vi.fn() }));
+
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn(),
 }));
@@ -18,7 +20,7 @@ vi.mock("../../hooks/useConnections", () => ({
 
 vi.mock("../../hooks/useScript", () => ({
   useScript: () => ({
-    runOperation: vi.fn(),
+    runOperation: mocks.runOperation,
     stop: vi.fn(),
   }),
 }));
@@ -55,10 +57,23 @@ function peekResult(messages: PeekedMessage[]) {
 
 describe("Toolbar", () => {
   beforeEach(() => {
+    mocks.runOperation.mockReset();
     mockInvoke.mockReset();
     useAppStore.setState(useAppStore.getInitialState());
     useAppStore.getState().setConnections([CONN]);
     useAppStore.getState().setActiveConnectionId(CONN.id);
+  });
+
+  it.each(["Drain / delete messages", "Replay", "Republish"])("records an actionable rejected %s without leaving a running entry", async (action) => {
+    if (action === "Republish") useAppStore.getState().setExplorerSubscription("billing", "processor");
+    else useAppStore.getState().setExplorerQueue("orders");
+    mocks.runOperation.mockRejectedValueOnce(new Error("Check the earlier unknown outcome in Event Log"));
+    render(<Toolbar />);
+    fireEvent.click(screen.getByRole("button", { name: /More/ }));
+    fireEvent.click(screen.getByRole("menuitem", { name: action }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm" }));
+    await waitFor(() => expect(useAppStore.getState().eventLog[0]).toMatchObject({ status: "error", errorMessage: expect.stringContaining("unknown outcome") }));
+    expect(useAppStore.getState().isRunning).toBe(false);
   });
 
   it("hides Manage Rules unless a subscription is selected", () => {

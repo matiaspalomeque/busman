@@ -1,3 +1,4 @@
+import { useShallow } from "zustand/react/shallow";
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { useAppStore, selectActiveConnection, SUBSCRIPTION_KEY_SEP } from "../../store/appStore";
@@ -65,7 +66,28 @@ export function Sidebar() {
     changedEntities,
     entityCountHistory,
     sparklineEnabled,
-  } = useAppStore();
+  } = useAppStore(useShallow((state) => ({
+    explorerSelection: state.explorerSelection,
+    treeFilter: state.treeFilter,
+    setTreeFilter: state.setTreeFilter,
+    setExplorerQueue: state.setExplorerQueue,
+    setExplorerSubscription: state.setExplorerSubscription,
+    sidebarCollapsed: state.sidebarCollapsed,
+    toggleSidebarSection: state.toggleSidebarSection,
+    queueCounts: state.queueCounts,
+    subscriptionCounts: state.subscriptionCounts,
+    sidebarWidth: state.sidebarWidth,
+    setSidebarWidth: state.setSidebarWidth,
+    pinnedEntities: state.pinnedEntities,
+    togglePin: state.togglePin,
+    setIsCreateEntityModalOpen: state.setIsCreateEntityModalOpen,
+    setDeleteEntityTarget: state.setDeleteEntityTarget,
+    dlqThresholds: state.dlqThresholds,
+    setDlqThreshold: state.setDlqThreshold,
+    changedEntities: state.changedEntities,
+    entityCountHistory: state.entityCountHistory,
+    sparklineEnabled: state.sparklineEnabled,
+  })));
 
   const { widthRef, onPointerDown } = useResizable({
     initialWidth: sidebarWidth,

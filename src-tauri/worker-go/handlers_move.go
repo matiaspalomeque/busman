@@ -163,7 +163,7 @@ func handleMoveMessages(requestCtx context.Context, raw json.RawMessage) (any, e
 
 	grandTotal := 0
 
-	runOne := func(receiver destructiveMessageReceiver, queueType string, settlementConcurrency int) (int, error) {
+	runOne := func(receiver destructiveMessageReceiver, queueType string, sourceMode string, settlementConcurrency int) (int, error) {
 		totalMoved := 0
 		stageStart := time.Now()
 		lastProgressEmitAt := time.Time{}
@@ -201,9 +201,11 @@ func handleMoveMessages(requestCtx context.Context, raw json.RawMessage) (any, e
 				}
 				sendCtx, sendCancel := cancellableOperationContext(requestCtx, p.Env, defaultOperationTimeoutMs)
 				defer sendCancel()
+				recordOperation(requestCtx, sourceMode, 0, 0, len(sourceMessages), 0)
 				if err := sender.SendMessageBatch(sendCtx, outboundBatch, nil); err != nil {
 					return 0, fmt.Errorf("send message batch error: %w", err)
 				}
+				recordOperation(requestCtx, sourceMode, len(sourceMessages), 0, -len(sourceMessages), len(sourceMessages))
 				confirmed, err := completeReceivedMessages(
 					requestCtx,
 					receiver,
@@ -212,6 +214,7 @@ func handleMoveMessages(requestCtx context.Context, raw json.RawMessage) (any, e
 					defaultOperationTimeoutMs,
 					settlementConcurrency,
 				)
+				recordOperation(requestCtx, sourceMode, 0, confirmed, 0, -confirmed)
 				if err != nil {
 					failure := fmt.Errorf(
 						"destination accepted %d messages but source settlement failed; duplicate delivery is possible: %w",
@@ -270,6 +273,10 @@ func handleMoveMessages(requestCtx context.Context, raw json.RawMessage) (any, e
 		return client.NewReceiverForQueue(p.SourceQueue, opts)
 	}
 	runSource := func(subQueue azservicebus.SubQueue, label string) (int, error) {
+		sourceMode := "normal"
+		if subQueue != 0 {
+			sourceMode = "dlq"
+		}
 		if requiresSession {
 			return consumeAvailableSessions(
 				requestCtx,
@@ -281,7 +288,7 @@ func handleMoveMessages(requestCtx context.Context, raw json.RawMessage) (any, e
 				},
 				func(receiver managedSessionReceiver, sessionLabel string) (int, error) {
 					// Keep receive, send, and source settlement ordered within one session.
-					return runOne(receiver, sessionLabel, 1)
+					return runOne(receiver, sessionLabel, sourceMode, 1)
 				},
 			)
 		}
@@ -295,7 +302,7 @@ func handleMoveMessages(requestCtx context.Context, raw json.RawMessage) (any, e
 			return 0, err
 		}
 		defer closeWithTimeout(receiver)
-		return runOne(receiver, label, completeConcurrency)
+		return runOne(receiver, label, sourceMode, completeConcurrency)
 	}
 
 	entityKind := "queue"
