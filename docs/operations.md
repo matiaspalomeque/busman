@@ -9,8 +9,12 @@ Move captures the connection and source when its dialog opens, starts from the e
 1. The frontend registers listeners, records metadata, and locks conflicting operations before dispatch.
 2. Rust resolves the captured connection's credentials and dispatches through worker protocol v2.
 3. Go owns the cancellable run and emits a heartbeat every five seconds, including while waiting for a handler slot. Structured progress aggregates Normal and DLQ work.
-4. Stop requests cancellation. The interface stays locked until a terminal response or event arrives. A rejected stop is visible and does not pretend the run stopped.
+4. Stop ends intake and scheduling of new work. Requests already sent to the broker retain their normal acknowledgment timeout. If a transfer's destination accepts a batch, Busman finishes removing that batch from the source before stopping. The interface stays locked until a terminal response or event arrives. A rejected stop is visible and does not pretend the run stopped.
 5. The command response and completion event each carry terminal acknowledgment. Either can finish the frontend lifecycle. After 90 seconds without updates, the interface reports unknown observation and retains the lock. There is no absolute duration limit on healthy transfers. Single-message ownership and Stop controls remain available after navigation; the same message cannot be submitted twice while its first operation is pending.
+
+During Receive, Replay, Move, and Republish, the status tray shows confirmed totals. Pending acknowledgments do not produce temporary reconciliation warnings. Source breakdowns and any remaining unconfirmed work appear with the final result. Stop shows **Stopping…** until acknowledged, followed by **Stopped** or **Stopped · review needed**. Technical cancellation details can be expanded when needed.
+
+The tray and single-message Stop controls remain available in Insights. Bulk results remain visible until dismissed or replaced by a new bulk operation, including operations that finish immediately. Closing a result does not remove it from Event Log or mark an unknown outcome reviewed.
 
 Per-call broker timeouts and worker process/framing failures are separate from frontend observation. A worker transport failure or unconfirmed broker acknowledgment is an unknown outcome, not a confirmed failure with zero effects.
 
@@ -24,7 +28,7 @@ Per-call broker timeouts and worker process/framing failures are separate from f
 | Unconfirmed removals | Upper bound on the received batch whose removal was not confirmed |
 | Sources | Separate Normal/DLQ totals, summed for the whole run |
 
-These are not exactly-once guarantees. Destination acceptance can succeed before source completion fails. An unconfirmed batch can include messages that were never settled as well as messages whose acknowledgment was lost. A cancellation with unconfirmed work remains **Outcome unknown**. [Azure settlement behavior](https://learn.microsoft.com/en-us/azure/service-bus-messaging/message-transfers-locks-settlement) explains why completing work and receiving its acknowledgment are distinct.
+These are not exactly-once guarantees. Destination acceptance can succeed before source completion fails. Unconfirmed removals count only requests actually dispatched without a successful acknowledgment; queued removals skipped by Stop do not count as uncertain. A confirmed destination send whose source was not removed also needs reconciliation. A stop with unresolved work shows **Stopped · review needed** and retains an unknown outcome in the journal. A normal stop with all dispatched work acknowledged shows **Stopped**. [Azure settlement behavior](https://learn.microsoft.com/en-us/azure/service-bus-messaging/message-transfers-locks-settlement) explains why completing work and receiving its acknowledgment are distinct.
 
 The Event Log retains up to 500 metadata entries for 30 days in local application storage. It includes captured scope, progress checkpoints at most every five seconds, and terminal counts, excludes message bodies, credentials, raw request parameters, and free-form error text, and can be exported as JSON. A save failure is visible. Local history can be lost if application storage is cleared; export it when needed for an incident.
 

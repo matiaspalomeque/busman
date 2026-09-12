@@ -4,6 +4,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { journalMetadata } from "../../store/operationJournal";
 import { ReplayFeedback } from "./ReplayFeedback";
 import { OperationOutcomeSummary } from "./OperationOutcomeSummary";
+import { OperationErrorDetails } from "./OperationErrorDetails";
+import { operationWasStopped } from "../../utils/operationOutcome";
 import { useRef, useState } from "react";
 import { useDialogFocus } from "../../hooks/useDialogFocus";
 import { useEscapeKey } from "../../hooks/useEscapeKey";
@@ -19,6 +21,10 @@ function OperationDetails({ entry, onClose }: { entry: EventLogEntry; onClose: (
   useDialogFocus(dialog);
   useEscapeKey(onClose);
   const counts = entry.outcome?.counts ?? entry.checkpoint?.counts;
+  const mode = entry.scope?.mode;
+  const source = mode === "dlq" ? t("explorer.eventLog.sourceDlq")
+    : mode === "normal" ? t("explorer.eventLog.sourceActive")
+    : mode === "both" ? t("explorer.eventLog.sourceBoth") : mode;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={(event) => { if (event.target === event.currentTarget) onClose(); }}>
       <div ref={dialog} role="dialog" aria-modal="true" aria-labelledby="operation-details-title" className="w-full max-w-xl max-h-[90vh] overflow-auto rounded-lg border border-zinc-300 bg-white p-5 text-sm text-zinc-800 shadow-xl dark:border-zinc-600 dark:bg-zinc-900 dark:text-zinc-100">
@@ -27,22 +33,22 @@ function OperationDetails({ entry, onClose }: { entry: EventLogEntry; onClose: (
           <button type="button" onClick={onClose} className="rounded border border-zinc-300 px-3 py-1 dark:border-zinc-600">{t("explorer.sendModal.close")}</button>
         </div>
         <p className="break-words font-medium">{entry.namespace} · {entry.entity}</p>
-        <div className="my-3"><StatusBadge status={entry.status} replayed={!!entry.scope?.replaySource} returned={!!entry.replayReturn} /></div>
+        <div className="my-3"><StatusBadge status={entry.status} stopped={operationWasStopped(entry)} replayed={!!entry.scope?.replaySource} returned={!!entry.replayReturn} /></div>
         <ReplayFeedback entry={entry} />
-        {counts && <OperationOutcomeSummary counts={counts} />}
+        <OperationOutcomeSummary counts={counts} operation={entry.operation} isRunning={entry.status === "running"} needsReview={entry.status === "unknown"} />
         <p className="mt-3 text-xs text-zinc-500 dark:text-zinc-400">{entry.outcome?.finishedAt ? new Date(entry.outcome.finishedAt).toLocaleString() : t("explorer.eventLog.lastObserved", { time: entry.checkpoint?.at })}</p>
-        {entry.scope && <p className="mt-2 break-words">{entry.scope.mode} → {entry.scope.destination || "—"}</p>}
-        {entry.status === "unknown" && <p className="mt-3 text-amber-700 dark:text-amber-300">{t("explorer.eventLog.reconcile")}</p>}
-        {entry.errorMessage && <p className="mt-3 break-words text-red-600 dark:text-red-400">{entry.errorMessage}</p>}
+        {source && <p className="mt-2 break-words">{t("explorer.eventLog.source", { source })}</p>}
+        {entry.scope?.destination && <p className="mt-2 break-words">{t("explorer.eventLog.destination", { destination: entry.scope.destination })}</p>}
+        <OperationErrorDetails entry={entry} />
       </div>
     </div>
   );
 }
 
-function StatusBadge({ status, replayed = false, returned = false }: { status: EventLogEntry["status"]; replayed?: boolean; returned?: boolean }) {
+function StatusBadge({ status, stopped = false, replayed = false, returned = false }: { status: EventLogEntry["status"]; stopped?: boolean; replayed?: boolean; returned?: boolean }) {
   const { t } = useTranslation();
   const styles =
-    status === "success" && returned
+    status === "unknown" || (status === "success" && returned)
       ? "bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-300"
       : status === "success"
       ? "bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400"
@@ -57,7 +63,7 @@ function StatusBadge({ status, replayed = false, returned = false }: { status: E
       title={status}
       className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold ${styles}`}
     >
-      {status === "unknown" ? t("explorer.eventLog.statusUnknown") : status === "running"
+      {status === "unknown" ? t(stopped ? "explorer.eventLog.statusStoppedUnknown" : "explorer.eventLog.statusUnknown") : status === "running"
         ? t("explorer.eventLog.statusRunning")
         : status === "success"
           ? t(returned ? "explorer.replayFeedback.returnedBadge" : replayed ? "explorer.replayFeedback.sentBadge" : "explorer.eventLog.statusOk")
@@ -253,7 +259,10 @@ export function EventLog() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
-                {rows.map((entry) => (
+                {rows.map((entry) => {
+                  const reconcileMessage = t(entry.operation === "Receive" || entry.operation === "DeleteMessage"
+                    ? "explorer.eventLog.reconcileRemoval" : "explorer.eventLog.reconcile");
+                  return (
                   <tr
                     key={entry.id}
                     className="hover:bg-zinc-100 dark:hover:bg-zinc-800/60 transition-colors"
@@ -280,19 +289,20 @@ export function EventLog() {
                       {entry.operation === "Receive" ? t("explorer.toolbar.receive") : entry.operation}
                     </td>
                     <td className="px-3 py-1">
-                      <StatusBadge status={entry.status} replayed={!!entry.scope?.replaySource} returned={!!entry.replayReturn} />
+                      <StatusBadge status={entry.status} stopped={operationWasStopped(entry)} replayed={!!entry.scope?.replaySource} returned={!!entry.replayReturn} />
                       {entry.status === "unknown" && !entry.reconciledAt && <button onClick={() => reconcileOperation(entry.id)} title={t("explorer.eventLog.reviewedHelp")} className="block mt-1 text-azure-primary underline">{t("explorer.eventLog.reviewed")}</button>}
                       {entry.reconciledAt && <span className="block text-zinc-500">{t("explorer.eventLog.reviewedAt", { time: new Date(entry.reconciledAt).toLocaleString() })}</span>}
                     </td>
                     <td
                       className="px-3 py-1 text-red-500 dark:text-red-400 truncate"
-                      title={entry.errorMessage}
+                      title={operationWasStopped(entry) ? undefined : entry.errorMessage}
                     >
                       {(entry.outcome || entry.checkpoint || entry.scope?.replaySource) && <button type="button" aria-haspopup="dialog" onClick={() => setDetailsId(entry.id)} className="block text-azure-primary underline">{t("explorer.eventLog.result")}</button>}
-                      {entry.status === "unknown" ? <span title={t("explorer.eventLog.reconcile")}>{t("explorer.eventLog.reconcile")}</span> : entry.errorMessage ?? (entry.outcome ? null : <span className="text-zinc-300 dark:text-zinc-600">—</span>)}
+                      {entry.status === "unknown" ? <span className="text-amber-700 dark:text-amber-300" title={reconcileMessage}>{reconcileMessage}</span> : operationWasStopped(entry) ? null : entry.errorMessage ?? (entry.outcome ? null : <span className="text-zinc-300 dark:text-zinc-600">—</span>)}
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           )}

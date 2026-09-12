@@ -76,13 +76,59 @@ describe("EventLog", () => {
     const dialog = screen.getByRole("dialog", { name: "View result" });
     expect(dialog.contains(document.activeElement)).toBe(true);
     expect(within(dialog).getByText(/Confirmed sent: 5/)).toBeTruthy();
-    expect(within(dialog).getByText(/Unconfirmed.*0 sends.*1 removals/)).toBeTruthy();
+    expect(within(dialog).getByText(/Up to 1 removal could not be confirmed/)).toBeTruthy();
+    expect(within(dialog).getAllByText(/before retrying/)).toHaveLength(1);
     fireEvent.keyDown(document, { key: "Escape" });
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(document.activeElement).toBe(open);
     fireEvent.click(screen.getByRole("button", { name: "I checked the broker" }));
     expect(useAppStore.getState().eventLog[0]).toMatchObject({ status: "unknown", reconciledAt: expect.any(String) });
     expect(screen.queryByRole("button", { name: /Review unknown outcomes/ })).toBeNull();
+  });
+
+  it("retains the stopped reason in saved history without losing the review requirement", () => {
+    const outcome = OperationOutcomeSchema.parse({ ...fixture, errorCode: "cancelled" });
+    useAppStore.getState().addEventLogEntry({ id: outcome.runId, time: new Date().toISOString(), namespace: "demo",
+      entity: "orders", entityType: "Queue", operation: "Replay", status: "unknown", outcome });
+    useAppStore.setState({ eventLog: loadOperationJournal().entries });
+    render(<EventLog />);
+    fireEvent.click(screen.getByRole("button", { name: /Review unknown outcomes/ }));
+    expect(screen.getByText("Stopped · review needed")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "I checked the broker" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "View result" }));
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).getByText("Stopped · review needed")).toBeTruthy();
+    expect(within(dialog).getAllByText(/before retrying/)).toHaveLength(1);
+  });
+
+  it.each([
+    ["dlq", "Dead-letter queue"],
+    ["normal", "Active messages"],
+    ["both", "Active and dead-letter messages"],
+  ])("describes %s removals without suggesting a destination", (mode, source) => {
+    const outcome = OperationOutcomeSchema.parse({ ...fixture, status: "stopped", errorCode: "cancelled" });
+    useAppStore.getState().addEventLogEntry({ id: outcome.runId, time: new Date().toISOString(), namespace: "demo",
+      entity: "orders", entityType: "Queue", operation: "Receive", status: "stopped", outcome,
+      scope: { connectionId: "demo", mode, destination: "" } });
+    render(<EventLog />);
+    fireEvent.click(screen.getByRole("button", { name: /^Event Log/ }));
+    fireEvent.click(screen.getByRole("button", { name: "View result" }));
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).getByText(`Source: ${source}`)).toBeTruthy();
+    expect(within(dialog).queryByText(/Destination:|→/)).toBeNull();
+  });
+
+  it("identifies the actual destination for transfers", () => {
+    const outcome = OperationOutcomeSchema.parse(fixture);
+    useAppStore.getState().addEventLogEntry({ id: outcome.runId, time: new Date().toISOString(), namespace: "demo",
+      entity: "orders", entityType: "Queue", operation: "Move", status: "unknown", outcome,
+      scope: { connectionId: "demo", mode: "dlq", destination: "retry-orders" } });
+    render(<EventLog />);
+    fireEvent.click(screen.getByRole("button", { name: /^Event Log/ }));
+    fireEvent.click(screen.getByRole("button", { name: "View result" }));
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).getByText("Source: Dead-letter queue")).toBeTruthy();
+    expect(within(dialog).getByText("Destination: retry-orders")).toBeTruthy();
   });
 });
 

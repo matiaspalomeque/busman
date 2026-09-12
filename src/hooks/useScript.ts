@@ -87,7 +87,7 @@ export function useScript() {
         if (scope === "bulk" && (counts.success || !event.payload.heartbeat)) state.setProgress({
           text: event.payload.heartbeat ? (useAppStore.getState().progress?.text ?? "") : event.payload.text,
           elapsedMs: event.payload.elapsedMs,
-          counts: counts.success ? counts.data : undefined,
+          counts: counts.success ? counts.data : useAppStore.getState().progress?.counts,
         });
       }));
       unlisteners.push(await listen<ScriptDoneEvent>(`script-done:${runId}`, (event) => resolveDone(event.payload)));
@@ -118,6 +118,10 @@ export function useScript() {
       const selection = current.explorerSelection;
       const targetMatches = selection.kind === "queue" ? params.queueName === selection.queueName
         : selection.kind === "subscription" && params.topicName === selection.topicName && params.subscriptionName === selection.subscriptionName;
+      const affectedQueueSelected = selection.kind === "queue" &&
+        (params.sourceQueue === selection.queueName || params.destQueue === selection.queueName);
+      if (destructive && current.connectionGeneration === generation && current.activeConnectionId === params.connectionId &&
+        (targetMatches || affectedQueueSelected)) current.refreshEntityProperties();
       return {
         ...(scope === "atomic" && (current.connectionGeneration !== generation || ((params.queueName != null || params.topicName != null) && !targetMatches)) ? { contextCurrent: false } : {}),
         exitCode: result.exitCode,

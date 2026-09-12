@@ -11,6 +11,40 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/messaging/azservicebus/admin"
 )
 
+// Once the destination accepts a batch, settle its sources before honoring
+// manual Stop. Leaving accepted messages at the source would duplicate a replay.
+func sendAndCompleteMessages(
+	requestCtx context.Context,
+	receiver destructiveMessageReceiver,
+	messages []*azservicebus.ReceivedMessage,
+	env map[string]string,
+	maxWaitMs, concurrency int,
+	sourceMode string,
+	send func(context.Context) error,
+) (int, error) {
+	if err := requestCtx.Err(); err != nil {
+		return 0, err
+	}
+	workCtx := operationWorkContext(requestCtx)
+	sendCtx, cancel := cancellableOperationContext(workCtx, env, maxWaitMs)
+	if err := sendCtx.Err(); err != nil {
+		cancel()
+		return 0, err
+	}
+	recordOperation(requestCtx, sourceMode, 0, 0, len(messages), 0)
+	err := send(sendCtx)
+	cancel()
+	if err != nil {
+		return 0, fmt.Errorf("send message batch error: %w", err)
+	}
+	recordOperation(requestCtx, sourceMode, len(messages), 0, -len(messages), 0)
+	confirmed, err := completeReceivedMessages(workCtx, receiver, messages, env, maxWaitMs, concurrency, sourceMode)
+	if err != nil {
+		return confirmed, fmt.Errorf("destination accepted %d messages but source settlement failed; duplicate delivery is possible: %w", len(messages), err)
+	}
+	return confirmed, nil
+}
+
 // ─── Shared outbound transfer policy and batching ──────────────────────────
 
 func cloneApplicationProperties(props map[string]any) map[string]any {

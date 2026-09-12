@@ -1,4 +1,5 @@
-import { render, screen } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
+import "../../i18n";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useAppStore } from "../../store/appStore";
 import type { PeekedMessage } from "../../types";
@@ -108,5 +109,26 @@ describe("Explorer", () => {
     render(<Explorer />);
 
     expect(screen.getByText("SettingsModal")).toBeTruthy();
+  });
+
+  it("keeps operation controls visible while switching to insights", () => {
+    const store = useAppStore.getState();
+    store.setPeekResults([selectedMessageFixture]);
+    store.addEventLogEntry({ id: "replay", time: new Date().toISOString(), namespace: "demo", entity: "orders", entityType: "Queue", operation: "Replay", status: "running" });
+    store.setRunning(true, "replay", "bulk");
+    render(<Explorer />);
+    act(() => store.setIsInsightsPanelOpen(true));
+    expect(within(screen.getByRole("status")).getByRole("button", { name: "Stop" })).toBeTruthy();
+    act(() => store.setIsInsightsPanelOpen(false));
+    expect(screen.getByText("Replay in progress")).toBeTruthy();
+  });
+
+  it("keeps single-message Stop available when navigation clears the loaded messages", () => {
+    const store = useAppStore.getState();
+    store.startOperationRun("single", "atomic");
+    store.setExplorerQueue("other");
+    render(<Explorer />);
+    expect(screen.getByText("1 message operation running")).toBeTruthy();
+    expect(within(screen.getByRole("status")).getByRole("button", { name: "Stop message operations" })).toBeTruthy();
   });
 });

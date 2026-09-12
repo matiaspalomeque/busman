@@ -177,6 +177,17 @@ func cancellableOperationContext(parent context.Context, env map[string]string, 
 	return context.WithTimeout(parent, time.Duration(timeoutMsFromEnv(env, "OPERATION_TIMEOUT_IN_MS", defMs))*time.Millisecond)
 }
 
+type inFlightContextKey struct{}
+
+// Manual Stop cancels intake, while work already dispatched retains its normal
+// timeout. Other cancellation (including a lost message lock) still aborts work.
+func operationWorkContext(requestCtx context.Context) context.Context {
+	if workCtx, ok := requestCtx.Value(inFlightContextKey{}).(context.Context); ok {
+		return workCtx
+	}
+	return requestCtx
+}
+
 func closeWithTimeout(resource interface{ Close(context.Context) error }) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -778,7 +789,7 @@ func consumeAvailableSessions(
 
 		sessionID := receiver.SessionID()
 		renewer := startSessionLockRenewer(
-			requestCtx,
+			operationWorkContext(requestCtx),
 			receiver,
 			maxWaitMs,
 			sessionLockRenewInterval(time.Now(), receiver.LockedUntil()),
@@ -812,50 +823,60 @@ func completeReceivedMessages(
 	env map[string]string,
 	maxWaitMs int,
 	concurrency int,
+	sourceMode string,
 ) (int, error) {
-	if concurrency <= 1 {
-		completed := 0
-		for _, msg := range messages {
-			completeCtx, completeCancel := cancellableOperationContext(requestCtx, env, maxWaitMs)
-			err := receiver.CompleteMessage(completeCtx, msg, nil)
-			completeCancel()
-			if err != nil {
-				return completed, fmt.Errorf("complete message error: %w", err)
-			}
-			completed++
-		}
-		return completed, nil
-	}
-
-	sem := make(chan struct{}, concurrency)
+	concurrency = max(1, min(concurrency, len(messages)))
+	scheduleCtx, stopScheduling := context.WithCancel(requestCtx)
+	defer stopScheduling()
+	jobs := make(chan *azservicebus.ReceivedMessage)
 	var wg sync.WaitGroup
-	errCh := make(chan error, len(messages))
-	completedCh := make(chan struct{}, len(messages))
-	for _, msg := range messages {
-		wg.Add(1)
-		go func(m *azservicebus.ReceivedMessage) {
-			defer wg.Done()
-			sem <- struct{}{}
-			defer func() { <-sem }()
-			completeCtx, completeCancel := cancellableOperationContext(requestCtx, env, maxWaitMs)
-			defer completeCancel()
-			if err := receiver.CompleteMessage(completeCtx, m, nil); err != nil {
-				errCh <- fmt.Errorf("complete message error: %w", err)
-				return
-			}
-			completedCh <- struct{}{}
-		}(msg)
-	}
-	wg.Wait()
-	close(errCh)
-	close(completedCh)
-
+	var mu sync.Mutex
 	completed := 0
-	for range completedCh {
-		completed++
+	var firstErr error
+	for i := 0; i < concurrency; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for msg := range jobs {
+				if scheduleCtx.Err() != nil {
+					return
+				}
+				completeCtx, completeCancel := cancellableOperationContext(operationWorkContext(requestCtx), env, maxWaitMs)
+				err := completeCtx.Err()
+				if err == nil {
+					recordOperation(requestCtx, sourceMode, 0, 0, 0, 1)
+					err = receiver.CompleteMessage(completeCtx, msg, nil)
+					if err == nil {
+						recordOperation(requestCtx, sourceMode, 0, 1, 0, -1)
+					}
+				}
+				completeCancel()
+				mu.Lock()
+				if err == nil {
+					completed++
+				} else if firstErr == nil {
+					firstErr = fmt.Errorf("complete message error: %w", err)
+				}
+				mu.Unlock()
+				if err != nil {
+					stopScheduling()
+					return
+				}
+			}
+		}()
 	}
-	if err := <-errCh; err != nil {
-		return completed, err
+schedule:
+	for _, msg := range messages {
+		select {
+		case <-scheduleCtx.Done():
+			break schedule
+		case jobs <- msg:
+		}
 	}
-	return completed, nil
+	close(jobs)
+	wg.Wait()
+	if firstErr != nil {
+		return completed, firstErr
+	}
+	return completed, requestCtx.Err()
 }

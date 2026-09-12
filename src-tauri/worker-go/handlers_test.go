@@ -84,6 +84,8 @@ type fakeSingleMessageActionReceiver struct {
 	renewHook        func(context.Context, int64) error
 }
 
+func (f *fakeSingleMessageActionReceiver) Close(context.Context) error { return nil }
+
 func messageSequence(msg *azservicebus.ReceivedMessage) int64 {
 	if msg == nil || msg.SequenceNumber == nil {
 		return 0
@@ -2437,7 +2439,7 @@ func TestCompleteReceivedMessagesPreservesOrderWhenSequential(t *testing.T) {
 		messages = append(messages, &azservicebus.ReceivedMessage{SequenceNumber: &sequenceNumber})
 	}
 
-	completed, err := completeReceivedMessages(context.Background(), receiver, messages, nil, 1000, 1)
+	completed, err := completeReceivedMessages(context.Background(), receiver, messages, nil, 1000, 1, "normal")
 	if err != nil {
 		t.Fatalf("completeReceivedMessages returned error: %v", err)
 	}

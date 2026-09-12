@@ -20,6 +20,9 @@ export interface OperationSlice {
   operationError: string | null;
   operationScope: "atomic" | "bulk" | null;
   runId: string | null;
+  // Retain the latest bulk result independently of view mounts and worker locks.
+  operationTrayRunId: string | null;
+  dismissOperationTray: () => void;
   outputLines: OutputLine[];
   progress: ProgressUpdate | null;
 
@@ -42,6 +45,10 @@ export const createOperationSlice: StateCreator<AppState, [["zustand/immer", nev
   operationError: null,
   operationScope: null,
   runId: null,
+  operationTrayRunId: null,
+  dismissOperationTray: () => set((state) => {
+    if (!state.isRunning) state.operationTrayRunId = null;
+  }),
   outputLines: [],
   progress: null,
   setRunning: (running, runId, scope) =>
@@ -51,6 +58,7 @@ export const createOperationSlice: StateCreator<AppState, [["zustand/immer", nev
       state.operationError = null;
       state.runId = runId ?? null;
       state.operationScope = running ? (scope ?? "bulk") : null;
+      if (running && scope !== "atomic") state.operationTrayRunId = runId ?? null;
       if (!running) {
         state.progress = null;
       }

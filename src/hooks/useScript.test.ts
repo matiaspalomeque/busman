@@ -52,6 +52,49 @@ function emit(eventName: string, payload: unknown) {
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
 describe("useScript", () => {
+  it.each([0, 130, -2])("refreshes affected Properties after terminal result %s", async (exitCode) => {
+    useAppStore.setState({ activeConnectionId: "conn-1" });
+    useAppStore.getState().setExplorerQueue("orders");
+    mockInvoke.mockResolvedValueOnce({ exitCode });
+    const { result } = renderHook(() => useScript());
+    await act(async () => { await result.current.runOperation("empty_messages", { connectionId: "conn-1", queueName: "orders" }); });
+    expect(useAppStore.getState().entityPropertiesRequestNonce).toBe(1);
+  });
+
+  it.each(["source", "destination"])("refreshes a transfer's selected %s queue", async (queue) => {
+    useAppStore.setState({ activeConnectionId: "conn-1" });
+    useAppStore.getState().setExplorerQueue(queue);
+    mockInvoke.mockResolvedValueOnce({ exitCode: 0 });
+    const { result } = renderHook(() => useScript());
+    await act(async () => { await result.current.runOperation("move_messages", { connectionId: "conn-1", sourceQueue: "source", destQueue: "destination" }); });
+    expect(useAppStore.getState().entityPropertiesRequestNonce).toBe(1);
+  });
+
+  it("refreshes the affected subscription", async () => {
+    useAppStore.setState({ activeConnectionId: "conn-1" });
+    useAppStore.getState().setExplorerSubscription("billing", "invoices");
+    mockInvoke.mockResolvedValueOnce({ exitCode: 130 });
+    const { result } = renderHook(() => useScript());
+    await act(async () => { await result.current.runOperation("empty_messages", { connectionId: "conn-1", topicName: "billing", subscriptionName: "invoices" }); });
+    expect(useAppStore.getState().entityPropertiesRequestNonce).toBe(1);
+  });
+
+  it.each(["queue", "connection"])("does not refresh an unrelated view after changing %s", async (changed) => {
+    const state = useAppStore.getState();
+    useAppStore.setState({ activeConnectionId: "conn-1" });
+    state.setExplorerQueue("orders");
+    mockInvoke.mockImplementationOnce(() => new Promise(() => {}));
+    const { result } = renderHook(() => useScript());
+    let pending!: Promise<OpResult>;
+    await act(async () => { pending = result.current.runOperation("empty_messages", { connectionId: "conn-1", queueName: "orders" }); });
+    act(() => {
+      if (changed === "queue") state.setExplorerQueue("unrelated");
+      else useAppStore.setState({ activeConnectionId: "conn-2", connectionGeneration: 1 });
+    });
+    await act(async () => { emit(`script-done:${RUN_ID}`, { exitCode: 130 }); await pending; });
+    expect(useAppStore.getState().entityPropertiesRequestNonce).toBe(0);
+  });
+
   it("records the source of a single resend for later return detection", async () => {
     const state = useAppStore.getState();
     state.addEventLogEntry({ id: RUN_ID, time: new Date().toISOString(), namespace: "test", entity: "orders #1", entityType: "Queue", operation: "ReplayMessage", status: "running" });
@@ -100,6 +143,20 @@ describe("useScript", () => {
     expect(useAppStore.getState().eventLog[0].checkpoint?.counts.sent).toBe(3);
     await act(async () => { vi.advanceTimersByTime(5000); emit(`script-progress:${RUN_ID}`, { text: "", elapsedMs: 5000, counts: { ...counts, sent: 5 } }); });
     expect(useAppStore.getState().eventLog[0].checkpoint?.counts.sent).toBe(5);
+    await act(async () => { emit(`script-done:${RUN_ID}`, { exitCode: 130 }); await pending; });
+  });
+
+  it("preserves confirmed progress when an update has no counts", async () => {
+    mockInvoke.mockImplementationOnce(() => new Promise(() => {}));
+    const { result } = renderHook(() => useScript());
+    let pending!: Promise<OpResult>;
+    await act(async () => { pending = result.current.runOperation("move_messages", {}); });
+    const counts = { sent: 12, settled: 12, sendUnconfirmed: 0, settlementUnconfirmed: 0, sources: {} };
+    await act(async () => {
+      emit(`script-progress:${RUN_ID}`, { text: "Moving", elapsedMs: 1000, counts });
+      emit(`script-progress:${RUN_ID}`, { text: "Waiting", elapsedMs: 2000 });
+    });
+    expect(useAppStore.getState().progress).toMatchObject({ text: "Waiting", elapsedMs: 2000, counts });
     await act(async () => { emit(`script-done:${RUN_ID}`, { exitCode: 130 }); await pending; });
   });
 

@@ -4,6 +4,7 @@ import { useEntityProperties } from "../../hooks/useEntityProperties";
 import { Sidebar } from "./Sidebar";
 import { Toolbar } from "./Toolbar";
 import { MessageGrid } from "./MessageGrid";
+import { AtomicOperationBanner, OperationStatusTray } from "./OperationStatus";
 import { MessageInsightsPanel } from "./MessageInsightsPanel";
 import { PropertiesPanel } from "./PropertiesPanel";
 import { EventLog } from "./EventLog";
@@ -54,14 +55,20 @@ export function Explorer() {
 
       <div className="flex flex-1 min-h-0">
         <Sidebar />
-        {showInsights ? (
-          <MessageInsightsPanel />
-        ) : (
-          <>
-            <MessageGrid />
-            {selectedMessage ? <PropertiesPanel /> : null}
-          </>
-        )}
+        <div className="relative flex min-w-0 flex-1 flex-col">
+          <AtomicOperationBanner />
+          <div className="flex min-h-0 flex-1">
+            {showInsights ? (
+              <MessageInsightsPanel />
+            ) : (
+              <>
+                <MessageGrid />
+                {selectedMessage ? <PropertiesPanel /> : null}
+              </>
+            )}
+          </div>
+          <OperationStatusTray />
+        </div>
       </div>
 
       <EventLog />

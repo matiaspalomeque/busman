@@ -32,6 +32,16 @@ mod tests {
         value["version"] = serde_json::json!(2);
         assert!(OperationOutcome::parse(value, "contract-run").is_err());
     }
+
+    #[test]
+    fn cancelled_unknown_outcome_keeps_review_required() {
+        let mut value: serde_json::Value =
+            serde_json::from_str(include_str!("../../contracts/operation-outcome.json")).unwrap();
+        value["errorCode"] = serde_json::json!("cancelled");
+        let result = OperationOutcome::parse(value, "contract-run").unwrap();
+        assert_eq!(result.exit_code(), -2);
+        assert_eq!(result.error_code.as_deref(), Some("cancelled"));
+    }
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]

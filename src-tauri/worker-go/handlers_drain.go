@@ -87,6 +87,9 @@ func handleEmptyMessages(requestCtx context.Context, raw json.RawMessage) (any, 
 		emitOutput(p.RunID, fmt.Sprintf("   Batch size: %d, First wait: %dms, Drain wait: %dms", batchSize, maxWaitMs, drainWaitMs), false, elapsedSince(startedAt))
 
 		for {
+			if err := requestCtx.Err(); err != nil {
+				return totalDeleted, err
+			}
 			receiveWaitMs := maxWaitMs
 			if totalDeleted > 0 {
 				receiveWaitMs = drainWaitMs
@@ -110,7 +113,6 @@ func handleEmptyMessages(requestCtx context.Context, raw json.RawMessage) (any, 
 				break
 			}
 
-			recordOperation(requestCtx, sourceMode, 0, 0, 0, len(messages))
 			completed, err := completeReceivedMessages(
 				requestCtx,
 				receiver,
@@ -118,8 +120,8 @@ func handleEmptyMessages(requestCtx context.Context, raw json.RawMessage) (any, 
 				p.Env,
 				maxWaitMs,
 				settlementConcurrency,
+				sourceMode,
 			)
-			recordOperation(requestCtx, sourceMode, 0, completed, 0, -completed)
 			totalDeleted += completed
 			if err != nil {
 				return totalDeleted, err

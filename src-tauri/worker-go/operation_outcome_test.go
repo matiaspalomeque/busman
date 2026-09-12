@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"sync"
 	"testing"
@@ -50,8 +51,13 @@ func TestCancelledOutcomeWithAndWithoutUnconfirmedWork(t *testing.T) {
 	}
 	ctx := context.WithValue(context.Background(), outcomeContextKey{}, tracker)
 	recordOperation(ctx, "dlq", 0, 0, 1, 0)
-	if tracker.finish("run", context.Canceled).Status != "unknown" {
-		t.Fatal("cancellation cannot prove send failed")
+	result := tracker.finish("run", fmt.Errorf("send message batch error: %w", context.Canceled))
+	if result.Status != "unknown" || result.ErrorCode != "cancelled" {
+		t.Fatalf("cancellation must retain its cause without claiming the send failed: %+v", result)
+	}
+	result = tracker.finish("run", errors.New("connection lost"))
+	if result.Status != "unknown" || result.ErrorCode != "broker_acknowledgment_unknown" {
+		t.Fatalf("an unconfirmed send failure must not be reported as a stop: %+v", result)
 	}
 }
 

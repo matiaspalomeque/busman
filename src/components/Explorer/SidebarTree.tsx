@@ -238,9 +238,9 @@ export const TreeItem = memo(function TreeItem({ label, itemTitle, icon, isSelec
                 : `${counts.active} · ${counts.dlq}`
             }
           >
-            {/* Trend column — only rendered when the sparkline prop is provided (feature enabled) */}
-            {sparkline != null && sparkline.length > 1 && (
-              <span className="w-8 inline-flex items-center justify-center">
+            {/* Reserve the trend column while samples accumulate so counts stay aligned. */}
+            {sparkline !== undefined && (
+              <span className="w-8 h-2.5 shrink-0 inline-flex items-center justify-center" aria-hidden="true">
                 {sparkline != null && <Sparkline data={sparkline} />}
               </span>
             )}
@@ -421,7 +421,7 @@ export function TopicNode({ topic, subscriptions, subCounts, dlqThresholds, onSe
               onSetThreshold={(v) => onSetThreshold(thresholdKey, v)}
               onRefreshCount={onRefreshSubscriptionCount ? () => onRefreshSubscriptionCount(topic, sub) : undefined}
               flash={changedSet?.has(`sub:${topic}/${sub}`) ?? false}
-              sparkline={subSparklines?.get(`sub:${topic}/${sub}`) ?? null}
+              sparkline={subSparklines ? (subSparklines.get(`sub:${topic}/${sub}`) ?? null) : undefined}
             />
           );
         })}

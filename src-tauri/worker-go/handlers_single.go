@@ -88,7 +88,7 @@ func startHeldMessageLockRenewer(
 	maxWaitMs int,
 	interval time.Duration,
 ) *heldMessageLockRenewer {
-	ctx, cancel := context.WithCancel(parent)
+	ctx, cancel := context.WithCancel(operationWorkContext(parent))
 	if interval <= 0 {
 		interval = time.Second
 	}
@@ -438,7 +438,7 @@ func scanActiveSingleMessage(
 			result.Found = true
 			targetCtx := requestCtx
 			if lockRenewer != nil {
-				targetCtx = lockRenewer.actionContext()
+				targetCtx = context.WithValue(requestCtx, inFlightContextKey{}, lockRenewer.actionContext())
 			}
 			targetErr := handleTarget(targetCtx, target)
 			var targetRenewalErr error
@@ -589,10 +589,13 @@ func performSingleMessageTargetAction(
 		return actionErr
 	}
 	completeTarget := func() error {
-		completeCtx, completeCancel := cancellableOperationContext(requestCtx, p.Env, maxWaitMs)
+		completeCtx, completeCancel := cancellableOperationContext(operationWorkContext(requestCtx), p.Env, maxWaitMs)
+		defer completeCancel()
+		if err := completeCtx.Err(); err != nil {
+			return err
+		}
 		recordOperation(requestCtx, sourceMode, 0, 0, 0, 1)
 		err := receiver.CompleteMessage(completeCtx, target, nil)
-		completeCancel()
 		if err != nil {
 			return fmt.Errorf("complete message error: %w", err)
 		}
@@ -601,6 +604,9 @@ func performSingleMessageTargetAction(
 	}
 
 	if err := validateSingleMessageTarget(p, target, "receiving"); err != nil {
+		return failAndReleaseTarget(err)
+	}
+	if err := requestCtx.Err(); err != nil {
 		return failAndReleaseTarget(err)
 	}
 	switch p.Action {
@@ -619,7 +625,11 @@ func performSingleMessageTargetAction(
 			// Replace any earlier attempt's marker without modifying the source.
 			newMsg.ApplicationProperties["BusmanReplayRunId"] = p.RunID
 		}
-		sendCtx, sendCancel := cancellableOperationContext(requestCtx, p.Env, maxWaitMs)
+		sendCtx, sendCancel := cancellableOperationContext(operationWorkContext(requestCtx), p.Env, maxWaitMs)
+		if err := sendCtx.Err(); err != nil {
+			sendCancel()
+			return failAndReleaseTarget(err)
+		}
 		recordOperation(requestCtx, sourceMode, 0, 0, 1, 0)
 		err := sender.SendMessage(sendCtx, newMsg, nil)
 		sendCancel()
@@ -862,7 +872,7 @@ func handleSingleMessageAction(requestCtx context.Context, raw json.RawMessage) 
 					return nil, fmt.Errorf("accept session %q error: %w", sessionID, sessionErr)
 				}
 				renewer := startSessionLockRenewer(
-					requestCtx,
+					operationWorkContext(requestCtx),
 					sessionReceiver,
 					maxWaitMs,
 					sessionLockRenewInterval(time.Now(), sessionReceiver.LockedUntil()),
@@ -904,7 +914,7 @@ func handleSingleMessageAction(requestCtx context.Context, raw json.RawMessage) 
 		defer closeWithTimeout(sessionReceiver)
 		actionReceiver = sessionReceiver
 		sessionRenewer = startSessionLockRenewer(
-			requestCtx,
+			operationWorkContext(requestCtx),
 			sessionReceiver,
 			maxWaitMs,
 			sessionLockRenewInterval(time.Now(), sessionReceiver.LockedUntil()),

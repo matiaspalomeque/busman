@@ -79,8 +79,12 @@ func (tracker *operationTracker) finish(runID string, err error) OperationOutcom
 		if errors.Is(err, context.Canceled) {
 			result.Status, result.ErrorCode = "stopped", "cancelled"
 		}
-		if result.Counts.SendUnconfirmed > 0 || result.Counts.SettlementUnconfirmed > 0 {
-			result.Status, result.ErrorCode = "unknown", "broker_acknowledgment_unknown"
+		if result.Counts.SendUnconfirmed > 0 || result.Counts.SettlementUnconfirmed > 0 || result.Counts.Sent > result.Counts.Settled {
+			result.Status = "unknown"
+			// Keep the reason for stopping separate from the certainty of the counts.
+			if result.ErrorCode != "cancelled" {
+				result.ErrorCode = "broker_acknowledgment_unknown"
+			}
 		}
 	}
 	return result

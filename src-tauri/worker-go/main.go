@@ -31,6 +31,7 @@ var handlerSlots = make(chan struct{}, maxConcurrentHandlers)
 type activeRun struct {
 	tracker *operationTracker
 	cancel  context.CancelFunc
+	stop    context.CancelFunc
 	done    chan struct{}
 }
 
@@ -182,9 +183,12 @@ func registerRun(runID string) (context.Context, *activeRun, error) {
 	if runID == "" {
 		return nil, nil, fmt.Errorf("runId is required for cancellable operations")
 	}
-	ctx, cancel := context.WithCancel(context.Background())
+	workCtx, cancel := context.WithCancel(context.Background())
 	run := &activeRun{cancel: cancel, done: make(chan struct{}), tracker: newOperationTracker()}
-	ctx = context.WithValue(ctx, outcomeContextKey{}, run.tracker)
+	workCtx = context.WithValue(workCtx, outcomeContextKey{}, run.tracker)
+	ctx, stop := context.WithCancel(workCtx)
+	run.stop = stop
+	ctx = context.WithValue(ctx, inFlightContextKey{}, workCtx)
 	activeRuns.Lock()
 	defer activeRuns.Unlock()
 	if _, exists := activeRuns.runs[runID]; exists {
@@ -201,6 +205,7 @@ func finishRun(runID string, run *activeRun) {
 		delete(activeRuns.runs, runID)
 	}
 	activeRuns.Unlock()
+	run.stop()
 	run.cancel()
 	close(run.done)
 }
@@ -212,13 +217,10 @@ func cancelRun(runID string) error {
 	if run == nil {
 		return fmt.Errorf("operation %q is not running", runID)
 	}
-	run.cancel()
-	select {
-	case <-run.done:
-		return nil
-	case <-time.After(10 * time.Second):
-		return fmt.Errorf("operation %q did not stop within 10 seconds", runID)
-	}
+	// Acknowledge the request immediately. The operation's terminal response
+	// releases the frontend lock after in-flight work has finished confirming.
+	run.stop()
+	return nil
 }
 
 func runIDFromParams(raw json.RawMessage) string {
@@ -315,6 +317,9 @@ func dispatch(line string) {
 			}
 			result, err := fn(ctx, params)
 			if hasStructuredOutcome(req.Method) {
+				if ctx.Err() != nil && !errors.Is(err, ctx.Err()) {
+					err = errors.Join(err, ctx.Err())
+				}
 				sendResponse(id, run.tracker.finish(runID, err))
 				return
 			}

@@ -11,22 +11,29 @@ func TestCancelRunTargetsOnlyRequestedOperation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("register run-a: %v", err)
 	}
+	defer finishRun("run-a", runA)
 	ctxB, runB, err := registerRun("run-b")
 	if err != nil {
 		t.Fatalf("register run-b: %v", err)
 	}
 	defer finishRun("run-b", runB)
 
-	go func() {
-		<-ctxA.Done()
-		finishRun("run-a", runA)
-	}()
-
 	if err := cancelRun("run-a"); err != nil {
 		t.Fatalf("cancel run-a: %v", err)
 	}
 	if ctxA.Err() != context.Canceled {
 		t.Fatalf("run-a context error = %v, want context.Canceled", ctxA.Err())
+	}
+	if err := operationWorkContext(ctxA).Err(); err != nil {
+		t.Fatalf("Stop interrupted in-flight work: %v", err)
+	}
+	if operationCounts("run-a") == nil {
+		t.Fatal("Stop removed the run before its work finished")
+	}
+	select {
+	case <-runA.done:
+		t.Fatal("Stop acknowledged completion before work finished")
+	default:
 	}
 	select {
 	case <-ctxB.Done():

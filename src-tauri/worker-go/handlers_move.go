@@ -169,6 +169,9 @@ func handleMoveMessages(requestCtx context.Context, raw json.RawMessage) (any, e
 		lastProgressEmitAt := time.Time{}
 
 		for {
+			if err := requestCtx.Err(); err != nil {
+				return totalMoved, err
+			}
 			receiveWaitMs := maxWaitMs
 			if totalMoved > 0 {
 				receiveWaitMs = drainWaitMs
@@ -199,32 +202,12 @@ func handleMoveMessages(requestCtx context.Context, raw json.RawMessage) (any, e
 				if outboundBatch.NumMessages() == 0 {
 					return 0, nil
 				}
-				sendCtx, sendCancel := cancellableOperationContext(requestCtx, p.Env, defaultOperationTimeoutMs)
-				defer sendCancel()
-				recordOperation(requestCtx, sourceMode, 0, 0, len(sourceMessages), 0)
-				if err := sender.SendMessageBatch(sendCtx, outboundBatch, nil); err != nil {
-					return 0, fmt.Errorf("send message batch error: %w", err)
-				}
-				recordOperation(requestCtx, sourceMode, len(sourceMessages), 0, -len(sourceMessages), len(sourceMessages))
-				confirmed, err := completeReceivedMessages(
-					requestCtx,
-					receiver,
-					sourceMessages,
-					p.Env,
-					defaultOperationTimeoutMs,
-					settlementConcurrency,
-				)
-				recordOperation(requestCtx, sourceMode, 0, confirmed, 0, -confirmed)
+				confirmed, err := sendAndCompleteMessages(requestCtx, receiver, sourceMessages, p.Env, defaultOperationTimeoutMs, settlementConcurrency, sourceMode,
+					func(sendCtx context.Context) error { return sender.SendMessageBatch(sendCtx, outboundBatch, nil) })
 				if err != nil {
-					failure := fmt.Errorf(
-						"destination accepted %d messages but source settlement failed; duplicate delivery is possible: %w",
-						outboundBatch.NumMessages(),
-						err,
-					)
-					emitOutput(p.RunID, "⚠ "+failure.Error(), true, elapsedSince(startedAt))
-					return confirmed, failure
+					emitOutput(p.RunID, "⚠ "+err.Error(), true, elapsedSince(startedAt))
 				}
-				return confirmed, nil
+				return confirmed, err
 			}
 
 			confirmed, err := sendMessagesInCompatibleBatches(
