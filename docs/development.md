@@ -2,7 +2,7 @@
 
 Busman uses React/TypeScript, a Tauri/Rust desktop bridge, and a Go Azure Service Bus worker. Keep credential ownership in Rust and broker receive/send/settlement ownership in Go.
 
-CI pins Bun 1.3.14 and Go 1.25.13, with stable Rust (minimum declared version 1.88). Install the [Tauri platform prerequisites](https://v2.tauri.app/start/prerequisites/), then:
+CI pins Bun 1.3.14 and Go 1.26.10, with stable Rust (minimum declared version 1.90). Install the [Tauri platform prerequisites](https://v2.tauri.app/start/prerequisites/), then:
 
 ```sh
 bun install --frozen-lockfile
