@@ -1503,6 +1503,37 @@ func TestSingleMessageSourceSubQueueSelection(t *testing.T) {
 	}
 }
 
+func TestSingleMessageTargetSessionID(t *testing.T) {
+	sessionID := "session-a"
+	tests := []struct {
+		name   string
+		params singleMessageActionParams
+		want   bool
+	}{
+		{name: "active", params: singleMessageActionParams{SourceSubQueue: "active"}, want: true},
+		{name: "dead letter", params: singleMessageActionParams{IsDlq: true, SourceSubQueue: "deadLetter"}},
+		{name: "transfer dead letter", params: singleMessageActionParams{IsDlq: true, SourceSubQueue: "transferDeadLetter"}},
+		{name: "legacy dead letter", params: singleMessageActionParams{IsDlq: true}},
+		{name: "legacy transfer dead letter", params: singleMessageActionParams{IsDlq: true, Source: "Transfer Dead Letter Queue: orders"}},
+	}
+	for _, tt := range tests {
+		for _, explicitSessionID := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/explicit=%t", tt.name, explicitSessionID), func(t *testing.T) {
+				params := tt.params
+				peeked := &azservicebus.ReceivedMessage{SessionID: &sessionID}
+				if explicitSessionID {
+					params.SessionID = &sessionID
+					peeked = nil
+				}
+				gotID, useSession := params.targetSessionID(peeked)
+				if useSession != tt.want || (useSession && gotID != sessionID) {
+					t.Fatalf("targetSessionID = (%q, %t), want useSession=%t", gotID, useSession, tt.want)
+				}
+			})
+		}
+	}
+}
+
 func TestEntityNameWithSubQueue(t *testing.T) {
 	if got := entityNameWithSubQueue("orders", azservicebus.SubQueueDeadLetter); got != "orders/$DeadLetterQueue" {
 		t.Fatalf("unexpected dead-letter path: %q", got)

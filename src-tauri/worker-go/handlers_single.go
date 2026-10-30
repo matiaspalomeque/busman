@@ -531,6 +531,10 @@ func (p singleMessageActionParams) acceptSessionReceiver(ctx context.Context, cl
 }
 
 func (p singleMessageActionParams) targetSessionID(peeked *azservicebus.ReceivedMessage) (string, bool) {
+	// A dead-letter message can retain SessionID without supporting a session receiver.
+	if p.sourceSubQueue() != 0 {
+		return "", false
+	}
 	if p.SessionID != nil {
 		return *p.SessionID, true
 	}

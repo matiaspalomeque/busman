@@ -162,7 +162,8 @@ func handleEmptyMessages(requestCtx context.Context, raw json.RawMessage) (any, 
 		if subQueue != 0 {
 			sourceMode = "dlq"
 		}
-		if requiresSession {
+		// Dead-letter subqueues do not support sessions, even when the parent requires them.
+		if requiresSession && subQueue == 0 {
 			return consumeAvailableSessions(
 				requestCtx,
 				maxWaitMs,
