@@ -473,7 +473,7 @@ func handlePeekMessages(requestCtx context.Context, raw json.RawMessage) (any, e
 
 	allMessages := []map[string]any{}
 
-	runOne := func(receiver *azservicebus.Receiver, sourceLabel string) error {
+	runOne := func(receiver *azservicebus.Receiver, sourceLabel, activePath string) error {
 		defer closeWithTimeout(receiver)
 
 		seqNumHint := ""
@@ -484,21 +484,23 @@ func handlePeekMessages(requestCtx context.Context, raw json.RawMessage) (any, e
 			fmt.Sprintf("👀 Peeking %d messages from %s%s...", count, sourceLabel, seqNumHint),
 			false, elapsedSince(startedAt))
 
+		onProgress := func(retrieved int) {
+			if count > 250 {
+				emitProgress(p.RunID,
+					fmt.Sprintf("📥 Retrieved from %s: %d | messages...", sourceLabel, retrieved),
+					elapsedSince(startedAt))
+			}
+		}
 		messages, canAdvanceCursor, err := peekMessagesForSource(
-			requestCtx,
-			receiver,
-			count,
-			startSeqNum,
-			maxWaitMs,
-			sourceLabel,
-			func(retrieved int) {
-				if count > 250 {
-					emitProgress(p.RunID,
-						fmt.Sprintf("📥 Retrieved from %s: %d | messages...", sourceLabel, retrieved),
-						elapsedSince(startedAt))
-				}
-			},
+			requestCtx, receiver, count, startSeqNum, maxWaitMs, sourceLabel, onProgress,
 		)
+		if activePath != "" && isSessionRequiredForBrowse(err) {
+			peeker := &managementPeekReceiver{connectionString: cs, entityPath: activePath}
+			defer peeker.close()
+			messages, canAdvanceCursor, err = peekMessagesForSource(
+				requestCtx, peeker, count, startSeqNum, maxWaitMs, sourceLabel, onProgress,
+			)
+		}
 		if err != nil {
 			return err
 		}
@@ -521,7 +523,7 @@ func handlePeekMessages(requestCtx context.Context, raw json.RawMessage) (any, e
 			if err != nil {
 				return nil, err
 			}
-			if err := runOne(receiver, "Normal Queue: "+entityName); err != nil {
+			if err := runOne(receiver, "Normal Queue: "+entityName, entityName); err != nil {
 				return nil, err
 			}
 		} else {
@@ -529,7 +531,8 @@ func handlePeekMessages(requestCtx context.Context, raw json.RawMessage) (any, e
 			if err != nil {
 				return nil, err
 			}
-			if err := runOne(receiver, "Normal Subscription: "+entityName+"/"+subscription); err != nil {
+			path := entityName + "/Subscriptions/" + subscription
+			if err := runOne(receiver, "Normal Subscription: "+entityName+"/"+subscription, path); err != nil {
 				return nil, err
 			}
 		}
@@ -542,7 +545,7 @@ func handlePeekMessages(requestCtx context.Context, raw json.RawMessage) (any, e
 			if err != nil {
 				return nil, err
 			}
-			if err := runOne(receiver, "Dead Letter Queue: "+entityName); err != nil {
+			if err := runOne(receiver, "Dead Letter Queue: "+entityName, ""); err != nil {
 				return nil, err
 			}
 		} else {
@@ -550,7 +553,7 @@ func handlePeekMessages(requestCtx context.Context, raw json.RawMessage) (any, e
 			if err != nil {
 				return nil, err
 			}
-			if err := runOne(receiver, "Dead Letter Subscription: "+entityName+"/"+subscription); err != nil {
+			if err := runOne(receiver, "Dead Letter Subscription: "+entityName+"/"+subscription, ""); err != nil {
 				return nil, err
 			}
 		}

@@ -71,13 +71,16 @@ func TestAzureServiceBusIntegration(t *testing.T) {
 	config := loadAzureIntegrationConfig(t)
 	t.Logf("running opt-in Service Bus integration suite against namespace %s", config.namespace)
 
-	t.Run("both browsing shows active and dead-letter messages", func(t *testing.T) {
+	t.Run("browsing shows active and dead-letter messages", func(t *testing.T) {
 		cases := []struct {
-			name string
-			kind string
+			name            string
+			kind            string
+			requiresSession bool
 		}{
 			{name: "queue", kind: "queue"},
 			{name: "subscription", kind: "subscription"},
+			{name: "session queue", kind: "queue", requiresSession: true},
+			{name: "session subscription", kind: "subscription", requiresSession: true},
 		}
 
 		for _, tc := range cases {
@@ -85,32 +88,66 @@ func TestAzureServiceBusIntegration(t *testing.T) {
 				fixture := newAzureIntegrationFixture(t, config)
 				var entity azureIntegrationEntity
 				if tc.kind == "queue" {
-					entity.queue = fixture.createQueue(t, "browse-queue", &admin.QueueProperties{}, "queues")
+					entity.queue = fixture.createQueue(t, "browse-queue", &admin.QueueProperties{
+						RequiresSession: &tc.requiresSession,
+					}, "queues")
 				} else {
 					entity.topic = fixture.createTopic(t, "browse-topic", &admin.TopicProperties{}, "topics")
-					entity.subscription = fixture.createSubscription(t, entity.topic, "browse-sub", &admin.SubscriptionProperties{}, "subscriptions")
+					entity.subscription = fixture.createSubscription(t, entity.topic, "browse-sub", &admin.SubscriptionProperties{
+						RequiresSession: &tc.requiresSession,
+					}, "subscriptions")
+				}
+
+				argv := []string{"queue", entity.queue, "10"}
+				if entity.topic != "" {
+					argv = []string{"topic", entity.topic, entity.subscription, "10"}
+				}
+				browse := func(mode string, expected map[string]string) {
+					t.Helper()
+					result := fixture.mustCallWorker(t, "peekMessages", map[string]any{
+						"argv": append(argv, mode),
+						"env":  fixture.workerEnv(),
+					})
+					messages := integrationMessageRecords(t, result)
+					if len(messages) != len(expected) {
+						t.Fatalf("%s Browse returned %d messages, want %d", mode, len(messages), len(expected))
+					}
+					assertIntegrationBrowseSources(t, messages, expected)
+					if tc.requiresSession {
+						for _, message := range messages {
+							// The fixture uses distinct message IDs as session IDs.
+							if message["sessionId"] != message["messageId"] {
+								t.Errorf("message %q has session ID %q", message["messageId"], message["sessionId"])
+							}
+						}
+					}
 				}
 
 				activeID := "browse-active"
 				dlqID := "browse-dlq"
-				fixture.sendViaWorker(t, entity.sendEntity(), dlqID, "", `{"state":"dlq"}`)
-				fixture.deadLetterOne(t, entity, dlqID, "")
-				fixture.sendViaWorker(t, entity.sendEntity(), activeID, "", `{"state":"active"}`)
-				fixture.waitForCounts(t, entity, 1, 1)
-
-				argv := []string{"queue", entity.queue, "10", "both"}
-				if entity.topic != "" {
-					argv = []string{"topic", entity.topic, entity.subscription, "10", "both"}
+				secondActiveID := "browse-second-active"
+				var activeSession, dlqSession string
+				if tc.requiresSession {
+					browse("normal", nil)
+					activeSession, dlqSession = activeID, dlqID
 				}
-				result := fixture.mustCallWorker(t, "peekMessages", map[string]any{
-					"argv": argv,
-					"env":  fixture.workerEnv(),
-				})
-				messages := integrationMessageRecords(t, result)
-				assertIntegrationBrowseSources(t, messages, map[string]string{
+				fixture.sendViaWorker(t, entity.sendEntity(), dlqID, dlqSession, `{"state":"dlq"}`)
+				fixture.deadLetterOne(t, entity, dlqID, dlqSession)
+				fixture.sendViaWorker(t, entity.sendEntity(), activeID, activeSession, `{"state":"active"}`)
+				expected := map[string]string{
 					activeID: "active",
 					dlqID:    "deadLetter",
-				})
+				}
+				if tc.requiresSession {
+					fixture.sendViaWorker(t, entity.sendEntity(), secondActiveID, secondActiveID, `{"state":"active"}`)
+					expected[secondActiveID] = "active"
+				}
+				fixture.waitForCounts(t, entity, len(expected)-1, 1)
+				browse("both", expected)
+				if tc.requiresSession {
+					browse("normal", map[string]string{activeID: "active", secondActiveID: "active"})
+					browse("dlq", map[string]string{dlqID: "deadLetter"})
+				}
 			})
 		}
 	})
