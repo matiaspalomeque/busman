@@ -1,6 +1,6 @@
 module busman/worker
 
-go 1.26.10
+go 1.26.11
 
 require (
 	github.com/Azure/azure-sdk-for-go/sdk/messaging/azservicebus v1.10.0
