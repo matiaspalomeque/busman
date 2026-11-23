@@ -1,5 +1,6 @@
 import { type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
+import { isTauriRuntime } from "../../utils/logging";
 import { Icon } from "../Common/Icon";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -20,8 +21,6 @@ export function formatTime(iso: string | null | undefined): string {
     return iso;
   }
 }
-
-export { bodyString } from "../../utils/messageSearch";
 
 // ─── Column filter row ────────────────────────────────────────────────────────
 
@@ -68,19 +67,13 @@ export function BodyFilterBar({ value, onChange, rightSlot }: BodyFilterBarProps
   const { t } = useTranslation();
   return (
     <div className="flex flex-wrap items-center gap-2 px-3 py-2 border-b border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-800/60">
-      <span className="text-[10px] font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider whitespace-nowrap">
-        {t("explorer.grid.bodyFilter")}
-      </span>
-      <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-200 dark:bg-zinc-700 text-zinc-600 dark:text-zinc-300">
-        {t("explorer.grid.contains")}
-      </span>
       <input
         type="text"
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={t("explorer.grid.searchBody")}
         aria-label={t("explorer.grid.searchBody")}
-        className="min-w-[14rem] flex-1 text-xs px-2 py-1 rounded border border-zinc-200 dark:border-zinc-600 bg-white dark:bg-zinc-900 focus:outline-none focus:ring-1 focus:ring-azure-primary dark:text-zinc-200"
+        className="min-w-24 flex-1 text-xs px-2 py-1 rounded border border-zinc-200 dark:border-zinc-600 bg-white dark:bg-zinc-900 focus:outline-none focus:ring-1 focus:ring-azure-primary dark:text-zinc-200"
       />
       {value && (
         <button
@@ -204,8 +197,14 @@ export function EmptyState({ message, icon = "search" }: { message: string; icon
   );
 }
 
-export function FirstRunState({ hasConnections, onManageConnections }: { hasConnections: boolean; onManageConnections: () => void }) {
+export function FirstRunState({ hasConnections, hasActiveConnection, onManageConnections }: {
+  hasConnections: boolean;
+  hasActiveConnection: boolean;
+  onManageConnections: () => void;
+}) {
   const { t } = useTranslation();
+  const browserPreview = !hasConnections && !isTauriRuntime();
+  const title = browserPreview ? "browserPreview" : hasActiveConnection ? "emptySelectEntity" : hasConnections ? "emptySelectConnection" : "emptyNoConnection";
   return (
     <div className="flex flex-1 items-center justify-center px-6 py-10 text-center">
       <div className="flex max-w-sm flex-col items-center gap-4">
@@ -214,19 +213,19 @@ export function FirstRunState({ hasConnections, onManageConnections }: { hasConn
         </div>
         <div className="space-y-1">
           <h2 className="text-base font-semibold text-zinc-800 dark:text-zinc-100">
-            {hasConnections ? t("explorer.grid.emptySelectEntity") : t("explorer.grid.emptyNoConnection")}
+            {t(`explorer.grid.${title}`)}
           </h2>
           <p className="text-sm text-zinc-600 dark:text-zinc-300">
-            {hasConnections ? t("explorer.grid.emptySelectEntityHint") : t("explorer.grid.emptyNoConnectionHint")}
+            {t(`explorer.grid.${title}Hint`)}
           </p>
         </div>
-        <button
+        {!hasConnections && !browserPreview && <button
           type="button"
           onClick={onManageConnections}
           className="min-h-11 rounded-lg bg-azure-primary px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-azure-600 focus:outline-none focus:ring-2 focus:ring-azure-primary focus:ring-offset-2 dark:focus:ring-offset-zinc-900"
         >
-          {hasConnections ? t("explorer.grid.manageConnections") : t("explorer.grid.addConnection")}
-        </button>
+          {t("explorer.grid.addConnection")}
+        </button>}
       </div>
     </div>
   );

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { useTranslation } from "react-i18next";
 import { ZodError } from "zod";
@@ -7,6 +7,7 @@ import { useAppStore, selectActiveConnection } from "../../store/appStore";
 import type { SubscriptionRule } from "../../types";
 import { buildRuleDraft, draftToManageRule, summarizeSubscriptionRule } from "../../utils/subscriptionRules";
 import type { RuleDraft } from "../../utils/subscriptionRules";
+import { useDialogFocus } from "../../hooks/useDialogFocus";
 import { Icon } from "../Common/Icon";
 import { logHandledError } from "../../utils/logging";
 
@@ -115,13 +116,8 @@ export function SubscriptionRulesModal() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conn?.id, explorerSelection.kind, explorerSelection.topicName, explorerSelection.subscriptionName]);
 
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") close();
-    };
-    document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
-  }, [close]);
+  const dialog = useRef<HTMLDivElement>(null);
+  useDialogFocus(dialog, close);
 
   if (!canRender) return null;
 
@@ -209,11 +205,11 @@ export function SubscriptionRulesModal() {
         if (event.target === event.currentTarget) close();
       }}
     >
-      <div role="dialog" aria-modal="true" className="flex h-[min(80vh,720px)] w-full max-w-6xl overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-xl dark:border-zinc-700 dark:bg-zinc-950">
+      <div ref={dialog} role="dialog" aria-modal="true" aria-labelledby="subscription-rules-title" className="flex h-[min(80vh,720px)] w-full max-w-6xl overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-xl dark:border-zinc-700 dark:bg-zinc-950">
         <aside className="flex w-80 shrink-0 flex-col border-r border-zinc-200 dark:border-zinc-700">
           <div className="flex items-center justify-between gap-3 border-b border-zinc-200 px-4 py-3 dark:border-zinc-700">
             <div className="min-w-0">
-              <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">{t("explorer.rules.title")}</h2>
+              <h2 id="subscription-rules-title" className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">{t("explorer.rules.title")}</h2>
               <p className="truncate text-xs text-zinc-500 dark:text-zinc-400">
                 {explorerSelection.topicName} / {explorerSelection.subscriptionName}
               </p>

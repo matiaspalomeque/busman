@@ -4,7 +4,7 @@ import { open, save } from "@tauri-apps/plugin-dialog";
 import { useCallback } from "react";
 import { useAppStore } from "../store/appStore";
 import { ConnectionSchema, ConnectionsConfigSchema, safeInvoke } from "../schemas/ipc";
-import type { Connection, ConnectionsConfig } from "../types";
+import type { Connection } from "../types";
 import { logHandledError } from "../utils/logging";
 
 export function useConnections() {
@@ -12,14 +12,6 @@ export function useConnections() {
     setConnections: state.setConnections,
     setActiveConnectionId: state.setActiveConnectionId,
   })));
-
-  const applyConfig = useCallback(
-    (config: ConnectionsConfig) => {
-      setConnections(config.connections);
-      setActiveConnectionId(config.activeConnectionId);
-    },
-    [setConnections, setActiveConnectionId]
-  );
 
   const loadConnections = useCallback(async () => {
     const config = await safeInvoke("load_connections", ConnectionsConfigSchema);
@@ -33,7 +25,7 @@ export function useConnections() {
   }, []);
 
   const saveConnection = useCallback(
-    async (connection: Partial<Connection> & { name: string; connectionString: string }) => {
+    async (connection: Partial<Connection> & { name: string; connectionString: string }, originalConnectionString?: string) => {
       const payload: Connection = {
         id: "",
         env: {},
@@ -44,7 +36,9 @@ export function useConnections() {
       });
       // Do not apply activeConnectionId from backend — saving a connection should
       // never auto-select one. Only sync the connections list.
-      setConnections(config.connections);
+      const credentialsChanged = originalConnectionString !== undefined
+        && originalConnectionString.trim() !== payload.connectionString.trim();
+      setConnections(config.connections, credentialsChanged ? payload.id : undefined);
     },
     [setConnections]
   );
@@ -55,27 +49,29 @@ export function useConnections() {
       // Clean up per-connection localStorage keys to prevent stale data accumulation.
       try { localStorage.removeItem(`pins:${id}`); } catch {}
       try { localStorage.removeItem(`dlqThresholds:${id}`); } catch {}
-      applyConfig(config);
+      setConnections(config.connections);
     },
-    [applyConfig]
+    [setConnections]
   );
 
   const setActive = useCallback(
     async (id: string | null) => {
       const config = await safeInvoke("set_active_connection", ConnectionsConfigSchema, { id });
-      applyConfig(config);
+      setConnections(config.connections);
+      setActiveConnectionId(config.activeConnectionId);
     },
-    [applyConfig]
+    [setConnections, setActiveConnectionId]
   );
 
-  const exportConnections = useCallback(async (password: string): Promise<void> => {
+  const exportConnections = useCallback(async (password: string): Promise<boolean> => {
     const path = await save({
       filters: [{ name: "Busman Export", extensions: ["busman"] }],
       defaultPath: "connections.busman",
     });
-    if (!path) return;
+    if (!path) return false;
     try {
       await invoke("export_connections", { path, password });
+      return true;
     } catch (error) {
       logHandledError("Failed to export connections", error, { path });
       throw error;
@@ -83,12 +79,12 @@ export function useConnections() {
   }, []);
 
   const importConnections = useCallback(
-    async (password: string, merge: boolean): Promise<number> => {
+    async (password: string, merge: boolean): Promise<number | null> => {
       const path = await open({
         filters: [{ name: "Busman Export", extensions: ["busman"] }],
         multiple: false,
       });
-      if (!path) return 0;
+      if (!path) return null;
       const before = useAppStore.getState().connections.length;
       const config = await safeInvoke("import_connections", ConnectionsConfigSchema, {
         path,
@@ -96,10 +92,9 @@ export function useConnections() {
         merge,
       });
       setConnections(config.connections);
-      setActiveConnectionId(config.activeConnectionId);
       return config.connections.length - (merge ? before : 0);
     },
-    [setConnections, setActiveConnectionId]
+    [setConnections]
   );
 
   return {

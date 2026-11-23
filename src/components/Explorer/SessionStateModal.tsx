@@ -1,10 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { SessionStateResultSchema, safeInvoke } from "../../schemas/ipc";
 import {
   MAX_SESSION_STATE_BYTES,
   sessionStateBase64ByteLength,
 } from "../../utils/sessionState";
+import { useDialogFocus } from "../../hooks/useDialogFocus";
 import { Icon } from "../Common/Icon";
 
 export interface SessionStateTarget {
@@ -31,6 +32,9 @@ export function SessionStateModal({ target, onClose }: SessionStateModalProps) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmation, setConfirmation] = useState<Confirmation>(null);
+
+  const dialog = useRef<HTMLDivElement>(null);
+  useDialogFocus(dialog, onClose);
 
   const parentEntity = target.queueName ?? `${target.topicName}/${target.subscriptionName}`;
   const targetArgs = {
@@ -110,6 +114,7 @@ export function SessionStateModal({ target, onClose }: SessionStateModalProps) {
       onClick={(event) => event.target === event.currentTarget && onClose()}
     >
       <div
+        ref={dialog}
         role="dialog"
         aria-modal="true"
         aria-labelledby="session-state-title"

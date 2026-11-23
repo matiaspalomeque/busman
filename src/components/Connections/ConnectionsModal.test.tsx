@@ -21,7 +21,8 @@ describe("connection transfer dialogs", () => {
 
   it("keeps the import dialog shell stable after success", async () => {
     connectionMocks.importConnections.mockResolvedValue(3);
-    render(<ImportConnectionsModal onClose={() => {}} />);
+    const close = vi.fn();
+    render(<ImportConnectionsModal onClose={close} />);
 
     const dialog = screen.getByRole("dialog");
     const shellClass = dialog.className;
@@ -33,11 +34,16 @@ describe("connection transfer dialogs", () => {
     await waitFor(() => expect(screen.getByRole("status")).toBeTruthy());
     expect(screen.getByRole("dialog")).toBe(dialog);
     expect(dialog.className).toBe(shellClass);
+    const closeButton = screen.getByRole("button", { name: "Close" });
+    expect(document.activeElement).toBe(closeButton);
+    fireEvent.keyDown(closeButton, { key: "Escape" });
+    expect(close).toHaveBeenCalledOnce();
   });
 
   it("keeps the export dialog shell stable after success", async () => {
-    connectionMocks.exportConnections.mockResolvedValue(undefined);
-    render(<ExportConnectionsModal onClose={() => {}} />);
+    connectionMocks.exportConnections.mockResolvedValue(true);
+    const close = vi.fn();
+    render(<ExportConnectionsModal onClose={close} />);
 
     const dialog = screen.getByRole("dialog");
     const shellClass = dialog.className;
@@ -50,5 +56,9 @@ describe("connection transfer dialogs", () => {
     await waitFor(() => expect(screen.getByRole("status")).toBeTruthy());
     expect(screen.getByRole("dialog")).toBe(dialog);
     expect(dialog.className).toBe(shellClass);
+    const closeButton = screen.getByRole("button", { name: "Close" });
+    expect(document.activeElement).toBe(closeButton);
+    fireEvent.keyDown(closeButton, { key: "Escape" });
+    expect(close).toHaveBeenCalledOnce();
   });
 });

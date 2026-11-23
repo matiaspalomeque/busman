@@ -2,7 +2,7 @@ import { useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useDialogFocus } from "../../hooks/useDialogFocus";
 import { formatBodyJson } from "./messageActions";
-import { bodyString } from "./MessageGridPresentation";
+import { bodyString } from "../../utils/messageSearch";
 
 export function MessageBody({ body, onExpand }: { body: unknown; onExpand?: () => void }) {
   const { t } = useTranslation();

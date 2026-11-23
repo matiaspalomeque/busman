@@ -9,6 +9,8 @@ function DialogFixture() {
   return (
     <div ref={ref} role="dialog">
       <button data-dialog-initial-focus>First</button>
+      <button tabIndex={-1}>Outside the tab order</button>
+      <button disabled>Unavailable</button>
       <button>Last</button>
     </div>
   );
@@ -21,10 +23,17 @@ describe("useDialogFocus", () => {
     const last = getByRole("button", { name: "Last" });
 
     expect(document.activeElement).toBe(first);
-    last.focus();
+    fireEvent.keyDown(first, { key: "Tab" });
+    expect(document.activeElement).toBe(last);
     fireEvent.keyDown(last, { key: "Tab" });
     expect(document.activeElement).toBe(first);
     fireEvent.keyDown(first, { key: "Tab", shiftKey: true });
+    expect(document.activeElement).toBe(last);
+
+    const dialog = getByRole("dialog");
+    dialog.focus();
+    expect(document.activeElement).toBe(dialog);
+    fireEvent.keyDown(dialog, { key: "Tab", shiftKey: true });
     expect(document.activeElement).toBe(last);
   });
 });

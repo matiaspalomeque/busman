@@ -68,6 +68,7 @@ describe("MessageContextMenu", () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
   });
 
   it("does not expose destructive single-message actions for active messages", () => {
@@ -86,6 +87,15 @@ describe("MessageContextMenu", () => {
     expect(screen.getByText(/Move to queue/)).toBeTruthy();
     expect(screen.getByText("Replay to main queue")).toBeTruthy();
     expect(screen.getByText("Delete this message")).toBeTruthy();
+  });
+
+  it("copies the full browsed record including its broker and session metadata", () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal("navigator", { clipboard: { writeText } });
+    const row = { ...message("Dead Letter Queue: q1"), sessionId: "session-7", deliveryCount: 4 };
+    renderMenu(row);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Copy Full JSON" }));
+    expect(JSON.parse(writeText.mock.calls[0][0])).toEqual(row);
   });
 
   it("gets, replaces, and clears the exact queue session state from a DLQ message", async () => {

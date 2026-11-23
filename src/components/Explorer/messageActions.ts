@@ -1,5 +1,5 @@
 import type { PeekedMessage, SendMessageDraft } from "../../types";
-import { bodyString } from "./MessageGrid";
+import { bodyString } from "../../utils/messageSearch";
 import type { useAppStore } from "../../store/appStore";
 
 type Store = ReturnType<typeof useAppStore.getState>;
@@ -26,20 +26,7 @@ export function copyMessageBody(msg: PeekedMessage): void {
 }
 
 export function copyMessageJson(msg: PeekedMessage): void {
-  const obj: Record<string, unknown> = {
-    messageId: msg.messageId,
-    sequenceNumber: msg.sequenceNumber,
-    enqueuedTimeUtc: msg.enqueuedTimeUtc,
-    subject: msg.subject,
-    contentType: msg.contentType,
-    correlationId: msg.correlationId,
-    partitionKey: msg.partitionKey,
-    applicationProperties: msg.applicationProperties,
-    body: msg.body,
-  };
-  if (msg.deadLetterReason) obj.deadLetterReason = msg.deadLetterReason;
-  if (msg.deadLetterErrorDescription) obj.deadLetterErrorDescription = msg.deadLetterErrorDescription;
-  void navigator.clipboard.writeText(JSON.stringify(obj, null, 2));
+  void navigator.clipboard.writeText(JSON.stringify(msg, null, 2));
 }
 
 export function openResend(msg: PeekedMessage, store: Store): void {

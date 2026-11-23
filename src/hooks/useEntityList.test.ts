@@ -19,14 +19,47 @@ const CONN = { id: "conn-1", name: "Test", connectionString: "sb://test.serviceb
 
 beforeEach(() => {
   useAppStore.setState(useAppStore.getInitialState());
-  vi.clearAllMocks();
 
   // Set up an active connection so the hook has a connId to work with
   useAppStore.getState().setConnections([CONN]);
   useAppStore.getState().setActiveConnectionId(CONN.id);
 
-  // Prevent fetchEntities from firing (list_entities not under test here)
-  mockSafeInvoke.mockResolvedValue({ queues: [], topics: {} });
+  mockSafeInvoke.mockReset().mockResolvedValue({ queues: [], topics: {} });
+});
+
+describe("useEntityList.refreshEntities", () => {
+  it.each([
+    { name: "reloads the tree after a creation during an older read", switchConnection: false },
+    { name: "discards the requested reload if the connection changes", switchConnection: true },
+  ])("$name", async ({ switchConnection }) => {
+    const other = { ...CONN, id: "other" };
+    useAppStore.getState().setConnections([CONN, other]);
+    let finishFirst!: () => void;
+    const firstRead = new Promise<void>((resolve) => { finishFirst = resolve; });
+    const expectedQueue = switchConnection ? "other-queue" : "created-queue";
+    mockSafeInvoke
+      .mockReturnValueOnce(firstRead.then(() => ({ queues: [], topics: {} })))
+      .mockResolvedValueOnce({ queues: [expectedQueue], topics: {} })
+      .mockResolvedValueOnce({ queues: [], subscriptions: [], errors: [] });
+
+    const { result } = renderHook(() => useEntityList());
+    const refreshes = [result.current.refreshEntities(), result.current.refreshEntities()];
+    expect(mockSafeInvoke).toHaveBeenCalledTimes(1);
+    if (switchConnection) {
+      await act(async () => { useAppStore.getState().setActiveConnectionId(other.id); });
+    }
+    await act(async () => {
+      finishFirst();
+      await Promise.all(refreshes);
+    });
+
+    expect(useAppStore.getState().entities?.queues).toEqual([expectedQueue]);
+    const reads = mockSafeInvoke.mock.calls.filter(([command]) => command === "list_entities");
+    expect(reads.map(([, , args]) => args)).toEqual([
+      { args: { connectionId: CONN.id } },
+      { args: { connectionId: switchConnection ? other.id : CONN.id } },
+    ]);
+  });
 });
 
 describe("useEntityList.refreshEntityCount", () => {

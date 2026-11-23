@@ -2,7 +2,7 @@ import { useShallow } from "zustand/react/shallow";
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { useAppStore, selectActiveConnection, SUBSCRIPTION_KEY_SEP } from "../../store/appStore";
-import { useEntityList } from "../../hooks/useEntityList";
+import type { useEntityList } from "../../hooks/useEntityList";
 import { useAutoRefresh } from "../../hooks/useAutoRefresh";
 import { useDlqAlerts } from "../../hooks/useDlqAlerts";
 import { useResizable } from "../../hooks/useResizable";
@@ -39,10 +39,10 @@ function SidebarEnvironmentBadge({ connection }: { connection: Connection | null
 
 // ─── Main Sidebar ─────────────────────────────────────────────────────────────
 
-export function Sidebar() {
+export function Sidebar({ entityList }: { entityList: ReturnType<typeof useEntityList> }) {
   const { t } = useTranslation();
   const conn = useAppStore(selectActiveConnection);
-  const { entities, entitiesLoading, entitiesError, refreshEntities, refreshEntityCount, refreshAllCounts } = useEntityList();
+  const { entities, entitiesLoading, entitiesError, refreshEntities, refreshEntityCount, refreshAllCounts } = entityList;
   useAutoRefresh(refreshAllCounts);
   useDlqAlerts();
   const {
@@ -195,7 +195,7 @@ export function Sidebar() {
       </div>
 
       {/* Filter input + create button */}
-      <div className="px-3 py-2.5 border-b border-zinc-200 dark:border-zinc-700 flex items-center gap-2">
+      {conn && <div className="px-3 py-2.5 border-b border-zinc-200 dark:border-zinc-700 flex items-center gap-2">
         <div className="relative flex-1">
           <Icon
             name="search"
@@ -222,7 +222,7 @@ export function Sidebar() {
             <Icon name="plus" size={15} />
           </button>
         )}
-      </div>
+      </div>}
 
       {/* Tree view */}
       <div className="flex-1 overflow-y-auto py-2 space-y-1">
@@ -372,7 +372,7 @@ export function Sidebar() {
             <button
               type="button"
               onClick={() => void refreshEntities()}
-              disabled={entitiesLoading}
+              disabled={!conn || entitiesLoading}
               aria-label={t("explorer.sidebar.refreshTitle")}
               className="p-1.5 rounded-lg text-zinc-400 hover:text-azure-primary hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-40 transition-colors"
               title={t("explorer.sidebar.refreshTitle")}

@@ -24,7 +24,7 @@ describe("EventLog", () => {
     expect(screen.getByText("No operations recorded yet.")).toBeTruthy();
     expect(useAppStore.getState().eventLog).toEqual([]);
     expect(loadOperationJournal().entries).toEqual([]);
-    expect(screen.getByRole<HTMLButtonElement>("button", { name: "Clear log" }).disabled).toBe(true);
+    expect(screen.queryByRole("button", { name: "Clear log" })).toBeNull();
     act(() => useAppStore.getState().addEventLogEntry({ ...entry, id: "clear-2" }));
     expect(screen.getByText("q1")).toBeTruthy();
   });

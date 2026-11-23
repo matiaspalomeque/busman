@@ -4,13 +4,18 @@ import { invoke } from "@tauri-apps/api/core";
 import { useAppStore, selectActiveConnection } from "../../store/appStore";
 import { Icon } from "../Common/Icon";
 import { extractNamespace } from "../../utils/connection";
+import { useDialogFocus } from "../../hooks/useDialogFocus";
 import { useMessageTemplates, type MessageTemplate } from "../../hooks/useMessageTemplates";
 import type { ExplorerSelection } from "../../types";
 import { QueuePropertiesSchema, safeInvoke } from "../../schemas/ipc";
 
 interface AppProperty {
   key: string;
-  value: string;
+  value: unknown;
+}
+
+function propertyRows(properties?: Record<string, unknown>): AppProperty[] {
+  return Object.entries(properties ?? {}).map(([key, value]) => ({ key, value }));
 }
 
 function extractSendTarget(sel: ExplorerSelection): { entityName: string; entityType: "Queue" | "Topic" } {
@@ -45,13 +50,10 @@ export function SendMessageModal() {
   const [correlationId, setCorrelationId] = useState(sendDraft?.correlationId ?? "");
   const [sessionId, setSessionId] = useState(sendDraft?.sessionId ?? "");
   const [scheduled, setScheduled] = useState("");
-  const [appProps, setAppProps] = useState<AppProperty[]>(() => {
-    if (!sendDraft?.applicationProperties) return [];
-    return Object.entries(sendDraft.applicationProperties).map(([key, value]) => ({
-      key,
-      value: String(value ?? ""),
-    }));
-  });
+  const [appProps, setAppProps] = useState(() => propertyRows(sendDraft?.applicationProperties));
+  const applicationProperties = Object.fromEntries(
+    appProps.filter(({ key }) => key.trim()).map(({ key, value }) => [key.trim(), value])
+  );
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [status, setStatus] = useState<{ ok: boolean; text: string } | null>(null);
   const [sending, setSending] = useState(false);
@@ -59,10 +61,10 @@ export function SendMessageModal() {
   // ─── Templates ──────────────────────────────────────────────────────────────
   const { templates, saveTemplate, deleteTemplate } = useMessageTemplates();
   const [tplDropdownOpen, setTplDropdownOpen] = useState(false);
-  const [showSaveInput, setShowSaveInput] = useState(false);
-  const [tplName, setTplName] = useState("");
+  const [tplName, setTplName] = useState<string | null>(null);
   const [saveFlash, setSaveFlash] = useState(false);
   const tplDropdownRef = useRef<HTMLDivElement>(null);
+  const restoreSaveFocus = useRef(false);
   const saveFlashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -89,23 +91,17 @@ export function SendMessageModal() {
     setCorrelationId(tpl.correlationId ?? "");
     setSessionId(tpl.sessionId ?? "");
     if (tpl.entityName) setEntityName(tpl.entityName);
-    setAppProps(
-      tpl.applicationProperties
-        ? Object.entries(tpl.applicationProperties).map(([key, value]) => ({
-            key,
-            value: String(value ?? ""),
-          }))
-        : [],
-    );
+    setAppProps(propertyRows(tpl.applicationProperties));
     setTplDropdownOpen(false);
   };
 
+  const finishNaming = () => {
+    restoreSaveFocus.current = true;
+    setTplName(null);
+  };
+
   const handleSaveTemplate = () => {
-    if (!tplName.trim()) return;
-    const builtProps: Record<string, unknown> = {};
-    for (const { key, value } of appProps) {
-      if (key.trim()) builtProps[key.trim()] = value;
-    }
+    if (!tplName?.trim()) return;
     saveTemplate(
       tplName,
       {
@@ -114,12 +110,11 @@ export function SendMessageModal() {
         subject: subject || undefined,
         correlationId: correlationId || undefined,
         sessionId: sessionId || undefined,
-        applicationProperties: Object.keys(builtProps).length > 0 ? builtProps : undefined,
+        applicationProperties: Object.keys(applicationProperties).length > 0 ? applicationProperties : undefined,
       },
       entityName || undefined,
     );
-    setTplName("");
-    setShowSaveInput(false);
+    finishNaming();
     if (saveFlashTimer.current) clearTimeout(saveFlashTimer.current);
     setSaveFlash(true);
     saveFlashTimer.current = setTimeout(() => setSaveFlash(false), 2200);
@@ -137,9 +132,17 @@ export function SendMessageModal() {
     setSendDraft(null);
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Escape") close();
-  };
+  const dialog = useRef<HTMLDivElement>(null);
+  useDialogFocus(dialog, () => {
+    if (tplDropdownOpen) {
+      setTplDropdownOpen(false);
+      tplDropdownRef.current?.querySelector("button")?.focus();
+    } else if (tplName !== null) {
+      finishNaming();
+    } else {
+      close();
+    }
+  });
 
   const formatJson = () => {
     try {
@@ -157,11 +160,6 @@ export function SendMessageModal() {
     const currentTarget = extractSendTarget(explorerSelection);
     const targetName = entityName.trim();
 
-    const builtProps: Record<string, unknown> = {};
-    for (const { key, value } of appProps) {
-      if (key.trim()) builtProps[key.trim()] = value;
-    }
-
     const message: Record<string, unknown> = {
       body,
       contentType: contentType || undefined,
@@ -172,7 +170,7 @@ export function SendMessageModal() {
       scheduledEnqueueTimeUtc: scheduled
         ? new Date(scheduled).toISOString()
         : undefined,
-      applicationProperties: Object.keys(builtProps).length > 0 ? builtProps : undefined,
+      applicationProperties: Object.keys(applicationProperties).length > 0 ? applicationProperties : undefined,
     };
 
     setSending(true);
@@ -252,17 +250,17 @@ export function SendMessageModal() {
       onClick={(e) => {
         if (e.target === overlayRef.current) close();
       }}
-      onKeyDown={handleKeyDown}
     >
-      <div className="flex h-[min(42rem,90vh)] w-full max-w-2xl flex-col rounded-lg border border-zinc-200 bg-white shadow-2xl dark:border-zinc-700 dark:bg-zinc-900">
+      <div ref={dialog} role="dialog" aria-modal="true" aria-labelledby="send-message-title" className="flex h-[min(42rem,90vh)] w-full max-w-2xl flex-col rounded-lg border border-zinc-200 bg-white shadow-2xl dark:border-zinc-700 dark:bg-zinc-900">
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-3.5 border-b border-zinc-200 dark:border-zinc-700">
-          <h2 className="text-sm font-semibold text-azure-dark dark:text-azure-light flex items-center gap-2">
+          <h2 id="send-message-title" className="text-sm font-semibold text-azure-dark dark:text-azure-light flex items-center gap-2">
             <Icon name="send" size={14} className="text-azure-primary" />
             {t("explorer.sendModal.title")}
           </h2>
           <button
             onClick={close}
+            aria-label={t("explorer.sendModal.close")}
             className="p-1 rounded text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800"
           >
             <Icon name="close" size={15} />
@@ -336,10 +334,16 @@ export function SendMessageModal() {
             </div>
 
             {/* Save as template */}
-            {!showSaveInput ? (
+            {tplName === null ? (
               <button
                 type="button"
-                onClick={() => setShowSaveInput(true)}
+                ref={(button) => {
+                  if (button && restoreSaveFocus.current) {
+                    restoreSaveFocus.current = false;
+                    button.focus();
+                  }
+                }}
+                onClick={() => { setTplDropdownOpen(false); setTplName(""); }}
                 title={t("explorer.sendModal.templates.save")}
                 className="flex flex-shrink-0 items-center gap-1.5 rounded border border-zinc-300 dark:border-zinc-600 px-2.5 py-1.5 text-xs text-zinc-500 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors"
               >
@@ -357,10 +361,6 @@ export function SendMessageModal() {
                   onChange={(e) => setTplName(e.target.value)}
                   onKeyDown={(e) => {
                     if (e.key === "Enter") handleSaveTemplate();
-                    if (e.key === "Escape") {
-                      setShowSaveInput(false);
-                      setTplName("");
-                    }
                   }}
                   placeholder={t("explorer.sendModal.templates.namePlaceholder")}
                   className="w-32 text-xs px-2 py-1.5 rounded border border-azure-primary bg-transparent focus:outline-none focus:ring-1 focus:ring-azure-primary dark:text-zinc-200"
@@ -375,10 +375,7 @@ export function SendMessageModal() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => {
-                    setShowSaveInput(false);
-                    setTplName("");
-                  }}
+                  onClick={finishNaming}
                   className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200"
                 >
                   <Icon name="close" size={13} />
@@ -404,11 +401,12 @@ export function SendMessageModal() {
 
           {/* Entity */}
           <div className="flex flex-col gap-1">
-            <label className="text-xs font-medium text-zinc-600 dark:text-zinc-300">
+            <label htmlFor="send-entity" className="text-xs font-medium text-zinc-600 dark:text-zinc-300">
               {t("explorer.sendModal.entityName")} <span className="text-red-500">*</span>
             </label>
             <input
               type="text"
+              id="send-entity"
               value={entityName}
               onChange={(e) => setEntityName(e.target.value)}
               placeholder={t("explorer.sendModal.entityPlaceholder")}
@@ -419,7 +417,7 @@ export function SendMessageModal() {
           {/* Body */}
           <div className="flex flex-col gap-1">
             <div className="flex items-center justify-between">
-              <label className="text-xs font-medium text-zinc-600 dark:text-zinc-300">{t("explorer.sendModal.body")}</label>
+              <label htmlFor="send-body" className="text-xs font-medium text-zinc-600 dark:text-zinc-300">{t("explorer.sendModal.body")}</label>
               <button
                 onClick={formatJson}
                 className="text-[10px] text-azure-primary hover:underline"
@@ -428,6 +426,8 @@ export function SendMessageModal() {
               </button>
             </div>
             <textarea
+              id="send-body"
+              data-dialog-initial-focus
               value={body}
               onChange={(e) => setBody(e.target.value)}
               rows={8}
@@ -549,7 +549,7 @@ export function SendMessageModal() {
                     />
                     <input
                       type="text"
-                      value={row.value}
+                      value={String(row.value ?? "")}
                       onChange={(e) => updateAppProp(i, "value", e.target.value)}
                       placeholder={t("explorer.sendModal.appPropValuePlaceholder")}
                       className="flex-1 text-xs px-2 py-1 rounded border border-zinc-300 dark:border-zinc-600 bg-transparent focus:outline-none focus:ring-1 focus:ring-azure-primary dark:text-zinc-200"

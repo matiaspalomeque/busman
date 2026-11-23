@@ -76,13 +76,11 @@ describe("Toolbar", () => {
     expect(useAppStore.getState().isRunning).toBe(false);
   });
 
-  it("hides Manage Rules unless a subscription is selected", () => {
+  it("hides entity actions until an entity is selected", () => {
     render(<Toolbar />);
 
-    // With no selection the More dropdown is disabled, so Manage Rules is not reachable.
-    const moreButton = screen.getByRole("button", { name: /More/ }) as HTMLButtonElement;
-    expect(moreButton.disabled).toBe(true);
-    expect(screen.queryByRole("button", { name: "Manage Rules" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /More/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Browse" })).toBeNull();
   });
 
   it("shows Manage Rules for subscriptions and opens the modal", () => {

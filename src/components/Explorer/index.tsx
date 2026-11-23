@@ -1,5 +1,6 @@
 import { useShallow } from "zustand/react/shallow";
 import { useAppStore } from "../../store/appStore";
+import { useEntityList } from "../../hooks/useEntityList";
 import { useEntityProperties } from "../../hooks/useEntityProperties";
 import { Sidebar } from "./Sidebar";
 import { Toolbar } from "./Toolbar";
@@ -19,6 +20,7 @@ import { MessageContextMenu } from "./MessageContextMenu";
 
 export function Explorer() {
   useEntityProperties();
+  const entityList = useEntityList();
 
   const {
     isSendModalOpen,
@@ -54,7 +56,7 @@ export function Explorer() {
       <Toolbar />
 
       <div className="flex flex-1 min-h-0">
-        <Sidebar />
+        <Sidebar entityList={entityList} />
         <div className="relative flex min-w-0 flex-1 flex-col">
           <AtomicOperationBanner />
           <div className="flex min-h-0 flex-1">
@@ -77,7 +79,7 @@ export function Explorer() {
       {isMoveModalOpen && <MoveMessagesModal />}
       {isSettingsModalOpen && <SettingsModal />}
       {isAboutModalOpen && <AboutModal onClose={() => setIsAboutModalOpen(false)} />}
-      {isCreateEntityModalOpen && <CreateEntityModal />}
+      {isCreateEntityModalOpen && <CreateEntityModal onCreated={entityList.refreshEntities} />}
       {isSubscriptionRulesModalOpen && <SubscriptionRulesModal />}
       {deleteEntityTarget != null && <DeleteEntityDialog />}
       {messageContextMenu != null && <MessageContextMenu />}

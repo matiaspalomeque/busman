@@ -13,11 +13,9 @@ import { useDialogFocus } from "../../hooks/useDialogFocus";
 
 // ─── Section constants ────────────────────────────────────────────────────────
 
-const SECTION_HEADING =
-  "text-[10px] font-semibold text-zinc-600 dark:text-zinc-300 uppercase tracking-wider mb-1.5";
 const SECTION_CARD =
-  "rounded border border-zinc-200 dark:border-zinc-700 p-2 space-y-2";
-const ROW = "flex items-center justify-between";
+  "divide-y divide-zinc-200 dark:divide-zinc-700";
+const ROW = "flex items-center justify-between gap-3 py-2";
 const LABEL = "text-xs text-zinc-600 dark:text-zinc-300";
 
 // ─── Tab definitions ──────────────────────────────────────────────────────────
@@ -46,31 +44,26 @@ const INTERVAL_OPTIONS: ButtonGroupOption<15 | 30 | 60>[] = [
 
 function AppearancePanel() {
   const { t } = useTranslation();
-  const { isDark, toggleDark, language, setLanguage } = useAppStore();
+  const { isDark, setIsDark, language, setLanguage } = useAppStore();
   const themeOptions: ButtonGroupOption<"light" | "dark">[] = [
     { value: "light", label: <Icon name="sun" size={12} />, ariaLabel: t("explorer.settingsModal.lightTheme") },
     { value: "dark", label: <Icon name="moon" size={12} />, ariaLabel: t("explorer.settingsModal.darkTheme") },
   ];
 
   return (
-    <div className="px-5 py-4 space-y-3">
-      <div>
-        <div className={SECTION_HEADING}>{t("explorer.settingsModal.tabs.appearance")}</div>
-        <div className={SECTION_CARD}>
-          <div className={ROW}>
-            <span className={LABEL}>{t("explorer.settingsModal.theme")}</span>
-            <ButtonGroup
-              options={themeOptions}
-              value={isDark ? "dark" : "light"}
-              onChange={(v) => {
-                if ((v === "dark") !== isDark) toggleDark();
-              }}
-            />
-          </div>
-          <div className={ROW}>
-            <span className={LABEL}>{t("explorer.settingsModal.language")}</span>
-            <ButtonGroup options={LANG_OPTIONS} value={language} onChange={setLanguage} />
-          </div>
+    <div className="px-5 py-4">
+      <div className={SECTION_CARD}>
+        <div className={ROW}>
+          <span className={LABEL}>{t("explorer.settingsModal.theme")}</span>
+          <ButtonGroup
+            options={themeOptions}
+            value={isDark ? "dark" : "light"}
+            onChange={(value) => setIsDark(value === "dark")}
+          />
+        </div>
+        <div className={ROW}>
+          <span className={LABEL}>{t("explorer.settingsModal.language")}</span>
+          <ButtonGroup options={LANG_OPTIONS} value={language} onChange={setLanguage} />
         </div>
       </div>
     </div>
@@ -86,47 +79,44 @@ function AutoRefreshPanel() {
   } = useAppStore();
 
   return (
-    <div className="px-5 py-4 space-y-3">
-      <div>
-        <div className={SECTION_HEADING}>{t("explorer.settingsModal.tabs.autoRefresh")}</div>
-        <p className="text-[11px] text-zinc-400 dark:text-zinc-500 mb-1.5">
-          {t("explorer.settingsModal.autoRefreshDescription")}
-        </p>
-        <div className={SECTION_CARD}>
-          <div className={ROW}>
-            <span className={LABEL}>{t("explorer.settingsModal.enabled")}</span>
-            <ToggleSwitch
-              enabled={autoRefreshEnabled}
-              onToggle={() => setAutoRefreshEnabled(!autoRefreshEnabled)}
-              ariaLabel={
-                autoRefreshEnabled
-                  ? t("explorer.settingsModal.autoRefreshEnabledAria")
-                  : t("explorer.settingsModal.autoRefreshDisabledAria")
-              }
-            />
-          </div>
-          <div className={ROW}>
-            <span className={LABEL}>{t("explorer.settingsModal.interval")}</span>
-            <ButtonGroup
-              options={INTERVAL_OPTIONS}
-              value={autoRefreshInterval}
-              onChange={setAutoRefreshInterval}
-              disabled={!autoRefreshEnabled}
-              className="transition-opacity"
-            />
-          </div>
-          <div className={ROW}>
-            <span className={LABEL}>{t("explorer.settingsModal.sparklineEnabled")}</span>
-            <ToggleSwitch
-              enabled={sparklineEnabled}
-              onToggle={() => setSparklineEnabled(!sparklineEnabled)}
-              ariaLabel={
-                sparklineEnabled
-                  ? t("explorer.settingsModal.sparklineEnabledAria")
-                  : t("explorer.settingsModal.sparklineDisabledAria")
-              }
-            />
-          </div>
+    <div className="px-5 py-4">
+      <p className="text-xs text-zinc-600 dark:text-zinc-400 mb-2">
+        {t("explorer.settingsModal.autoRefreshDescription")}
+      </p>
+      <div className={SECTION_CARD}>
+        <div className={ROW}>
+          <span className={LABEL}>{t("explorer.settingsModal.enabled")}</span>
+          <ToggleSwitch
+            enabled={autoRefreshEnabled}
+            onToggle={() => setAutoRefreshEnabled(!autoRefreshEnabled)}
+            ariaLabel={
+              autoRefreshEnabled
+                ? t("explorer.settingsModal.autoRefreshEnabledAria")
+                : t("explorer.settingsModal.autoRefreshDisabledAria")
+            }
+          />
+        </div>
+        <div className={ROW}>
+          <span className={LABEL}>{t("explorer.settingsModal.interval")}</span>
+          <ButtonGroup
+            options={INTERVAL_OPTIONS}
+            value={autoRefreshInterval}
+            onChange={setAutoRefreshInterval}
+            disabled={!autoRefreshEnabled}
+            className="transition-opacity"
+          />
+        </div>
+        <div className={ROW}>
+          <span className={LABEL}>{t("explorer.settingsModal.sparklineEnabled")}</span>
+          <ToggleSwitch
+            enabled={sparklineEnabled}
+            onToggle={() => setSparklineEnabled(!sparklineEnabled)}
+            ariaLabel={
+              sparklineEnabled
+                ? t("explorer.settingsModal.sparklineEnabledAria")
+                : t("explorer.settingsModal.sparklineDisabledAria")
+            }
+          />
         </div>
       </div>
     </div>
@@ -138,25 +128,22 @@ function NotificationsPanel() {
   const { dlqNotificationsEnabled, setDlqNotificationsEnabled } = useAppStore();
 
   return (
-    <div className="px-5 py-4 space-y-3">
-      <div>
-        <div className={SECTION_HEADING}>{t("explorer.settingsModal.tabs.notifications")}</div>
-        <p className="text-[11px] text-zinc-400 dark:text-zinc-500 mb-1.5">
-          {t("explorer.settingsModal.dlqAlertsDescription")}
-        </p>
-        <div className={SECTION_CARD}>
-          <div className={ROW}>
-            <span className={LABEL}>{t("explorer.settingsModal.dlqAlerts")}</span>
-            <ToggleSwitch
-              enabled={dlqNotificationsEnabled}
-              onToggle={() => setDlqNotificationsEnabled(!dlqNotificationsEnabled)}
-              ariaLabel={
-                dlqNotificationsEnabled
-                  ? t("explorer.settingsModal.dlqNotificationsEnabledAria")
-                  : t("explorer.settingsModal.dlqNotificationsDisabledAria")
-              }
-            />
-          </div>
+    <div className="px-5 py-4">
+      <p className="text-xs text-zinc-600 dark:text-zinc-400 mb-2">
+        {t("explorer.settingsModal.dlqAlertsDescription")}
+      </p>
+      <div className={SECTION_CARD}>
+        <div className={ROW}>
+          <span className={LABEL}>{t("explorer.settingsModal.dlqAlerts")}</span>
+          <ToggleSwitch
+            enabled={dlqNotificationsEnabled}
+            onToggle={() => setDlqNotificationsEnabled(!dlqNotificationsEnabled)}
+            ariaLabel={
+              dlqNotificationsEnabled
+                ? t("explorer.settingsModal.dlqNotificationsEnabledAria")
+                : t("explorer.settingsModal.dlqNotificationsDisabledAria")
+            }
+          />
         </div>
       </div>
     </div>
@@ -192,7 +179,7 @@ export function SettingsModal() {
   return (
     <div
       ref={overlayRef}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-start justify-center bg-black/40 pt-[7.5vh] backdrop-blur-sm"
       onClick={(e) => {
         if (e.target === overlayRef.current) close();
       }}
@@ -203,7 +190,7 @@ export function SettingsModal() {
         aria-modal="true"
         aria-labelledby="settings-modal-title"
         tabIndex={-1}
-        className="bg-white dark:bg-zinc-900 rounded-lg shadow-2xl border border-zinc-200 dark:border-zinc-700 w-full max-w-3xl h-[85vh] flex flex-col overflow-hidden"
+        className="flex max-h-[85vh] w-full max-w-3xl flex-col overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-2xl dark:border-zinc-700 dark:bg-zinc-900"
       >
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-3.5 border-b border-zinc-200 dark:border-zinc-700 shrink-0">
@@ -226,6 +213,7 @@ export function SettingsModal() {
           {/* Left rail */}
           <div
             role="tablist"
+            aria-orientation="vertical"
             aria-label={t("explorer.settingsModal.title")}
             className="w-44 border-r border-zinc-200 dark:border-zinc-700 py-2 shrink-0"
           >
@@ -258,7 +246,7 @@ export function SettingsModal() {
             id="settings-tab-panel"
             role="tabpanel"
             aria-labelledby={`settings-tab-${settingsTab}`}
-            className="flex-1 flex flex-col min-h-0"
+            className="min-h-0 min-w-0 flex-1 flex flex-col overflow-y-auto"
           >
             {settingsTab === "connections" && <ConnectionsPanel />}
             {settingsTab === "appearance" && <AppearancePanel />}

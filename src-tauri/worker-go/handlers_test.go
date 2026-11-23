@@ -2520,3 +2520,14 @@ func TestKnownSingleMessageScanLeavesNoUnusedCreditsDuringAction(t *testing.T) {
 		t.Fatalf("unexpected settlement: abandoned=%v completed=%v", abandoned, completed)
 	}
 }
+
+func TestOutboundMessagePreservesSubmittedJSON(t *testing.T) {
+	body := `{ "orderId" : 9007199254740993, "amount" : 12.00 }`
+	message, err := outboundMessage(map[string]any{"body": body, "contentType": "application/json"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(message.Body) != body {
+		t.Fatalf("outgoing body = %s, want %s", message.Body, body)
+	}
+}

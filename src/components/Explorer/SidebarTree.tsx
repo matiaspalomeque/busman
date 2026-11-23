@@ -238,29 +238,24 @@ export const TreeItem = memo(function TreeItem({ label, itemTitle, icon, isSelec
                 : `${counts.active} · ${counts.dlq}`
             }
           >
-            {/* Reserve the trend column while samples accumulate so counts stay aligned. */}
-            {sparkline !== undefined && (
-              <span className="w-8 h-2.5 shrink-0 inline-flex items-center justify-center" aria-hidden="true">
-                {sparkline != null && <Sparkline data={sparkline} />}
-              </span>
-            )}
-            {/* Active count column */}
-            <span className="w-7 text-right text-zinc-500 dark:text-zinc-400">
+            {sparkline && <Sparkline data={sparkline} />}
+            <span className="text-zinc-600 dark:text-zinc-300">
+              <span className="sr-only">{t("explorer.entityDetails.activeMessageCount")} </span>
               {fmtCount(counts.active)}
             </span>
             {/* Separator */}
             <span className="text-zinc-300 dark:text-zinc-600">·</span>
             {/* DLQ count column — slightly wider to accommodate optional alert icon */}
             <span className={[
-              "w-9 inline-flex items-center justify-end gap-0.5",
+              "inline-flex items-center gap-0.5",
               breached
                 ? "text-red-500 dark:text-red-400 font-bold"
                 : counts.dlq > 0
-                  ? "text-amber-500 dark:text-amber-400 font-medium"
+                  ? "text-amber-700 dark:text-amber-400 font-medium"
                   : "text-zinc-400 dark:text-zinc-600",
             ].join(" ")}>
               {breached && <Icon name="alertTriangle" size={8} className="shrink-0" />}
-              {fmtCount(counts.dlq)}
+              {fmtCount(counts.dlq)} {t("modeSelector.dlq")}
             </span>
           </span>
         )}

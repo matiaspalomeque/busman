@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import "../../i18n";
 import { useAppStore } from "../../store/appStore";
@@ -14,10 +14,6 @@ vi.mock("@tauri-apps/api/core", () => ({
   invoke: mocks.invoke,
 }));
 
-vi.mock("../../hooks/useEntityList", () => ({
-  useEntityList: () => ({ refreshEntities: mocks.refreshEntities }),
-}));
-
 const CONN: Connection = {
   id: "conn-1",
   name: "Test",
@@ -31,7 +27,7 @@ function renderModal() {
   store.setConnections([CONN]);
   store.setActiveConnectionId(CONN.id);
   store.setEntities({ queues: ["existing-queue"], topics: { orders: ["existing-subscription"] } });
-  render(<CreateEntityModal />);
+  render(<CreateEntityModal onCreated={mocks.refreshEntities} />);
   fireEvent.click(screen.getByRole("button", { name: "Advanced Options" }));
 }
 
@@ -53,6 +49,41 @@ describe("CreateEntityModal", () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+  });
+
+  it.each([
+    { selection: "original", refreshes: 1 },
+    { selection: "different profile", refreshes: 0 },
+    { selection: "returned to original", refreshes: 1 },
+    { selection: "changed namespace", refreshes: 0 },
+  ])("keeps a reopened dialog intact when Create finishes on $selection", async ({ selection, refreshes }) => {
+    const other = { ...CONN, id: "other" };
+    const store = useAppStore.getState();
+    store.setConnections([CONN, other]);
+    store.setActiveConnectionId(CONN.id);
+    store.setIsCreateEntityModalOpen(true);
+    let complete!: () => void;
+    mocks.invoke.mockReturnValueOnce(new Promise<void>((resolve) => { complete = resolve; }));
+
+    function DialogHost() {
+      const open = useAppStore((state) => state.isCreateEntityModalOpen);
+      return open ? <CreateEntityModal onCreated={mocks.refreshEntities} /> : null;
+    }
+    render(<DialogHost />);
+    fireEvent.change(inputFor("Name"), { target: { value: "new-queue" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    act(() => {
+      if (selection === "different profile" || selection === "returned to original") store.setActiveConnectionId(other.id);
+      if (selection === "returned to original") store.setActiveConnectionId(CONN.id);
+      if (selection === "changed namespace") store.setConnections([{ ...CONN, connectionString: "Endpoint=sb://changed.example/" }, other]);
+      store.setIsCreateEntityModalOpen(true);
+    });
+    const reopened = screen.getByRole("dialog");
+    await act(async () => { complete(); });
+    expect(mocks.refreshEntities).toHaveBeenCalledTimes(refreshes);
+    expect(screen.queryByRole("dialog")).toBe(reopened);
+    expect(useAppStore.getState().eventLog[0].status).toBe("success");
   });
 
   it("submits Lock Duration for queues", async () => {

@@ -12,7 +12,7 @@ import type { z } from "zod";
 
 type ListEntitiesResult = z.infer<typeof ListEntitiesResultSchema>;
 
-// Shared across consumers (the sidebar and entity-creation dialog).
+// Request IDs stay unique when the explorer remounts during a refresh.
 let countRequestSequence = 0;
 
 export function useEntityList() {
@@ -40,7 +40,11 @@ export function useEntityList() {
   })));
 
   const generation = useAppStore((state) => state.connectionGeneration);
-  const fetchingConnRef = useRef<number | null>(null);
+  const pendingList = useRef<{
+    generation: number;
+    requestReload: () => void;
+    done: Promise<void>;
+  } | null>(null);
 
   const fetchCounts = useCallback(
     (result: ListEntitiesResult, connId: string) => {
@@ -92,38 +96,53 @@ export function useEntityList() {
     [batchSetCounts, incrementCountsLoading, decrementCountsLoading]
   );
 
-  const fetchEntities = useCallback(async () => {
+  const fetchEntities = useCallback((reloadIfBusy: boolean) => {
     const state = useAppStore.getState();
     const currentConn = selectActiveConnection(state);
     const requestGeneration = state.connectionGeneration;
-    if (!currentConn || fetchingConnRef.current === requestGeneration) return;
-    fetchingConnRef.current = requestGeneration;
-    const connId = currentConn.id;
+    if (!currentConn) return Promise.resolve();
+    if (pendingList.current?.generation === requestGeneration) {
+      if (reloadIfBusy) pendingList.current.requestReload();
+      return pendingList.current.done;
+    }
+
+    let reloadRequested = false;
+    const isCurrent = () => useAppStore.getState().connectionGeneration === requestGeneration;
+    const readLatest = async () => {
+      do {
+        reloadRequested = false;
+        try {
+          const result = await safeInvoke("list_entities", ListEntitiesResultSchema, {
+            args: { connectionId: currentConn.id },
+          });
+          if (isCurrent() && !reloadRequested) {
+            setEntities(result);
+            fetchCounts(result, currentConn.id);
+          }
+        } catch (err) {
+          if (isCurrent() && !reloadRequested) setEntitiesError(String(err));
+        }
+      } while (reloadRequested && isCurrent());
+      if (pendingList.current?.generation === requestGeneration) pendingList.current = null;
+      if (isCurrent()) setEntitiesLoading(false);
+    };
+
+    const done = readLatest();
+    pendingList.current = {
+      generation: requestGeneration,
+      requestReload: () => { reloadRequested = true; },
+      done,
+    };
     setEntitiesLoading(true);
     setEntitiesError(null);
-    try {
-      const result = await safeInvoke(
-        "list_entities",
-        ListEntitiesResultSchema,
-        { args: { connectionId: connId } }
-      );
-      if (useAppStore.getState().connectionGeneration !== requestGeneration) return;
-      setEntities(result);
-      fetchCounts(result, connId);
-    } catch (err) {
-      if (useAppStore.getState().connectionGeneration !== requestGeneration) return;
-      setEntitiesError(String(err));
-    } finally {
-      if (fetchingConnRef.current === requestGeneration) {
-        if (useAppStore.getState().connectionGeneration === requestGeneration) setEntitiesLoading(false);
-        fetchingConnRef.current = null;
-      }
-    }
+    return done;
   }, [setEntities, setEntitiesLoading, setEntitiesError, fetchCounts]);
 
   useEffect(() => {
-    void fetchEntities();
+    void fetchEntities(false);
   }, [conn?.id, generation, fetchEntities]);
+
+  const refreshEntities = useCallback(() => fetchEntities(true), [fetchEntities]);
 
   const refreshAllCounts = useCallback(() => {
     const state = useAppStore.getState();
@@ -168,5 +187,5 @@ export function useEntityList() {
     }
   }, [batchSetCounts]);
 
-  return { entities, entitiesLoading, entitiesError, refreshEntities: fetchEntities, refreshEntityCount, refreshAllCounts };
+  return { entities, entitiesLoading, entitiesError, refreshEntities, refreshEntityCount, refreshAllCounts };
 }

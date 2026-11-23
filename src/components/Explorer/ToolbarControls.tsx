@@ -4,7 +4,8 @@ import { useConnections } from "../../hooks/useConnections";
 import { useEscapeKey } from "../../hooks/useEscapeKey";
 import { useDialogFocus } from "../../hooks/useDialogFocus";
 import { selectActiveConnection, useAppStore } from "../../store/appStore";
-import type { Connection, QueueMode } from "../../types";
+import { groupConnections } from "../../utils/connection";
+import type { QueueMode } from "../../types";
 import { safeColor } from "../../utils/color";
 import { Icon } from "../Common/Icon";
 
@@ -16,34 +17,23 @@ interface ToolbarButtonProps {
   onClick: () => void;
   disabled?: boolean;
   title?: string;
-  danger?: boolean;
   primary?: boolean;
-  warn?: boolean;
-  violet?: boolean;
   active?: boolean;
 }
 
-export function ToolbarButton({ label, icon, onClick, disabled, title, danger, primary, warn, violet, active }: ToolbarButtonProps) {
+export function ToolbarButton({ label, icon, onClick, disabled, title, primary, active }: ToolbarButtonProps) {
   return (
     <button
       type="button"
       onClick={onClick}
       disabled={disabled}
       title={title}
+      aria-pressed={active}
       className={[
-        "flex items-center gap-2 px-3.5 py-2 text-sm font-medium border rounded-lg transition-all duration-150",
-        "disabled:opacity-40 disabled:cursor-not-allowed",
-        danger
-          ? "border-red-300 dark:border-red-700 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20"
-          : warn
-            ? "border-orange-400 dark:border-orange-600 text-orange-600 dark:text-orange-400 hover:bg-orange-50 dark:hover:bg-orange-900/20"
-            : primary
-              ? "border-blue-300 dark:border-blue-700 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20"
-              : violet
-                ? active
-                  ? "border-violet-400 dark:border-violet-600 bg-violet-50 dark:bg-violet-900/20 text-violet-600 dark:text-violet-400 shadow-sm"
-                  : "border-violet-300 dark:border-violet-700 text-violet-500 dark:text-violet-400 hover:bg-violet-50 dark:hover:bg-violet-900/20"
-                : "border-zinc-300 dark:border-zinc-600 text-azure-secondary dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-700",
+        "inline-flex items-center gap-1.5 whitespace-nowrap rounded border px-2.5 py-1.5 text-xs font-medium disabled:cursor-not-allowed disabled:opacity-40",
+        primary || active
+          ? "border-azure-700 bg-azure-700 text-white hover:bg-azure-800"
+          : "border-zinc-300 text-azure-secondary hover:bg-zinc-100 dark:border-zinc-600 dark:text-zinc-300 dark:hover:bg-zinc-700",
       ].join(" ")}
     >
       {icon}
@@ -159,7 +149,7 @@ export function MoreActionsDropdown({ onMove, onReceive, onReplay, onRepublish, 
         disabled={disabled}
         aria-haspopup="menu"
         aria-expanded={open}
-        className="flex items-center gap-2 px-3.5 py-2 text-sm font-medium border rounded-lg transition-all duration-150 border-zinc-300 dark:border-zinc-600 text-azure-secondary dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-700 disabled:opacity-40 disabled:cursor-not-allowed"
+        className="flex items-center gap-2 px-2.5 py-1.5 text-xs font-medium border rounded-lg transition-all duration-150 border-zinc-300 dark:border-zinc-600 text-azure-secondary dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-700 disabled:opacity-40 disabled:cursor-not-allowed"
         title={t("explorer.toolbar.moreActions")}
       >
         <Icon name="moreHorizontal" size={16} />
@@ -258,7 +248,7 @@ export function ModeSelector({ value, onChange }: ModeSelectorProps) {
           onClick={() => onChange(m)}
           aria-pressed={value === m}
           className={[
-            "px-3 py-2 text-sm font-medium transition-colors",
+            "px-2.5 py-1.5 text-xs font-medium transition-colors",
             value === m
               ? "bg-azure-primary text-white"
               : "text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-700",
@@ -273,24 +263,9 @@ export function ModeSelector({ value, onChange }: ModeSelectorProps) {
 
 // ─── Connection selector ──────────────────────────────────────────────────────
 
-const ENV_ORDER = ["prod", "staging", "dev"];
-
-function buildGroups(items: Connection[]) {
-  const buckets: Record<string, Connection[]> = {};
-  for (const c of items) {
-    const key = c.environment ?? "";
-    if (!buckets[key]) buckets[key] = [];
-    buckets[key].push(c);
-  }
-  return [
-    ...ENV_ORDER.filter((e) => buckets[e]?.length).map((e) => ({ key: e, items: buckets[e]! })),
-    ...(buckets[""]?.length ? [{ key: "", items: buckets[""] }] : []),
-  ];
-}
-
 export function ConnectionSelector() {
   const { t } = useTranslation();
-  const { connections } = useAppStore();
+  const connections = useAppStore((state) => state.connections);
   const conn = useAppStore(selectActiveConnection);
   const { setActive } = useConnections();
   const [open, setOpen] = useState(false);
@@ -322,7 +297,7 @@ export function ConnectionSelector() {
     ? connections.filter((c) => c.name.toLowerCase().includes(search.toLowerCase()))
     : connections;
 
-  const groups = buildGroups(filtered);
+  const groups = groupConnections(filtered);
   const showHeaders = groups.length > 1;
 
   const handleSelect = (id: string) => {

@@ -10,7 +10,7 @@ import type { PeekedMessage } from "../../types";
 import { EntityDetailsPanel } from "./EntityDetailsPanel";
 import { messageOperationKey, type MessageOperation } from "../../utils/messageOperation";
 import { logHandledError } from "../../utils/logging";
-import { BodyFilterBar, ColHeader, EmptyState, FilterRow, FirstRunState, bodyString, formatTime } from "./MessageGridPresentation";
+import { BodyFilterBar, ColHeader, EmptyState, FilterRow, FirstRunState, formatTime } from "./MessageGridPresentation";
 
 function pendingOperationLabel(t: ReturnType<typeof useTranslation>["t"], operation: MessageOperation): string {
   if (operation === "DeleteMessage") return t("explorer.grid.pendingDelete");
@@ -42,7 +42,8 @@ export function MessageGrid() {
     pendingMessageOperations,
     lastBrowseError,
     setLastBrowseError,
-    connections,
+    hasConnections,
+    hasActiveConnection,
     setIsSettingsModalOpen,
   } = useAppStore(useShallow((state) => ({
     peekMessages: state.peekMessages,
@@ -63,7 +64,8 @@ export function MessageGrid() {
     pendingMessageOperations: state.pendingMessageOperations,
     lastBrowseError: state.lastBrowseError,
     setLastBrowseError: state.setLastBrowseError,
-    connections: state.connections,
+    hasConnections: state.connections.length > 0,
+    hasActiveConnection: state.activeConnectionId !== null,
     setIsSettingsModalOpen: state.setIsSettingsModalOpen,
   })));
 
@@ -101,16 +103,15 @@ export function MessageGrid() {
         : explorerSelection.kind === "subscription"
           ? `${sanitize(explorerSelection.topicName)}-${sanitize(explorerSelection.subscriptionName)}-messages`
           : "messages";
-    const path = await save({
-      defaultPath: `${baseName}.json`,
-      filters: [{ name: "JSON", extensions: ["json"] }],
-    });
-    if (!path) return;
     try {
+      const path = await save({
+        defaultPath: `${baseName}.json`,
+        filters: [{ name: "JSON", extensions: ["json"] }],
+      });
+      if (!path) return;
       await invoke("write_json_file", { path, content: JSON.stringify(peekMessages, null, 2) });
     } catch (err) {
       logHandledError("Failed to export messages", err, {
-        path,
         messageCount: peekMessages.length,
         selection: explorerSelection,
       });
@@ -174,7 +175,8 @@ export function MessageGrid() {
 
       {!hasSelection ? (
         <FirstRunState
-          hasConnections={connections.length > 0}
+          hasConnections={hasConnections}
+          hasActiveConnection={hasActiveConnection}
           onManageConnections={() => setIsSettingsModalOpen(true, "connections")}
         />
       ) : showEntityDetails ? (
@@ -190,7 +192,7 @@ export function MessageGrid() {
             <button
               type="button"
               onClick={() => void handleExport()}
-              title="Export all loaded messages to a JSON file"
+              title={t("explorer.grid.exportJsonTitle")}
               aria-label={t("explorer.grid.exportJson")}
               className="ml-1 flex items-center gap-1 px-2 py-0.5 text-[10px] rounded border border-zinc-300 dark:border-zinc-600 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-700 focus:outline-none focus:ring-1 focus:ring-azure-primary transition-colors whitespace-nowrap"
             >
@@ -207,7 +209,12 @@ export function MessageGrid() {
 
       {/* Table */}
       <div className="flex-1 overflow-auto">
-        <table className="w-full min-w-[640px] text-xs border-collapse table-fixed">
+        <table className="w-full min-w-[30rem] text-xs border-collapse table-fixed">
+          <colgroup>
+            <col className="w-12" />
+            <col className="w-32" />
+            <col /><col /><col />
+          </colgroup>
           <thead className="sticky top-0 z-10 bg-zinc-50 dark:bg-zinc-800">
             <tr>
               <ColHeader label={t("explorer.grid.colIndex")} />
@@ -257,48 +264,32 @@ export function MessageGrid() {
           <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
             {pageRows.length === 0 ? (
               <EmptyState
-                message={
-                  !hasSelection
-                    ? t("explorer.grid.emptySelectEntity")
-                    : !hasBrowsed
-                      ? t("explorer.grid.emptyNoBrowse")
-                      : peekMessages.length === 0
-                        ? t("explorer.grid.emptyNoMessages")
-                        : t("explorer.grid.emptyNoMatch")
-                }
-                icon={
-                  !hasSelection
-                    ? "search"
-                    : !hasBrowsed || peekMessages.length === 0
-                      ? "box"
-                      : "search"
-                }
+                message={t(peekMessages.length === 0 ? "explorer.grid.emptyNoMessages" : "explorer.grid.emptyNoMatch")}
+                icon={peekMessages.length === 0 ? "box" : "search"}
               />
             ) : (
-              pageRows.map((msg, idx) => (
-                (() => {
-                  const pendingKey = messageOperationKey(msg);
-                  const pendingOperation = pendingKey ? pendingMessageOperations[pendingKey] : undefined;
-                  return (
-                    <MessageRow
-                      key={pendingKey ?? msg.messageId ?? idx}
-                      msg={msg}
-                      index={pageStart + idx + 1}
-                      isSelected={selectedMessage === msg}
-                      pendingOperation={pendingOperation?.operation}
-                      onClick={() => {
-                        if (pendingOperation) return;
-                        setSelectedMessage(msg === selectedMessage ? null : msg);
-                      }}
-                      onContextMenu={(e) => {
-                        e.preventDefault();
-                        if (pendingOperation) return;
-                        setMessageContextMenu({ x: e.clientX, y: e.clientY, msg });
-                      }}
-                    />
-                  );
-                })()
-              ))
+              pageRows.map((msg, idx) => {
+                const pendingKey = messageOperationKey(msg);
+                const pendingOperation = pendingKey ? pendingMessageOperations[pendingKey] : undefined;
+                return (
+                  <MessageRow
+                    key={pendingKey ?? msg.messageId ?? idx}
+                    msg={msg}
+                    index={pageStart + idx + 1}
+                    isSelected={selectedMessage === msg}
+                    pendingOperation={pendingOperation?.operation}
+                    onClick={() => {
+                      if (pendingOperation) return;
+                      setSelectedMessage(msg === selectedMessage ? null : msg);
+                    }}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      if (pendingOperation) return;
+                      setMessageContextMenu({ x: e.clientX, y: e.clientY, msg });
+                    }}
+                  />
+                );
+              })
             )}
           </tbody>
         </table>
@@ -487,5 +478,3 @@ function MessageRow({ msg, index, isSelected, pendingOperation, onClick, onConte
     </tr>
   );
 }
-
-export { bodyString };

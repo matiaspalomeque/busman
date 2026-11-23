@@ -157,14 +157,16 @@ export function EventLog() {
 
         {unknownCount > 0 && <button type="button" onClick={() => setCollapsed(false)} className="text-[10px] text-amber-700 dark:text-amber-300 hover:underline">{unknownCount} · {t("explorer.eventLog.needsReview")}</button>}
         {returnedEntries.length > 0 && <button type="button" onClick={() => setDetailsId(returnedEntries[0].id)} className="text-[10px] text-amber-700 dark:text-amber-300 hover:underline">{t("explorer.replayFeedback.returnedCount", { count: returnedEntries.length })}</button>}
-        <button type="button" onClick={() => void exportJournal()} className="ml-auto text-[10px] text-azure-primary hover:underline">{t("explorer.eventLog.export")}</button>
-        <button
-          type="button"
-          onClick={() => { clearEventLog(); setPage(1); setDetailsId(null); }}
-          disabled={eventLog.length === 0 || isRunning || unknownCount > 0 || eventLog.some((entry) => entry.status === "running")}
-          title={t("explorer.eventLog.clearHelp")}
-          className="text-[10px] text-azure-primary hover:underline disabled:opacity-50 disabled:cursor-not-allowed disabled:no-underline"
-        >{t("explorer.eventLog.clear")}</button>
+        {eventLog.length > 0 && <>
+          <button type="button" onClick={() => void exportJournal()} className="ml-auto text-[10px] text-azure-primary hover:underline">{t("explorer.eventLog.export")}</button>
+          <button
+            type="button"
+            onClick={() => { clearEventLog(); setPage(1); setDetailsId(null); }}
+            disabled={isRunning || unknownCount > 0 || eventLog.some((entry) => entry.status === "running")}
+            title={t("explorer.eventLog.clearHelp")}
+            className="text-[10px] text-azure-primary hover:underline disabled:opacity-50 disabled:cursor-not-allowed disabled:no-underline"
+          >{t("explorer.eventLog.clear")}</button>
+        </>}
         {(journalError || exportError) && <span role="alert" className="text-[10px] text-red-600" title={journalError ?? exportError ?? ""}>{t("explorer.eventLog.saveError")}</span>}
         {/* Running indicator */}
         {isRunning && (

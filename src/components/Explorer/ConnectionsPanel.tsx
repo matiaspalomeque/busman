@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { useAppStore } from "../../store/appStore";
 import { useConnections } from "../../hooks/useConnections";
 import { Icon } from "../Common/Icon";
+import { groupConnections } from "../../utils/connection";
 import { safeColor } from "../../utils/color";
 import { ExportConnectionsModal } from "../Connections/ExportConnectionsModal";
 import { ImportConnectionsModal } from "../Connections/ImportConnectionsModal";
@@ -134,6 +135,7 @@ function ConnectionForm({ initial, onSave, onCancel }: ConnectionFormProps) {
             className="flex-1 text-xs px-2.5 py-1.5 rounded border border-zinc-300 dark:border-zinc-600 bg-transparent focus:outline-none focus:ring-1 focus:ring-azure-primary dark:text-zinc-200 select-custom-arrow"
           >
             <option value="">{t("explorer.connectionsModal.envNone")}</option>
+            {environment && !ENV_PRESETS.some((p) => p.value === environment) && <option value={environment}>{environment}</option>}
             {ENV_PRESETS.map((p) => (
               <option key={p.value} value={p.value}>
                 {t(`explorer.connectionsModal.env.${p.value}`)}
@@ -235,21 +237,6 @@ function EnvironmentBadge({ connection }: { connection: Connection }) {
   );
 }
 
-const CP_ENV_ORDER = ["prod", "staging", "dev"];
-
-function buildConnectionGroups(items: Connection[]) {
-  const buckets: Record<string, Connection[]> = {};
-  for (const c of items) {
-    const key = c.environment ?? "";
-    if (!buckets[key]) buckets[key] = [];
-    buckets[key].push(c);
-  }
-  return [
-    ...CP_ENV_ORDER.filter((e) => buckets[e]?.length).map((e) => ({ key: e, items: buckets[e]! })),
-    ...(buckets[""]?.length ? [{ key: "", items: buckets[""] }] : []),
-  ];
-}
-
 export function ConnectionsPanel() {
   const { t } = useTranslation();
   const { connections, activeConnectionId } = useAppStore();
@@ -259,14 +246,13 @@ export function ConnectionsPanel() {
   const [deleting, setDeleting] = useState<string | null>(null);
   const [loadingEdit, setLoadingEdit] = useState<string | null>(null);
   const [editError, setEditError] = useState("");
-  const [showExport, setShowExport] = useState(false);
-  const [showImport, setShowImport] = useState(false);
+  const [transfer, setTransfer] = useState<"import" | "export" | null>(null);
   const [search, setSearch] = useState("");
 
   const handleSave = async (
     c: Partial<Connection> & { name: string; connectionString: string }
   ) => {
-    await saveConnection(c);
+    await saveConnection(c, formMode?.kind === "edit" ? formMode.connection.connectionString : undefined);
     setFormMode(null);
   };
 
@@ -299,7 +285,7 @@ export function ConnectionsPanel() {
     ? connections.filter((c) => c.name.toLowerCase().includes(search.toLowerCase()))
     : connections;
 
-  const groups = buildConnectionGroups(filtered);
+  const groups = groupConnections(filtered);
   const showGroupHeaders = !search && groups.length > 1;
 
   const renderConnectionItem = (c: Connection) => (
@@ -310,7 +296,7 @@ export function ConnectionsPanel() {
             {t("explorer.connectionsModal.editing", { name: c.name })}
           </p>
           <ConnectionForm
-            initial={c}
+            initial={formMode.connection}
             onSave={handleSave}
             onCancel={() => setFormMode(null)}
           />
@@ -465,13 +451,13 @@ export function ConnectionsPanel() {
         )}
         <div className="flex items-center gap-2">
           <button
-            onClick={() => setShowImport(true)}
+            onClick={() => setTransfer("import")}
             className="text-xs px-3 py-1.5 rounded border border-zinc-300 dark:border-zinc-600 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-300"
           >
             {t("connections.importButton")}
           </button>
           <button
-            onClick={() => setShowExport(true)}
+            onClick={() => setTransfer("export")}
             disabled={connections.length === 0}
             className="text-xs px-3 py-1.5 rounded border border-zinc-300 dark:border-zinc-600 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-300 disabled:opacity-40 disabled:cursor-not-allowed"
           >
@@ -480,14 +466,16 @@ export function ConnectionsPanel() {
         </div>
       </div>
 
-      {showExport && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40">
-          <ExportConnectionsModal onClose={() => setShowExport(false)} />
-        </div>
-      )}
-      {showImport && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40">
-          <ImportConnectionsModal onClose={() => setShowImport(false)} />
+      {transfer && (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40"
+          onPointerDown={(event) => {
+            if (event.target === event.currentTarget) event.preventDefault();
+          }}
+        >
+          {transfer === "import"
+            ? <ImportConnectionsModal onClose={() => setTransfer(null)} />
+            : <ExportConnectionsModal onClose={() => setTransfer(null)} />}
         </div>
       )}
     </div>

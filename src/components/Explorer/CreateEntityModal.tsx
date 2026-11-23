@@ -1,8 +1,8 @@
-import { useEffect, useState } from "react";
+import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { useAppStore, selectActiveConnection } from "../../store/appStore";
-import { useEntityList } from "../../hooks/useEntityList";
+import { useDialogFocus } from "../../hooks/useDialogFocus";
 import { Icon } from "../Common/Icon";
 import { extractNamespace } from "../../utils/connection";
 
@@ -10,11 +10,10 @@ type EntityType = "queue" | "topic" | "subscription";
 
 const MAX_SIZE_OPTIONS = [1024, 2048, 3072, 4096, 5120];
 
-export function CreateEntityModal() {
+export function CreateEntityModal({ onCreated }: { onCreated: () => Promise<void> }) {
   const { t } = useTranslation();
   const conn = useAppStore(selectActiveConnection);
   const { entities, setIsCreateEntityModalOpen, addEventLogEntry, updateEventLogEntry } = useAppStore();
-  const { refreshEntities } = useEntityList();
 
   const [entityType, setEntityType] = useState<EntityType>("queue");
   const [name, setName] = useState("");
@@ -38,14 +37,8 @@ export function CreateEntityModal() {
 
   const close = () => setIsCreateEntityModalOpen(false);
 
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => {
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") close();
-    };
-    document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
-  }, []);
+  const dialog = useRef<HTMLDivElement>(null);
+  useDialogFocus(dialog, close);
 
   const validate = (): string | null => {
     if (!name.trim()) return t("explorer.entityManagement.nameRequired");
@@ -89,11 +82,6 @@ export function CreateEntityModal() {
       if (entityType !== "topic") {
         options.maxDeliveryCount = maxDeliveryCount;
         options.deadLetteringOnMessageExpiration = deadLetteringOnExpiration;
-      }
-      if (entityType === "queue") {
-        options.requiresSession = requiresSession;
-      }
-      if (entityType === "subscription") {
         options.requiresSession = requiresSession;
       }
 
@@ -108,8 +96,9 @@ export function CreateEntityModal() {
       }
 
       updateEventLogEntry(logId, "success");
-      close();
-      void refreshEntities();
+      if (dialog.current) close();
+      const active = selectActiveConnection(useAppStore.getState());
+      if (active?.id === conn.id && active.connectionString === conn.connectionString) void onCreated();
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       setError(t("explorer.entityManagement.createError", { type: entityTypeLabel, error: msg }));
@@ -129,13 +118,13 @@ export function CreateEntityModal() {
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
       onClick={(e) => e.target === e.currentTarget && close()}
     >
-      <div role="dialog" aria-modal="true" className="flex min-h-[24rem] max-h-[90vh] w-full max-w-md flex-col overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-xl mx-4 dark:border-zinc-700 dark:bg-zinc-900">
+      <div ref={dialog} role="dialog" aria-modal="true" aria-labelledby="create-entity-title" className="flex min-h-[24rem] max-h-[90vh] w-full max-w-md flex-col overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-xl mx-4 dark:border-zinc-700 dark:bg-zinc-900">
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-200 dark:border-zinc-700">
-          <h2 className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">
+          <h2 id="create-entity-title" className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">
             {t("explorer.entityManagement.createEntity")}
           </h2>
-          <button onClick={close} className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200">
+          <button onClick={close} aria-label={t("explorer.properties.close")} className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200">
             <Icon name="close" size={16} />
           </button>
         </div>
@@ -188,7 +177,7 @@ export function CreateEntityModal() {
               value={name}
               onChange={(e) => setName(e.target.value)}
               className={inputClass}
-              autoFocus
+              data-dialog-initial-focus
             />
           </div>
 

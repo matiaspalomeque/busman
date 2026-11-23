@@ -116,6 +116,14 @@ describe("useConnections", () => {
   });
 
   describe("deleteConnection", () => {
+    it("keeps a saved profile disconnected when another profile is deleted", async () => {
+      useAppStore.getState().setConnections([CONN_A]);
+      mockInvoke.mockResolvedValueOnce(makeConfig([CONN_A], "a"));
+      const { result } = renderHook(() => useConnections());
+      await act(async () => { await result.current.deleteConnection("b"); });
+      expect(useAppStore.getState().activeConnectionId).toBeNull();
+    });
+
     it("invokes delete_connection and removes its localStorage keys", async () => {
       localStorage.setItem("pins:a", "[]");
       localStorage.setItem("dlqThresholds:a", "{}");
@@ -158,7 +166,7 @@ describe("useConnections", () => {
       mockInvoke.mockResolvedValueOnce(undefined);
 
       const { result } = renderHook(() => useConnections());
-      await act(async () => { await result.current.exportConnections("secret"); });
+      await act(async () => { await expect(result.current.exportConnections("secret")).resolves.toBe(true); });
 
       expect(mockSave).toHaveBeenCalled();
       expect(mockInvoke).toHaveBeenCalledWith("export_connections", {
@@ -171,21 +179,18 @@ describe("useConnections", () => {
       mockSave.mockResolvedValueOnce(null);
 
       const { result } = renderHook(() => useConnections());
-      await act(async () => { await result.current.exportConnections("secret"); });
+      await act(async () => { await expect(result.current.exportConnections("secret")).resolves.toBe(false); });
 
       expect(mockInvoke).not.toHaveBeenCalled();
     });
   });
 
   describe("importConnections", () => {
-    it("returns 0 and skips the invoke when user cancels the file picker", async () => {
+    it("distinguishes a cancelled picker from an import with zero new profiles", async () => {
       mockOpen.mockResolvedValueOnce(null);
 
       const { result } = renderHook(() => useConnections());
-      let count!: number;
-      await act(async () => { count = await result.current.importConnections("pw", false); });
-
-      expect(count).toBe(0);
+      await act(async () => { await expect(result.current.importConnections("pw", false)).resolves.toBeNull(); });
       expect(mockInvoke).not.toHaveBeenCalled();
     });
 
@@ -194,24 +199,24 @@ describe("useConnections", () => {
       mockInvoke.mockResolvedValueOnce(makeConfig([CONN_A, CONN_B], null));
 
       const { result } = renderHook(() => useConnections());
-      let count!: number;
+      let count: number | null = null;
       await act(async () => { count = await result.current.importConnections("pw", false); });
 
       expect(count).toBe(2);
       expect(useAppStore.getState().connections).toHaveLength(2);
     });
 
-    it("returns only the delta (new connections) when merge=true", async () => {
+    it("counts newly merged profiles and preserves the current disconnected state", async () => {
       useAppStore.getState().setConnections([CONN_A]);
       mockOpen.mockResolvedValueOnce("/tmp/export.busman");
-      mockInvoke.mockResolvedValueOnce(makeConfig([CONN_A, CONN_B], null));
+      mockInvoke.mockResolvedValueOnce(makeConfig([CONN_A, CONN_B], CONN_A.id));
 
       const { result } = renderHook(() => useConnections());
-      let count!: number;
+      let count: number | null = null;
       await act(async () => { count = await result.current.importConnections("pw", true); });
 
-      // 2 total − 1 pre-existing = 1 new
       expect(count).toBe(1);
+      expect(useAppStore.getState().activeConnectionId).toBeNull();
     });
   });
 });

@@ -8,7 +8,9 @@ A desktop client for managing Azure Service Bus queues and topics.
 
 Browse messages, inspect payloads, send test messages, move dead letters back to their queues, and drain queues — all from a native desktop window without writing any code or using the Azure Portal.
 
-![Screenshot](src/assets/screenshot.png)
+The screenshots use synthetic data from a fictional bookshop.
+
+![Busman Explorer showing the orders.incoming queue and the JSON body of a selected book order](src/assets/screenshot.png)
 
 ---
 
@@ -78,7 +80,7 @@ Save multiple named connections and switch between them at any time. Connections
 
 Use **Test Connection** to validate your connection string before saving — Busman will confirm it can reach the namespace or show the specific error.
 
-Connections that share a common name prefix are automatically grouped together in the connections panel. A **search bar** lets you filter connections by name across all groups.
+The connections panel groups profiles by environment. The search bar filters profiles by name across groups.
 
 ### Export & Import Connections
 
@@ -86,13 +88,13 @@ Back up your connections or share them with teammates using **Export** and **Imp
 
 ### Entity Browser
 
-The left sidebar lists all **Queues** and **Topics** (with their subscriptions) in the connected namespace. Each entity shows its **active and dead-letter message counts** so you can spot backlogs at a glance. Use the filter box to search by name. Click any item to select it.
+The left sidebar lists all **Queues** and **Topics** (with their subscriptions) in the connected namespace. Each entity shows its **active and dead-letter message counts** so you can spot backlogs at a glance. Use the filter box to search by name. Expand a topic to see its subscriptions. Select a queue or subscription to inspect it.
 
 When **trend lines** are enabled in settings, a small sparkline next to each entity visualises how its message count has changed over recent auto-refresh cycles — making it easy to see queues that are growing or draining.
 
 ### Pin Entities
 
-Open the **⋯ actions** beside a queue or subscription and select **Pin** to keep it at the top of the list. Pinned items remain visible regardless of filtering or sorting. Unpin them the same way.
+Click the star beside a queue or subscription to keep it at the top of the list. Pinned items remain visible regardless of filtering or sorting. Unpin them the same way.
 
 ### Create & Delete Entities
 
@@ -100,7 +102,7 @@ You can create new **queues**, **topics**, and **subscriptions** directly from B
 
 ### Subscription Rules
 
-Right-click a subscription and select **Manage Rules** to view, create, edit, and delete its filter rules. Busman supports **SQL filters**, **correlation filters**, and **True/False (pass-all/pass-none)** rule types. Each rule is validated before saving.
+Select a subscription, then open **More → Manage Rules** to view, create, edit, and delete its filter rules. Busman supports **SQL filters**, **correlation filters**, and **True/False (pass-all/pass-none)** rule types. Each rule is validated before saving.
 
 ### DLQ Alert Thresholds
 
@@ -129,6 +131,8 @@ Click any row in the message grid to open its details in the right panel. You ca
 - Application Properties (custom key/value metadata)
 - Full message body (JSON is automatically pretty-printed)
 
+![Failure tab showing that order-7002 was dead-lettered because its SKU is missing from the catalog](src/assets/screenshot-dead-letter.png)
+
 ### Send a Message
 
 Click **Send** to open the send dialog. Fill in the message body and content type. Expand **Advanced properties** to set:
@@ -140,23 +144,23 @@ Click **Send** to open the send dialog. Fill in the message body and content typ
 
 ### Message Templates
 
-Save frequently-used message payloads as named templates directly from the Send dialog. Click **Save as template** to store the current body and properties, then reload any saved template with a single click. Templates are persisted locally and tied to the entity they were created from for easy filtering.
+Save frequently-used message payloads as named templates directly from the Send dialog. Click **Save as template** to store the current body and properties, then reload any saved template with a single click. Templates are saved locally. Loading a template restores its saved destination name when present. The Explorer selection determines whether Send treats that name as a queue or a topic.
 
 ### Move Messages
 
-Click **Move** to transfer all messages from one queue to another. Choose the mode (Normal, DLQ, or Both). Useful for routing messages between environments or queues. This operation is **irreversible** — messages are consumed from the source and re-published to the destination.
+Open **More → Move** to transfer all messages from one queue to another. Choose the mode (Normal, DLQ, or Both). Useful for routing messages between environments or queues. This operation is **irreversible** — messages are consumed from the source and re-published to the destination.
 
 ### Replay Dead Letters
 
-Click **Replay** to move all DLQ messages from a queue back into the same queue's main channel. This re-processes failed messages without any manual copying.
+Open **More → Replay** to move all DLQ messages from a queue back into the same queue's main channel. This re-processes failed messages without any manual copying.
 
 ### Receive (Drain)
 
-Click **Receive** to destructively read and discard all messages from a queue. Useful for clearing test data. **This cannot be undone.** A confirmation prompt appears before the operation runs.
+Open **More → Drain / delete messages** to discard messages from the selected source. Useful for clearing test data. **This cannot be undone.** A confirmation prompt appears before the operation runs.
 
 ### Resend a Message
 
-While inspecting a message in the properties panel, click **Resend this message** to pre-fill the Send dialog with that message's body and metadata. Edit as needed, then send.
+To edit and send a copy, right-click a message and choose **Resend (send a copy)**. The detail panel’s **Resend this message** action immediately replays the selected message and removes the original after broker acceptance.
 
 ### Message Insights
 
@@ -167,6 +171,8 @@ After browsing, click **Insights** in the toolbar to open the Message Insights p
 - **Error distribution** — bar chart of DLQ error reasons
 - **Time distribution** — hour-of-day heatmap showing when messages were enqueued
 - **JSON schema** — inferred schema across all message bodies
+
+![Message Insights showing 24 active orders, 12 dead letters grouped by reason, and enqueue times by hour](src/assets/screenshot-insights.png)
 
 ### Export Messages as JSON
 
@@ -184,11 +190,11 @@ Busman checks for new releases on startup. When an update is available, you will
 
 ## Interface
 
-- **Dark / Light mode** — toggle with the moon/sun icon in the sidebar footer.
-- **Language** — switch between **EN** (English) and **ES** (Spanish) from the sidebar footer.
+- **Dark / Light mode** — choose a theme in **Settings → Appearance**.
+- **Language** — choose **English** or **Español** in **Settings → Appearance**.
 - **Resizable panels** — drag the sidebar and properties panel edges to resize them. Your preferred widths are saved automatically.
 - **Window state** — Busman remembers its size and position between sessions.
-- **Stop** — any long-running operation (Move, Receive, Replay) can be cancelled mid-flight with the **Stop** button that appears in the toolbar while it runs.
+- **Stop** — any long-running operation (Move, Receive, Replay) can be cancelled mid-flight with the **Stop** button in the operation status tray.
 
 ---
 

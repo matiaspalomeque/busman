@@ -53,57 +53,9 @@ func validateSendSessionRequirement(
 	return nil
 }
 
-func handleSendMessage(raw json.RawMessage) (any, error) {
-	var p sendMessageParams
-	if err := json.Unmarshal(raw, &p); err != nil {
-		return nil, fmt.Errorf("invalid params: %w", err)
-	}
-	cs, err := requireConnectionString(p.Env)
-	if err != nil {
-		return nil, err
-	}
-	if err := validateEntityName(p.EntityName, "Entity"); err != nil {
-		return nil, err
-	}
-	if p.EntityKind == "" {
-		// Backward-compatible worker default for callers predating entityKind.
-		p.EntityKind = "queue"
-	}
-
-	msg := p.Message
-	if msg == nil {
-		msg = map[string]any{}
-	}
-	maxWaitMs := parseIntOrDefault(p.Env["MAX_WAIT_TIME_IN_MS"], 60000)
-	sessionID, _ := msg["sessionId"].(string)
-	if p.EntityKind == "queue" {
-		adminClient, err := getAdminClient(cs)
-		if err != nil {
-			return nil, err
-		}
-		checkCtx, checkCancel := context.WithTimeout(context.Background(), time.Duration(maxWaitMs)*time.Millisecond)
-		err = validateSendSessionRequirement(checkCtx, adminClient, p.EntityKind, p.EntityName, sessionID)
-		checkCancel()
-		if err != nil {
-			return nil, fmt.Errorf("cannot safely send to queue %q: %w", p.EntityName, err)
-		}
-	} else if err := validateSendSessionRequirement(context.Background(), nil, p.EntityKind, p.EntityName, sessionID); err != nil {
-		return nil, err
-	}
-
-	// Body: if contentType is application/json, try to parse → re-encode for clean bytes.
-	bodyStr, _ := msg["body"].(string)
-	body := []byte(bodyStr)
-	if ct, _ := msg["contentType"].(string); strings.Contains(ct, "application/json") {
-		var jsonVal any
-		if err := json.Unmarshal(body, &jsonVal); err == nil {
-			if b, err := json.Marshal(jsonVal); err == nil {
-				body = b
-			}
-		}
-	}
-
-	sbMsg := &azservicebus.Message{Body: body}
+func outboundMessage(msg map[string]any) (*azservicebus.Message, error) {
+	body, _ := msg["body"].(string)
+	sbMsg := &azservicebus.Message{Body: []byte(body)}
 
 	if v, _ := msg["contentType"].(string); v != "" {
 		sbMsg.ContentType = &v
@@ -129,6 +81,48 @@ func handleSendMessage(raw json.RawMessage) (any, error) {
 			return nil, fmt.Errorf("scheduledEnqueueTimeUtc must be an RFC3339 timestamp: %w", err)
 		}
 		sbMsg.ScheduledEnqueueTime = &t
+	}
+	return sbMsg, nil
+}
+
+func handleSendMessage(raw json.RawMessage) (any, error) {
+	var p sendMessageParams
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return nil, fmt.Errorf("invalid params: %w", err)
+	}
+	cs, err := requireConnectionString(p.Env)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateEntityName(p.EntityName, "Entity"); err != nil {
+		return nil, err
+	}
+	if p.EntityKind == "" {
+		// Backward-compatible worker default for callers predating entityKind.
+		p.EntityKind = "queue"
+	}
+
+	msg := p.Message
+	maxWaitMs := parseIntOrDefault(p.Env["MAX_WAIT_TIME_IN_MS"], 60000)
+	sessionID, _ := msg["sessionId"].(string)
+	if p.EntityKind == "queue" {
+		adminClient, err := getAdminClient(cs)
+		if err != nil {
+			return nil, err
+		}
+		checkCtx, checkCancel := context.WithTimeout(context.Background(), time.Duration(maxWaitMs)*time.Millisecond)
+		err = validateSendSessionRequirement(checkCtx, adminClient, p.EntityKind, p.EntityName, sessionID)
+		checkCancel()
+		if err != nil {
+			return nil, fmt.Errorf("cannot safely send to queue %q: %w", p.EntityName, err)
+		}
+	} else if err := validateSendSessionRequirement(context.Background(), nil, p.EntityKind, p.EntityName, sessionID); err != nil {
+		return nil, err
+	}
+
+	sbMsg, err := outboundMessage(msg)
+	if err != nil {
+		return nil, err
 	}
 
 	client, err := azservicebus.NewClientFromConnectionString(cs, nil)

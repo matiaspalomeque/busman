@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useDialogFocus } from "../../hooks/useDialogFocus";
 import { useConnections } from "../../hooks/useConnections";
 import { logHandledError } from "../../utils/logging";
 
@@ -9,6 +10,8 @@ interface Props {
 
 export function ExportConnectionsModal({ onClose }: Props) {
   const { t } = useTranslation();
+  const dialog = useRef<HTMLDivElement>(null);
+  useDialogFocus(dialog, onClose);
   const { exportConnections } = useConnections();
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -30,8 +33,7 @@ export function ExportConnectionsModal({ onClose }: Props) {
     setExporting(true);
     setError(null);
     try {
-      await exportConnections(password);
-      setSuccess(true);
+      setSuccess(await exportConnections(password));
     } catch (err) {
       logHandledError("Failed to export connections from modal", err);
       setError(String(err));
@@ -42,6 +44,7 @@ export function ExportConnectionsModal({ onClose }: Props) {
 
   return (
     <div
+      ref={dialog}
       role="dialog"
       aria-modal="true"
       aria-labelledby="export-connections-title"
@@ -65,6 +68,7 @@ export function ExportConnectionsModal({ onClose }: Props) {
             </p>
             <div className="mt-auto flex justify-end">
               <button
+                autoFocus
                 onClick={onClose}
                 className="text-xs px-4 py-1.5 rounded bg-azure-primary text-white hover:bg-azure-primary/90"
               >
@@ -83,7 +87,7 @@ export function ExportConnectionsModal({ onClose }: Props) {
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                autoFocus
+                data-dialog-initial-focus
                 className="text-xs px-2.5 py-1.5 rounded border border-zinc-300 dark:border-zinc-600 bg-transparent focus:outline-none focus:ring-1 focus:ring-azure-primary dark:text-zinc-200"
               />
             </div>

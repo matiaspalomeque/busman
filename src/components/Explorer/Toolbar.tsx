@@ -42,7 +42,6 @@ export function Toolbar() {
     lastPeekNormalMaxSeqNum,
     lastPeekDlqMaxSeqNum,
     isRunning,
-    isSendModalOpen,
     setIsSendModalOpen,
     setIsMoveModalOpen,
     setIsSettingsModalOpen,
@@ -66,7 +65,6 @@ export function Toolbar() {
     lastPeekNormalMaxSeqNum: state.lastPeekNormalMaxSeqNum,
     lastPeekDlqMaxSeqNum: state.lastPeekDlqMaxSeqNum,
     isRunning: state.isRunning,
-    isSendModalOpen: state.isSendModalOpen,
     setIsSendModalOpen: state.setIsSendModalOpen,
     setIsMoveModalOpen: state.setIsMoveModalOpen,
     setIsSettingsModalOpen: state.setIsSettingsModalOpen,
@@ -416,109 +414,77 @@ export function Toolbar() {
   })();
 
   return (
-    <header className="relative shrink-0 min-h-14 flex flex-wrap items-center px-4 py-2 gap-x-4 gap-y-2 border-b border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900">
-      {/* Mode selector */}
-      <ModeSelector value={peekMode} onChange={setPeekMode} />
-
-      {/* Count input */}
-      <div className="flex shrink-0 items-center gap-2">
-        <label htmlFor={countInputId} className="text-sm text-zinc-500 dark:text-zinc-400">{t("explorer.toolbar.countLabel")}</label>
-        <input
-          id={countInputId}
-          type="number"
-          value={peekCount}
-          min={1}
-          max={5000}
-          onChange={(e) => setPeekCount(Math.max(1, Math.min(5000, Number(e.target.value))))}
-          className="w-20 text-sm px-3 py-2 rounded-lg border border-zinc-300 dark:border-zinc-600 bg-transparent focus:outline-none focus:ring-2 focus:ring-azure-primary/50 dark:text-zinc-200"
-        />
-      </div>
-
-      {/* Divider */}
-      <div className="h-8 w-px bg-zinc-200 dark:bg-zinc-700" />
-
-      {/* Action buttons */}
-      <div className="flex shrink-0 items-center gap-2">
-        <ToolbarButton
-          label={t("explorer.toolbar.browse")}
-          icon={
-            browsing ? (
-              <span className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
-            ) : (
-              <Icon name="eye" size={14} />
-            )
-          }
-          onClick={handleBrowse}
-          disabled={!hasSelection || busy}
-          title={hasSelection ? t("explorer.toolbar.browseTitle") : t("explorer.toolbar.browseTitleDisabled")}
-        />
-
-        {peekMessages.length > 0 && (
-          <ToolbarButton
-            label={t("explorer.toolbar.loadMore")}
-            icon={
-              loadingMore ? (
-                <span className="w-5 h-5 border-2 border-current border-t-transparent rounded-full animate-spin" />
-              ) : (
-                <Icon name="chevronDown" size={16} />
-              )
-            }
-            onClick={handleLoadMore}
-            disabled={loadMoreDisabled}
-            title={loadMoreTitle}
-            primary
-          />
-        )}
-
-        {peekMessages.length > 0 && (
-          <ToolbarButton
-            label={t("insights.toggle")}
-            icon={<Icon name="chartBar" size={14} />}
-            onClick={() => setIsInsightsPanelOpen(!isInsightsPanelOpen)}
-            title={t("insights.toggleTitle")}
-            violet
-            active={isInsightsPanelOpen}
-          />
-        )}
-
-        <ToolbarButton
-          label={t("explorer.toolbar.send")}
-          icon={<Icon name="send" size={14} />}
-          onClick={() => setIsSendModalOpen(!isSendModalOpen)}
-          disabled={!hasSelection || busy}
-          title={hasSelection ? t("explorer.toolbar.sendTitle") : t("explorer.toolbar.sendTitleDisabled")}
-        />
-
-        <MoreActionsDropdown
-          onMove={() => setIsMoveModalOpen(true)}
-          onReceive={() => setConfirm("receive")}
-          onReplay={() => setConfirm("replay")}
-          onRepublish={() => setConfirm("republish")}
-          onManageRules={() => setIsSubscriptionRulesModalOpen(true)}
-          disabled={!hasSelection || busy}
-          canReplay={canReplay}
-          canRepublish={canRepublish}
-          canManageRules={canManageRules}
-        />
-      </div>
-
-      {/* Spacer */}
-      <div className="flex-1" />
-
-      {/* Connection selector */}
-      <div className="flex shrink-0 items-center gap-2">
+    <header className="relative flex min-h-12 shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-b border-zinc-200 bg-white px-3 py-1.5 dark:border-zinc-700 dark:bg-zinc-900">
+      {hasSelection && (
+        <>
+          <ModeSelector value={peekMode} onChange={setPeekMode} />
+          <label htmlFor={countInputId} className="flex items-center gap-1.5 text-xs text-zinc-600 dark:text-zinc-300">
+            {t("explorer.toolbar.countLabel")}
+            <input
+              id={countInputId}
+              type="number"
+              value={peekCount}
+              min={1}
+              max={5000}
+              onChange={(e) => setPeekCount(Math.max(1, Math.min(5000, Math.trunc(Number(e.target.value)) || 1)))}
+              className="w-16 rounded border border-zinc-300 bg-transparent px-2 py-1.5 text-sm dark:border-zinc-600 dark:text-zinc-200"
+            />
+          </label>
+          <div className="flex flex-wrap items-center gap-1.5">
+            <ToolbarButton
+              label={t("explorer.toolbar.browse")}
+              icon={<Icon name={browsing ? "loader" : "eye"} size={14} className={browsing ? "animate-spin" : undefined} />}
+              primary
+              onClick={handleBrowse}
+              disabled={busy}
+              title={t("explorer.toolbar.browseTitle")}
+            />
+            {peekMessages.length > 0 && (
+              <>
+                <ToolbarButton
+                  label={t("explorer.toolbar.loadMore")}
+                  icon={<Icon name={loadingMore ? "loader" : "chevronDown"} size={14} className={loadingMore ? "animate-spin" : undefined} />}
+                  onClick={handleLoadMore}
+                  disabled={loadMoreDisabled}
+                  title={loadMoreTitle}
+                />
+                <ToolbarButton
+                  label={t("insights.toggle")}
+                  icon={<Icon name="chartBar" size={14} />}
+                  onClick={() => setIsInsightsPanelOpen(!isInsightsPanelOpen)}
+                  title={t("insights.toggleTitle")}
+                  active={isInsightsPanelOpen}
+                />
+              </>
+            )}
+            <ToolbarButton
+              label={t("explorer.toolbar.send")}
+              icon={<Icon name="send" size={14} />}
+              onClick={() => setIsSendModalOpen(true)}
+              disabled={busy}
+              title={t("explorer.toolbar.sendTitle")}
+            />
+            <MoreActionsDropdown
+              onMove={() => setIsMoveModalOpen(true)}
+              onReceive={() => setConfirm("receive")}
+              onReplay={() => setConfirm("replay")}
+              onRepublish={() => setConfirm("republish")}
+              onManageRules={() => setIsSubscriptionRulesModalOpen(true)}
+              disabled={busy}
+              canReplay={canReplay}
+              canRepublish={canRepublish}
+              canManageRules={canManageRules}
+            />
+          </div>
+        </>
+      )}
+      <div className="ml-auto flex items-center gap-2">
         <ConnectionSelector />
-
-        <button
-          type="button"
-          onClick={() => setIsSettingsModalOpen(true, "connections")}
-          aria-label={t("explorer.settingsModal.title")}
-          className="p-2 rounded-lg border border-zinc-300 dark:border-zinc-600 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-700 transition-colors"
-          title={t("explorer.settingsModal.title")}
-        >
+        <button type="button" onClick={() => setIsSettingsModalOpen(true, "connections")}
+          aria-label={t("explorer.settingsModal.title")} title={t("explorer.settingsModal.title")}
+          className="rounded border border-zinc-300 p-2 text-zinc-500 hover:bg-zinc-100 dark:border-zinc-600 dark:text-zinc-400 dark:hover:bg-zinc-700">
           <Icon name="settings" size={15} />
         </button>
-
       </div>
 
       {/* Confirm modals */}

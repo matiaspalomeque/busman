@@ -131,7 +131,7 @@ export interface AppState extends MessageSlice, OperationSlice {
   entityCountHistory: Record<string, number[]>;
 
   // Actions
-  setConnections: (connections: Connection[]) => void;
+  setConnections: (connections: Connection[], changedCredentialId?: string) => void;
   setActiveConnectionId: (id: string | null) => void;
   setPeekMode: (mode: QueueMode) => void;
   setCountRefresh: (key: string, status: { requestId: number; updatedAt?: string; error?: string }) => void;
@@ -179,14 +179,12 @@ export interface AppState extends MessageSlice, OperationSlice {
   setSingleMessageMoveTarget: (msg: PeekedMessage | null) => void;
   startMessageOperation: (key: string, operation: PendingMessageOperation) => void;
   finishMessageOperation: (key: string, runId?: string) => void;
-  removePeekedMessageBySeq: (sequenceNumber: string | null | undefined) => void;
   removePeekedMessageByKey: (key: string) => void;
   toggleSidebarSection: (section: "queues" | "topics" | "system") => void;
   setSidebarWidth: (width: number) => void;
   setPropertiesPanelWidth: (width: number) => void;
   togglePin: (key: string) => void;
   setIsDark: (dark: boolean) => void;
-  toggleDark: () => void;
   setLanguage: (lang: "en" | "es") => void;
   setDlqThreshold: (entityKey: string, threshold: number | null) => void;
   setDlqNotificationsEnabled: (enabled: boolean) => void;
@@ -289,10 +287,17 @@ export const useAppStore = create<AppState>()(
       return 320;
     })(),
     pinnedEntities: [],
-    isDark: false,
+    isDark: (() => {
+      try {
+        const stored = localStorage.getItem("theme");
+        return stored === "dark" || (stored === null && window.matchMedia?.("(prefers-color-scheme: dark)").matches === true);
+      } catch {
+        return false;
+      }
+    })(),
     language: (() => {
       try {
-        return (localStorage.getItem("language") as "en" | "es") ?? "en";
+        return localStorage.getItem("language") === "es" ? "es" : "en";
       } catch {
         return "en" as const;
       }
@@ -330,12 +335,22 @@ export const useAppStore = create<AppState>()(
     changedEntities: [],
     entityCountHistory: {},
 
-    setConnections: (connections) =>
+    setConnections: (connections, changedCredentialId) => {
+      const { activeConnectionId, connections: previousConnections } = get();
+      const previous = previousConnections.find((connection) => connection.id === activeConnectionId);
+      const replacement = connections.find((connection) => connection.id === activeConnectionId);
+      const scopeChanged = activeConnectionId !== null && (
+        !replacement || activeConnectionId === changedCredentialId || previous?.connectionString !== replacement.connectionString
+      );
       set((state) => {
         state.connections = [...connections].sort((a, b) =>
           a.name.localeCompare(b.name, undefined, { sensitivity: "base" })
         );
-      }),
+      });
+      // An edited profile can point at a different broker while retaining its ID.
+      // Retire old observations and requests using the normal scope reset.
+      if (scopeChanged) get().setActiveConnectionId(replacement ? activeConnectionId : null);
+    },
 
     setActiveConnectionId: (id) =>
       set((state) => {
@@ -708,19 +723,6 @@ export const useAppStore = create<AppState>()(
         if (!runId || state.pendingMessageOperations[key]?.runId === runId) delete state.pendingMessageOperations[key];
       }),
 
-    removePeekedMessageBySeq: (sequenceNumber) =>
-      set((state) => {
-        if (sequenceNumber == null) return;
-        const idx = state.peekMessages.findIndex((m) => m.sequenceNumber === sequenceNumber);
-        if (idx >= 0) {
-          state.loadedMessageBytes = Math.max(0, state.loadedMessageBytes - messageBytes(state.peekMessages[idx]));
-          state.peekMessages.splice(idx, 1);
-          if (state.selectedMessage?.sequenceNumber === sequenceNumber) {
-            state.selectedMessage = null;
-          }
-        }
-      }),
-
     removePeekedMessageByKey: (key) =>
       set((state) => {
         const idx = state.peekMessages.findIndex((m) => messageOperationKey(m) === key);
@@ -776,11 +778,6 @@ export const useAppStore = create<AppState>()(
     setIsDark: (dark) =>
       set((state) => {
         state.isDark = dark;
-      }),
-
-    toggleDark: () =>
-      set((state) => {
-        state.isDark = !state.isDark;
       }),
 
     setLanguage: (lang) =>

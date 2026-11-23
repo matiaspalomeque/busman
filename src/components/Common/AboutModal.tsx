@@ -1,7 +1,8 @@
+import { useRef } from "react";
 import { useTranslation } from "react-i18next";
 import logo from "../../../src-tauri/icons/128x128@2x.png";
 import { version as APP_VERSION } from "../../../package.json";
-import { useEscapeKey } from "../../hooks/useEscapeKey";
+import { useDialogFocus } from "../../hooks/useDialogFocus";
 
 interface Props {
   onClose: () => void;
@@ -9,12 +10,14 @@ interface Props {
 
 export function AboutModal({ onClose }: Props) {
   const { t } = useTranslation();
-  useEscapeKey(onClose);
+  const dialog = useRef<HTMLDivElement>(null);
+  useDialogFocus(dialog, onClose);
 
   return (
     <div
       className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4"
       onClick={onClose}
+      ref={dialog}
       role="dialog"
       aria-modal="true"
       aria-labelledby="about-modal-title"

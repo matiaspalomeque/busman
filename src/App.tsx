@@ -17,18 +17,14 @@ export function App() {
     workerAvailable,
     setWorkerAvailable,
     isDark,
-    setIsDark,
     language,
-    setLanguage,
     setIsAboutModalOpen,
     setIsSettingsModalOpen,
   } = useAppStore(useShallow((state) => ({
     workerAvailable: state.workerAvailable,
     setWorkerAvailable: state.setWorkerAvailable,
     isDark: state.isDark,
-    setIsDark: state.setIsDark,
     language: state.language,
-    setLanguage: state.setLanguage,
     setIsAboutModalOpen: state.setIsAboutModalOpen,
     setIsSettingsModalOpen: state.setIsSettingsModalOpen,
   })));
@@ -72,7 +68,6 @@ export function App() {
     };
   }, []);
 
-  // Initialise theme and language from localStorage / system preference.
   useEffect(() => {
     const checkForUpdates = async () => {
       if (!import.meta.env.PROD) {
@@ -120,45 +115,22 @@ export function App() {
       }
     };
 
-    const stored = localStorage.getItem("theme");
-    const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-    setIsDark(stored === "dark" || (!stored && prefersDark));
-
-    const storedLang = localStorage.getItem("language") as "en" | "es" | null;
-    setLanguage(storedLang ?? "en");
-
-    if (isTauriRuntime()) {
-      void checkWorkerAvailability();
-    } else {
-      setWorkerAvailable(false);
-    }
-
-    // Check for a newer app release.
+    if (!isTauriRuntime()) return;
+    void checkWorkerAvailability();
     void checkForUpdates();
-
-    // Load persisted connections.
-    if (isTauriRuntime()) {
-      loadConnections().catch((err) => {
-        logHandledError("Failed to load connections", err);
-        console.error("Failed to load connections:", err);
-      });
-    }
-  }, [setIsDark, loadConnections, setLanguage, checkWorkerAvailability]);
+    loadConnections().catch((error) => logHandledError("Failed to load connections", error));
+  }, [loadConnections, checkWorkerAvailability]);
 
   // Sync the document class and localStorage whenever isDark changes.
   useEffect(() => {
-    if (isDark) {
-      document.documentElement.classList.add("dark");
-      localStorage.setItem("theme", "dark");
-    } else {
-      document.documentElement.classList.remove("dark");
-      localStorage.setItem("theme", "light");
-    }
+    document.documentElement.classList.toggle("dark", isDark);
+    localStorage.setItem("theme", isDark ? "dark" : "light");
   }, [isDark]);
 
   // Sync language to localStorage and i18next whenever it changes.
   useEffect(() => {
     localStorage.setItem("language", language);
+    document.documentElement.lang = language;
     void i18n.changeLanguage(language);
   }, [language]);
 

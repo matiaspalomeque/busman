@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { useAppStore, selectActiveConnection } from "../../store/appStore";
+import { useDialogFocus } from "../../hooks/useDialogFocus";
 import { Icon } from "../Common/Icon";
 import { extractNamespace } from "../../utils/connection";
 
@@ -22,26 +23,20 @@ export function DeleteEntityDialog() {
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const close = () => {
+    setDeleteEntityTarget(null);
+    setError(null);
+  };
+
+  const dialog = useRef<HTMLDivElement>(null);
+  useDialogFocus(dialog, close);
+
   if (!deleteEntityTarget) return null;
 
   const { type, name, topicName } = deleteEntityTarget;
   const namespace = conn ? extractNamespace(conn.connectionString) : "";
   const typeLabel = t(`explorer.entityManagement.${type}`);
   const displayName = type === "subscription" ? `${topicName}/${name}` : name;
-
-  const close = () => {
-    setDeleteEntityTarget(null);
-    setError(null);
-  };
-
-  useEffect(() => {
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") close();
-    };
-    document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   const isSelectedEntity = () => {
     if (type === "queue") {
@@ -118,14 +113,14 @@ export function DeleteEntityDialog() {
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
       onClick={(e) => e.target === e.currentTarget && close()}
     >
-      <div role="dialog" aria-modal="true" className="flex min-h-[17rem] w-full max-w-sm flex-col overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-xl mx-4 dark:border-zinc-700 dark:bg-zinc-900">
+      <div ref={dialog} role="dialog" aria-modal="true" aria-labelledby="delete-entity-title" className="flex min-h-[17rem] w-full max-w-sm flex-col overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-xl mx-4 dark:border-zinc-700 dark:bg-zinc-900">
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-200 dark:border-zinc-700">
-          <h2 className="text-sm font-semibold text-red-600 dark:text-red-400 flex items-center gap-2">
+          <h2 id="delete-entity-title" className="text-sm font-semibold text-red-600 dark:text-red-400 flex items-center gap-2">
             <Icon name="trash" size={15} />
             {t("explorer.entityManagement.delete")} {typeLabel}
           </h2>
-          <button onClick={close} className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200">
+          <button onClick={close} aria-label={t("explorer.properties.close")} className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200">
             <Icon name="close" size={16} />
           </button>
         </div>
@@ -154,6 +149,7 @@ export function DeleteEntityDialog() {
         {/* Footer */}
         <div className="flex justify-end gap-2 px-4 py-3 border-t border-zinc-200 dark:border-zinc-700">
           <button
+            data-dialog-initial-focus
             onClick={close}
             className="px-3 py-1.5 text-xs rounded border border-zinc-300 dark:border-zinc-600 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800"
           >

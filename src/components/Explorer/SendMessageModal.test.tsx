@@ -32,7 +32,7 @@ const SESSION_MESSAGE: PeekedMessage = {
   correlationId: "correlation-42",
   partitionKey: "partition-42",
   traceParent: null,
-  applicationProperties: { source: "test" },
+  applicationProperties: { source: "test", retry: false, attempt: 3 },
   enqueuedTimeUtc: null,
   expiresAtUtc: null,
   _source: "Normal Queue: q1",
@@ -97,6 +97,23 @@ describe("SendMessageModal", () => {
     vi.restoreAllMocks();
   });
 
+  it.each(["Save as template", "Load template…"])("keeps the draft when Escape dismisses %s", (action) => {
+    configureStore().setIsSendModalOpen(true);
+    render(<SendMessageModal />);
+    const body = screen.getByLabelText("Body") as HTMLTextAreaElement;
+    fireEvent.change(body, { target: { value: "Work in progress" } });
+    const trigger = () => screen.getByRole("button", { name: action });
+    trigger().focus();
+    fireEvent.click(trigger());
+    fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+
+    expect(useAppStore.getState().isSendModalOpen).toBe(true);
+    expect(body.value).toBe("Work in progress");
+    expect(document.activeElement).toBe(trigger());
+    fireEvent.keyDown(trigger(), { key: "Escape" });
+    expect(useAppStore.getState().isSendModalOpen).toBe(false);
+  });
+
   it("preserves a source message Session Id through resend and send", async () => {
     const store = configureStore();
     openResend(SESSION_MESSAGE, store);
@@ -116,7 +133,10 @@ describe("SendMessageModal", () => {
           entityName: "q1",
           entityKind: "queue",
           connectionId: CONN.id,
-          message: expect.objectContaining({ sessionId: "session-42" }),
+          message: expect.objectContaining({
+            sessionId: "session-42",
+            applicationProperties: SESSION_MESSAGE.applicationProperties,
+          }),
         },
       });
     });

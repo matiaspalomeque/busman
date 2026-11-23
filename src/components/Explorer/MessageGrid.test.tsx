@@ -56,7 +56,7 @@ describe("MessageGrid", () => {
     render(<><AtomicOperationBanner /><MessageGrid /><OperationStatusTray /></>);
 
     expect(useAppStore.getState().hasBrowsed).toBe(true);
-    expect(screen.getByText("No messages found. This queue appears to be empty.")).toBeTruthy();
+    expect(screen.getByText("No messages returned from the selected source.")).toBeTruthy();
   });
 
   it("keeps the grid visible and renders pending message rows as loading rows", () => {

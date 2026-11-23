@@ -22,9 +22,9 @@ function computeInsights(messages: PeekedMessage[]) {
 
   const uniqueCorrIds = new Set<string>();
   const msgIds: string[] = [];
-  const reasonMap: Record<string, number> = {};
-  const fieldFreq: Record<string, number> = {};
-  const ctMap: Record<string, number> = {};
+  const reasonMap: Record<string, number> = Object.create(null);
+  const fieldFreq: Record<string, number> = Object.create(null);
+  const ctMap: Record<string, number> = Object.create(null);
   const hourBuckets = new Array(24).fill(0) as number[];
 
   for (const m of messages) {
@@ -100,10 +100,10 @@ function computeInsights(messages: PeekedMessage[]) {
     const ms = maxTime - minTime;
     const h = ms / 3_600_000;
     timeSpanLabel = h < 1
-      ? `${Math.round(ms / 60_000)}m span`
+      ? `${Math.round(ms / 60_000)}m`
       : h < 24
-        ? `${h.toFixed(1)}h span`
-        : `${Math.round(h / 24)}d span`;
+        ? `${h.toFixed(1)}h`
+        : `${Math.round(h / 24)}d`;
   }
 
   return {
@@ -294,7 +294,8 @@ function HourHeatmap({ buckets, maxCount }: { buckets: number[]; maxCount: numbe
 
 export function MessageInsightsPanel() {
   const { t } = useTranslation();
-  const { peekMessages, setIsInsightsPanelOpen } = useAppStore();
+  const peekMessages = useAppStore((state) => state.peekMessages);
+  const setIsInsightsPanelOpen = useAppStore((state) => state.setIsInsightsPanelOpen);
   const ins = useMemo(() => computeInsights(peekMessages), [peekMessages]);
 
   const findings = useMemo(() => {
@@ -305,7 +306,7 @@ export function MessageInsightsPanel() {
       list.push({ text: t("insights.emptyBodies", { count: ins.emptyBodyCount }), kind: "warning" });
     if (ins.expiredCount > 0)
       list.push({ text: t("insights.expired", { count: ins.expiredCount }), kind: "warning" });
-    if (ins.noCorrelationCount > 0 && ins.noCorrelationCount < ins.total)
+    if (ins.noCorrelationCount > 0)
       list.push({ text: t("insights.missingCorrelation", { count: ins.noCorrelationCount }), kind: "info" });
     if (ins.dlqCount > 0 && ins.normalCount === 0)
       list.push({ text: t("insights.allDlq"), kind: "warning" });
@@ -347,19 +348,19 @@ export function MessageInsightsPanel() {
             <StatCard
               label={t("insights.totalMessages")}
               value={ins.total}
-              sub={ins.timeSpanLabel ?? undefined}
+              sub={ins.timeSpanLabel ? t("insights.timeSpan", { duration: ins.timeSpanLabel }) : undefined}
               accent
             />
             <StatCard
               label={t("insights.dlqMessages")}
               value={ins.dlqCount}
-              sub={ins.total > 0 ? `${ins.dlqPct}% of total` : undefined}
+              sub={ins.total > 0 ? t("insights.percentOfTotal", { percent: ins.dlqPct }) : undefined}
               color={ins.dlqCount > 0 ? "red" : undefined}
             />
             <StatCard
               label={t("insights.normalMessages")}
               value={ins.normalCount}
-              sub={ins.total > 0 ? `${100 - ins.dlqPct}% of total` : undefined}
+              sub={ins.total > 0 ? t("insights.percentOfTotal", { percent: 100 - ins.dlqPct }) : undefined}
               color="blue"
             />
             <StatCard
