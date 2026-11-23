@@ -2,13 +2,14 @@ import { useShallow } from "zustand/react/shallow";
 import { useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useAppStore, selectActiveConnection } from "../../store/appStore";
+import { MAX_LOADED_BYTES, MAX_LOADED_MESSAGES } from "../../store/messageSlice";
 import { useScript } from "../../hooks/useScript";
 import { Icon } from "../Common/Icon";
 import { extractNamespace } from "../../utils/connection";
 import { exitCodeToStatus } from "../../utils/exitCode";
 import { incrementSequenceNumber } from "../../utils/sequenceNumber";
 import { PeekResultSchema, safeInvoke } from "../../schemas/ipc";
-import type { ExplorerSelection } from "../../types";
+import type { PeekSource } from "../../types";
 import {
   buildEmptyMessagesParams,
   buildReplayParams,
@@ -19,14 +20,6 @@ import {
   getDisplayEntity,
 } from "./toolbarActions";
 import { ConfirmModal, ConnectionSelector, ModeSelector, MoreActionsDropdown, ToolbarButton } from "./ToolbarControls";
-
-function selectionKey(selection: ExplorerSelection): string {
-  if (selection.kind === "queue") return `queue:${selection.queueName}`;
-  if (selection.kind === "subscription") {
-    return `subscription:${selection.topicName}/${selection.subscriptionName}`;
-  }
-  return "none";
-}
 
 // ─── Toolbar ──────────────────────────────────────────────────────────────────
 
@@ -41,6 +34,7 @@ export function Toolbar() {
     peekMessages,
     lastPeekNormalMaxSeqNum,
     lastPeekDlqMaxSeqNum,
+    truncatedPeekSources,
     isRunning,
     setIsSendModalOpen,
     setIsMoveModalOpen,
@@ -64,6 +58,7 @@ export function Toolbar() {
     peekMessages: state.peekMessages,
     lastPeekNormalMaxSeqNum: state.lastPeekNormalMaxSeqNum,
     lastPeekDlqMaxSeqNum: state.lastPeekDlqMaxSeqNum,
+    truncatedPeekSources: state.truncatedPeekSources,
     isRunning: state.isRunning,
     setIsSendModalOpen: state.setIsSendModalOpen,
     setIsMoveModalOpen: state.setIsMoveModalOpen,
@@ -110,7 +105,30 @@ export function Toolbar() {
 
   const busy = browsing || loadingMore || isRunning || atomicOperationCount > 0;
 
+  // A shared frame reads Normal first. Give the last interrupted source first access
+  // to the remaining grid budget, always using that source's own sequence cursor.
+  const priority = truncatedPeekSources[truncatedPeekSources.length - 1];
+  const bothSources: PeekSource[] = priority === "dlq" ? ["dlq", "normal"] : ["normal", "dlq"];
+  const sources = peekMode === "both" ? bothSources : [peekMode];
+  const hasCursor = lastPeekNormalMaxSeqNum !== null || lastPeekDlqMaxSeqNum !== null;
+  const continuation = sources.flatMap((source) => {
+    const cursor = source === "normal" ? lastPeekNormalMaxSeqNum : lastPeekDlqMaxSeqNum;
+    if (cursor === null) {
+      return truncatedPeekSources.includes(source) || (peekMode === "both" && hasCursor) ? [{ source, start: "" }] : [];
+    }
+    const start = incrementSequenceNumber(cursor);
+    return start === null ? [] : [{ source, start }];
+  });
+
   // ── Browse / Peek ──────────────────────────────────────────────────────────
+  const isCurrentSelection = (generation: number) => {
+    const state = useAppStore.getState();
+    // Returning to the same entity starts a new selection with fresh cursors.
+    return state.explorerSelection === explorerSelection
+      && state.activeConnectionId === conn?.id
+      && state.connectionGeneration === generation;
+  };
+
   const handleBrowse = async () => {
     if (!conn || explorerSelection.kind === "none" || !entityName) return;
 
@@ -118,11 +136,6 @@ export function Toolbar() {
     const namespace = extractNamespace(conn.connectionString);
     const requestConnId = conn.id;
     const requestGeneration = useAppStore.getState().connectionGeneration;
-    const requestSelectionKey = selectionKey(explorerSelection);
-    const isCurrentRequest = () => {
-      const state = useAppStore.getState();
-      return state.connectionGeneration === requestGeneration && state.activeConnectionId === requestConnId && selectionKey(state.explorerSelection) === requestSelectionKey;
-    };
 
     // argv format must match the Go worker's peekMessages parser.
     // count must be a string; include an empty startSequence to match expected arg positions.
@@ -165,15 +178,15 @@ export function Toolbar() {
           runId,
         },
       });
-      if (!isCurrentRequest()) {
+      if (!isCurrentSelection(requestGeneration)) {
         updateEventLogEntry(runId, "stopped", "Browse result ignored because selection changed");
         return;
       }
-      setPeekResults(result.messages);
+      setPeekResults(result.messages, result.truncatedSources);
       updateEventLogEntry(runId, "success");
     } catch (err) {
       const msg = String(err);
-      if (isCurrentRequest()) setLastBrowseError(msg);
+      if (isCurrentSelection(requestGeneration)) setLastBrowseError(msg);
       updateEventLogEntry(runId, "error", msg);
     } finally {
       setBrowsing(false);
@@ -188,11 +201,7 @@ export function Toolbar() {
     const namespace = extractNamespace(conn.connectionString);
     const requestConnId = conn.id;
     const requestGeneration = useAppStore.getState().connectionGeneration;
-    const requestSelectionKey = selectionKey(explorerSelection);
-    const isCurrentRequest = () => {
-      const state = useAppStore.getState();
-      return state.connectionGeneration === requestGeneration && state.activeConnectionId === requestConnId && selectionKey(state.explorerSelection) === requestSelectionKey;
-    };
+    const canAppend = () => isCurrentSelection(requestGeneration) && useAppStore.getState().hasBrowsed;
 
     addEventLogEntry({
       id: runId,
@@ -227,66 +236,34 @@ export function Toolbar() {
       runId,
     });
 
+    const sourceErrors: string[] = [];
     try {
-      if (peekMode === "both") {
-        // DLQ and normal queue have independent sequence number spaces — run separately.
-        let requestedSource = false;
-        const normalStart =
-          lastPeekNormalMaxSeqNum === null ? "" : incrementSequenceNumber(lastPeekNormalMaxSeqNum);
-        if (normalStart !== null) {
-          requestedSource = true;
-          const normalResult = await safeInvoke("peek_messages", PeekResultSchema, {
-            args: invokeArgs(buildArgv("normal", normalStart)),
-          });
-          if (!isCurrentRequest()) {
-            updateEventLogEntry(runId, "stopped", "Browse result ignored because selection changed");
-            return;
-          }
-          appendPeekResults(normalResult.messages);
-        }
-
-        const dlqStart = lastPeekDlqMaxSeqNum === null ? "" : incrementSequenceNumber(lastPeekDlqMaxSeqNum);
-        if (dlqStart !== null) {
-          requestedSource = true;
-          const dlqResult = await safeInvoke("peek_messages", PeekResultSchema, {
-            args: invokeArgs(buildArgv("dlq", dlqStart)),
-          });
-          if (!isCurrentRequest()) {
-            updateEventLogEntry(runId, "stopped", "Browse result ignored because selection changed");
-            return;
-          }
-          appendPeekResults(dlqResult.messages);
-        }
-
-        if (!requestedSource) {
-          const message = "Cannot load more: both sequence cursors are at the signed 64-bit maximum.";
-          setLastBrowseError(message);
-          updateEventLogEntry(runId, "stopped", message);
+      for (const { source, start } of continuation) {
+        const result = await safeInvoke("peek_messages", PeekResultSchema, {
+          args: invokeArgs(buildArgv(source, start)),
+        }).catch((error: unknown) => ({ error: error instanceof Error ? error.message : String(error) }));
+        if (!canAppend()) {
+          updateEventLogEntry(runId, "stopped", "Browse result ignored because the loaded view changed");
           return;
         }
-      } else {
-        const startSeqNum = peekMode === "normal" ? lastPeekNormalMaxSeqNum : lastPeekDlqMaxSeqNum;
-        if (startSeqNum === null) return;
-        const nextStartSeqNum = incrementSequenceNumber(startSeqNum);
-        if (nextStartSeqNum === null) {
-          const message = "Cannot load more: the sequence cursor is at the signed 64-bit maximum.";
-          setLastBrowseError(message);
-          updateEventLogEntry(runId, "stopped", message);
-          return;
+        if ("error" in result) {
+          const detail = peekMode === "both" ? `${t(`modeSelector.${source}`)}: ${result.error}` : result.error;
+          sourceErrors.push(detail);
+          setLastBrowseError(sourceErrors.join("\n"));
+          // Native cancellation stops the whole run. Otherwise the other source still has its own cursor.
+          if (result.error === "Operation cancelled.") break;
+          continue;
         }
-        const r = await safeInvoke("peek_messages", PeekResultSchema, {
-          args: invokeArgs(buildArgv(peekMode, nextStartSeqNum)),
-        });
-        if (!isCurrentRequest()) {
-          updateEventLogEntry(runId, "stopped", "Browse result ignored because selection changed");
-          return;
-        }
-        appendPeekResults(r.messages);
+        appendPeekResults(result.messages, source, result.truncatedSources);
+        const loaded = useAppStore.getState();
+        // A record can be too large for the remaining room while the other source still fits.
+        if (loaded.loadedMessageBytes >= MAX_LOADED_BYTES || loaded.peekMessages.length >= MAX_LOADED_MESSAGES) break;
       }
-      updateEventLogEntry(runId, "success");
+      const error = sourceErrors.length ? sourceErrors.join("\n") : undefined;
+      updateEventLogEntry(runId, error === undefined ? "success" : "error", error);
     } catch (err) {
-      const msg = String(err);
-      if (isCurrentRequest()) setLastBrowseError(msg);
+      const msg = [...sourceErrors, String(err)].join("\n");
+      if (canAppend()) setLastBrowseError(msg);
       updateEventLogEntry(runId, "error", msg);
     } finally {
       setLoadingMore(false);
@@ -377,41 +354,14 @@ export function Toolbar() {
     }
   };
 
-  const nextNormalSequenceNumber =
-    lastPeekNormalMaxSeqNum === null ? null : incrementSequenceNumber(lastPeekNormalMaxSeqNum);
-  const nextDlqSequenceNumber =
-    lastPeekDlqMaxSeqNum === null ? null : incrementSequenceNumber(lastPeekDlqMaxSeqNum);
-
   const messageBudgetReached = useAppStore((state) => state.messageBudgetReached);
-  const loadMoreDisabled = messageBudgetReached ||
-    !hasSelection ||
-    busy ||
-    (peekMode === "normal"
-      ? nextNormalSequenceNumber === null
-      : peekMode === "dlq"
-        ? nextDlqSequenceNumber === null
-        : (lastPeekNormalMaxSeqNum === null && lastPeekDlqMaxSeqNum === null) ||
-          (lastPeekNormalMaxSeqNum !== null && nextNormalSequenceNumber === null &&
-            lastPeekDlqMaxSeqNum !== null && nextDlqSequenceNumber === null));
-
-  const loadMoreTitle = (() => {
-    if (peekMode === "normal") {
-      return nextNormalSequenceNumber === null
-        ? t("explorer.toolbar.noSeqAvailable")
-        : t("explorer.toolbar.loadMoreFromSeq", { count: peekCount, seq: nextNormalSequenceNumber });
-    }
-    if (peekMode === "dlq") {
-      return nextDlqSequenceNumber === null
-        ? t("explorer.toolbar.noSeqAvailable")
-        : t("explorer.toolbar.loadMoreFromSeq", { count: peekCount, seq: nextDlqSequenceNumber });
-    }
-    const parts: string[] = [];
-    if (nextNormalSequenceNumber !== null)
-      parts.push(t("explorer.toolbar.loadMoreFromSeq", { count: peekCount, seq: nextNormalSequenceNumber }));
-    if (nextDlqSequenceNumber !== null)
-      parts.push(t("explorer.toolbar.loadMoreFromSeq", { count: peekCount, seq: nextDlqSequenceNumber }));
-    return parts.length === 0 ? t("explorer.toolbar.noSeqAvailable") : parts.join(" | ");
-  })();
+  const loadMoreDisabled = messageBudgetReached || !hasSelection || busy || continuation.length === 0;
+  const interrupted = truncatedPeekSources.filter((source) => peekMode === "both" || peekMode === source);
+  const cursorTitles = continuation.filter(({ start }) => start !== "").map(({ start }) =>
+    t("explorer.toolbar.loadMoreFromSeq", { count: peekCount, seq: start }));
+  const loadMoreTitle = interrupted.length > 0
+    ? t("explorer.grid.partialPage", { sources: interrupted.map((source) => t(`modeSelector.${source}`)).join(", ") })
+    : cursorTitles.join(" | ") || t("explorer.toolbar.noSeqAvailable");
 
   return (
     <header className="relative flex min-h-12 shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-b border-zinc-200 bg-white px-3 py-1.5 dark:border-zinc-700 dark:bg-zinc-900">

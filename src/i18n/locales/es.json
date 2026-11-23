@@ -313,7 +313,6 @@
       "forwardTo": "Reenviar A",
       "forwardDeadLetteredMessagesTo": "Reenviar DLQ A",
       "maxMessageSizeInKilobytes": "Tama\u00f1o M\u00e1ximo de Mensaje (KB)",
-      "supportOrdering": "Soporte de Orden",
       "enableDeadLetteringOnFilterEvaluationExceptions": "DLQ por Errores de Filtro",
       "sizeInBytes": "Tama\u00f1o",
       "scheduledMessageCount": "Mensajes Programados",
@@ -322,7 +321,6 @@
       "deadLetterMessageCount": "Mensajes en DLQ",
       "transferMessageCount": "Mensajes en Transferencia",
       "transferDeadLetterMessageCount": "Mensajes DLQ en Transferencia",
-      "subscriptionCount": "Suscripciones",
       "createdAt": "Creado",
       "updatedAt": "Actualizado",
       "accessedAt": "\u00daltimo Acceso",
@@ -333,7 +331,6 @@
       "yes": "S\u00ed",
       "no": "No",
       "typeQueue": "Cola",
-      "typeTopic": "T\u00f3pico",
       "typeSubscription": "Suscripci\u00f3n"
     },
     "rules": {
@@ -420,6 +417,7 @@
       "nextPage": "Página siguiente",
       "lastPage": "Última página",
       "loadedBudget": "Filtrando {{count}} / {{max}} mensajes cargados · {{size}} / {{bytes}} MiB de datos",
+      "partialPage": "Se alcanzó el límite de tamaño de la página ({{sources}}). Usá Cargar Más para continuar.",
       "clearLoaded": "Limpiar resultados cargados",
       "budgetReached": "Se alcanzó el límite de datos cargados. No se conservaron algunos resultados. Exportá o limpiá los resultados antes de explorar otra vez."
     },

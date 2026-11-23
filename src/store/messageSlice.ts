@@ -1,6 +1,6 @@
 import type { StateCreator } from "zustand";
 import type { AppState } from "./appStore";
-import type { PeekedMessage } from "../types";
+import type { PeekedMessage, PeekSource } from "../types";
 import { computeMaxSeqNums } from "./peekCursors";
 import { compareSequenceNumbers } from "../utils/sequenceNumber";
 import { findMessageReplay } from "../utils/messageOperation";
@@ -27,8 +27,9 @@ export interface MessageSlice {
   lastPeekDlqMaxSeqNum: string | null;
   loadedMessageBytes: number;
   messageBudgetReached: boolean;
-  setPeekResults: (messages: PeekedMessage[]) => void;
-  appendPeekResults: (messages: PeekedMessage[]) => void;
+  truncatedPeekSources: PeekSource[];
+  setPeekResults: (messages: PeekedMessage[], truncated?: PeekSource[]) => void;
+  appendPeekResults: (messages: PeekedMessage[], source?: PeekSource, truncated?: PeekSource[]) => void;
   clearPeekResults: () => void;
 }
 
@@ -44,26 +45,32 @@ export function fitMessages(messages: PeekedMessage[], count: number, bytes: num
 
 export const createMessageSlice: StateCreator<AppState, [["zustand/immer", never]], [], MessageSlice> = (set) => ({
   peekMessages: [], hasBrowsed: false, lastPeekNormalMaxSeqNum: null, lastPeekDlqMaxSeqNum: null,
-  loadedMessageBytes: 0, messageBudgetReached: false,
-  setPeekResults: (messages) => set((state) => {
+  loadedMessageBytes: 0, messageBudgetReached: false, truncatedPeekSources: [],
+  setPeekResults: (messages, truncated = []) => set((state) => {
     observeReplayReturns(state, messages);
     const result = fitMessages(messages, 0, 0);
     state.peekMessages = result.accepted;
+    state.truncatedPeekSources = truncated;
     state.loadedMessageBytes = result.bytes; state.messageBudgetReached = result.reached; state.hasBrowsed = true;
     const cursors = computeMaxSeqNums(result.accepted);
     state.lastPeekNormalMaxSeqNum = cursors.normal; state.lastPeekDlqMaxSeqNum = cursors.dlq;
   }),
-  appendPeekResults: (messages) => set((state) => {
+  appendPeekResults: (messages, source, truncated = []) => set((state) => {
     observeReplayReturns(state, messages);
     const result = fitMessages(messages, state.peekMessages.length, state.loadedMessageBytes);
     state.peekMessages.push(...result.accepted);
-    state.loadedMessageBytes = result.bytes; state.messageBudgetReached = result.reached; state.hasBrowsed = true;
+    if (source) {
+      state.truncatedPeekSources = state.truncatedPeekSources.filter((previous) => previous !== source);
+      if (truncated.includes(source)) state.truncatedPeekSources.push(source);
+    }
+    state.loadedMessageBytes = result.bytes; state.messageBudgetReached ||= result.reached; state.hasBrowsed = true;
     const cursors = computeMaxSeqNums(result.accepted);
     if (cursors.normal !== null && (state.lastPeekNormalMaxSeqNum === null || compareSequenceNumbers(cursors.normal, state.lastPeekNormalMaxSeqNum) > 0)) state.lastPeekNormalMaxSeqNum = cursors.normal;
     if (cursors.dlq !== null && (state.lastPeekDlqMaxSeqNum === null || compareSequenceNumbers(cursors.dlq, state.lastPeekDlqMaxSeqNum) > 0)) state.lastPeekDlqMaxSeqNum = cursors.dlq;
   }),
   clearPeekResults: () => set((state) => {
     state.peekMessages = []; state.hasBrowsed = false; state.selectedMessage = null;
+    state.truncatedPeekSources = [];
     state.lastPeekNormalMaxSeqNum = null; state.lastPeekDlqMaxSeqNum = null;
     state.loadedMessageBytes = 0; state.messageBudgetReached = false;
   }),

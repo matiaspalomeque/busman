@@ -14,6 +14,7 @@ export interface ConnectionsConfig {
 }
 
 export type QueueMode = "normal" | "dlq" | "both";
+export type PeekSource = Exclude<QueueMode, "both">;
 
 export interface OutputLine {
   id: string;
@@ -37,6 +38,8 @@ export interface PeekedMessage {
   lockedUntilUtc?: string | null;
   sourceSubQueue?: "active" | "deadLetter" | "transferDeadLetter" | null;
   body: unknown;
+  /** The worker supplied the original JSON text in body. */
+  bodyIsJson?: boolean;
   subject: string | null;
   contentType: string | null;
   correlationId: string | null;
@@ -98,7 +101,6 @@ import type {
   SubscriptionRuleActionSchema,
   SubscriptionRuleFilterSchema,
   SubscriptionRuleSchema,
-  TopicPropertiesSchema,
   SubscriptionPropertiesSchema,
 } from "../schemas/ipc";
 
@@ -109,12 +111,10 @@ export type SubscriptionRule = z.infer<typeof SubscriptionRuleSchema>;
 export type ListSubscriptionRulesResult = z.infer<typeof ListSubscriptionRulesResultSchema>;
 export type ManageSubscriptionRule = z.infer<typeof ManageSubscriptionRuleSchema>;
 export type QueueProperties = z.infer<typeof QueuePropertiesSchema>;
-export type TopicProperties = z.infer<typeof TopicPropertiesSchema>;
 export type SubscriptionProperties = z.infer<typeof SubscriptionPropertiesSchema>;
 
 export type EntityProperties =
   | { kind: "queue"; data: QueueProperties }
-  | { kind: "topic"; data: TopicProperties }
   | { kind: "subscription"; data: SubscriptionProperties };
 
 export type ExplorerSelection =

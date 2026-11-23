@@ -177,7 +177,7 @@ export function Sidebar({ entityList }: { entityList: ReturnType<typeof useEntit
   return (
     <aside
       aria-label={t("explorer.sidebar.entityTree")}
-      className="flex flex-col border-r border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 overflow-hidden shrink-0 relative"
+      className="entity-sidebar flex flex-col border-r border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 overflow-hidden shrink-0 relative"
       style={{ width: sidebarWidth }}
     >
       {/* Namespace header */}

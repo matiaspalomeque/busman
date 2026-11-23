@@ -79,13 +79,11 @@ describe("useMessageTemplates", () => {
         result.current.saveTemplate(
           "Full",
           { body: "payload", contentType: "application/json", subject: "my-subject" },
-          "my-queue",
         );
       });
       const t = result.current.templates[0];
       expect(t.contentType).toBe("application/json");
       expect(t.subject).toBe("my-subject");
-      expect(t.entityName).toBe("my-queue");
     });
 
     it("omits optional fields when they are empty strings or absent", () => {
@@ -95,7 +93,6 @@ describe("useMessageTemplates", () => {
       });
       const t = result.current.templates[0];
       expect(t.contentType).toBeUndefined();
-      expect(t.entityName).toBeUndefined();
     });
   });
 

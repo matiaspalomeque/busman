@@ -1,17 +1,8 @@
 import type { PeekedMessage, SendMessageDraft } from "../../types";
-import { bodyString } from "../../utils/messageSearch";
+import { bodyString, formatBodyJson, serializeMessage } from "../../utils/messageBody";
 import type { useAppStore } from "../../store/appStore";
 
 type Store = ReturnType<typeof useAppStore.getState>;
-
-export function formatBodyJson(body: unknown): string {
-  const raw = bodyString(body);
-  try {
-    return JSON.stringify(JSON.parse(raw), null, 2);
-  } catch {
-    return raw;
-  }
-}
 
 export function copyMessageId(msg: PeekedMessage): void {
   void navigator.clipboard.writeText(msg.messageId ?? "");
@@ -26,7 +17,7 @@ export function copyMessageBody(msg: PeekedMessage): void {
 }
 
 export function copyMessageJson(msg: PeekedMessage): void {
-  void navigator.clipboard.writeText(JSON.stringify(msg, null, 2));
+  void navigator.clipboard.writeText(serializeMessage(msg));
 }
 
 export function openResend(msg: PeekedMessage, store: Store): void {

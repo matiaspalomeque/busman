@@ -119,7 +119,7 @@ export function PropertiesPanel() {
   return (
     <aside
       aria-label={t("explorer.properties.messageDetail")}
-      className="relative shrink-0 flex flex-col border-l border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 overflow-hidden"
+      className="message-detail relative shrink-0 flex flex-col border-l border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 overflow-hidden"
       style={{ width: propertiesPanelWidth }}
     >
       {/* Drag handle — left edge */}
@@ -129,7 +129,7 @@ export function PropertiesPanel() {
         aria-orientation="vertical"
         aria-label={t("explorer.properties.resizePanel")}
         title={t("explorer.properties.resizePanel")}
-        className="absolute top-0 left-0 h-full w-1.5 cursor-col-resize group z-10"
+        className="message-detail-resizer absolute top-0 left-0 h-full w-1.5 cursor-col-resize group z-10"
       >
         <div className="absolute inset-y-0 left-0 w-px bg-transparent group-hover:bg-azure-primary/40 group-active:bg-azure-primary/70 transition-colors" />
       </div>

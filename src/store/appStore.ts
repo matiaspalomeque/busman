@@ -199,6 +199,7 @@ export interface AppState extends MessageSlice, OperationSlice {
 /** Resets all entity-specific grid/peek state. Used when switching connection, queue, or subscription. */
 function resetGridState(state: AppState): void {
   state.peekMessages = [];
+  state.truncatedPeekSources = [];
   state.loadedMessageBytes = 0;
   state.messageBudgetReached = false;
   state.hasBrowsed = false;

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -252,7 +253,7 @@ func TestSequenceNumberDecimalStringBoundaries(t *testing.T) {
 			record := peekedMessageRecord(&azservicebus.ReceivedMessage{
 				MessageID:      "boundary",
 				SequenceNumber: &value,
-			}, "Normal Queue: orders")
+			}, "normal", "Normal Queue: orders")
 			if got := record["sequenceNumber"]; got != tt.want {
 				t.Fatalf("sequenceNumber = %#v, want decimal string %q", got, tt.want)
 			}
@@ -298,18 +299,31 @@ func TestSingleMessageActionParamsPreserveSequenceNumberJSONInteger(t *testing.T
 	}
 }
 
+func peekField(t *testing.T, record json.RawMessage, field string) string {
+	t.Helper()
+	var values map[string]json.RawMessage
+	if err := json.Unmarshal(record, &values); err != nil {
+		t.Fatal(err)
+	}
+	var text string
+	if err := json.Unmarshal(values[field], &text); err != nil {
+		t.Fatal(err)
+	}
+	return text
+}
+
 func TestPeekMessagesStopsBeforeSequenceNumberOverflow(t *testing.T) {
 	const maxSequenceNumber int64 = 9223372036854775807
 	receiver := &fakePeekMessageReceiver{messages: peekTestMessages("max", maxSequenceNumber)}
 
-	messages, canAdvance, err := peekMessagesForSource(
-		context.Background(), receiver, 2, nil, 1000, "Normal Queue: orders", nil,
+	page, canAdvance, err := newPeekPage(0).readSource(
+		context.Background(), receiver, 2, nil, 1000, "normal", "Normal Queue: orders", nil,
 	)
 	if err != nil {
 		t.Fatalf("peek messages: %v", err)
 	}
-	if len(messages) != 1 {
-		t.Fatalf("messages = %d, want exactly the max-sequence message once", len(messages))
+	if len(page.messages) != 1 {
+		t.Fatalf("messages = %d, want exactly the max-sequence message once", len(page.messages))
 	}
 	if canAdvance {
 		t.Fatal("cursor unexpectedly advanced beyond signed int64 maximum")
@@ -317,8 +331,113 @@ func TestPeekMessagesStopsBeforeSequenceNumberOverflow(t *testing.T) {
 	if len(receiver.requests) != 1 {
 		t.Fatalf("peek requests = %d, want 1", len(receiver.requests))
 	}
-	if got := messages[0]["sequenceNumber"]; got != "9223372036854775807" {
+	if got := peekField(t, page.messages[0], "sequenceNumber"); got != "9223372036854775807" {
 		t.Fatalf("sequenceNumber = %#v, want exact max string", got)
+	}
+}
+
+func TestPeekPreservesBodyThroughWorkerJSON(t *testing.T) {
+	for _, tc := range []struct {
+		body   string
+		isJSON bool
+	}{
+		{` {"id":9007199254740993,"ratio":1.0e-25,"id":-0} `, true},
+		{`"quoted text"`, true},
+		{"null", true},
+		{"plain text", false},
+		{"", false},
+	} {
+		record := peekedMessageRecord(&azservicebus.ReceivedMessage{Body: []byte(tc.body)}, "normal", "Normal Queue: orders")
+		wire, err := json.Marshal(record)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var decoded struct {
+			Body       string `json:"body"`
+			BodyIsJSON bool   `json:"bodyIsJson"`
+		}
+		if err := json.Unmarshal(wire, &decoded); err != nil || decoded.Body != tc.body || decoded.BodyIsJSON != tc.isJSON {
+			t.Fatalf("peek body %q: got %+v, error %v", tc.body, decoded, err)
+		}
+	}
+}
+
+func TestPeekSplitsQuoteHeavyPagesAtTheEncodedSize(t *testing.T) {
+	const count = 100
+	body := []byte("[" + strings.Repeat(`"",`, 74999) + `""]`)
+	receiver := &fakePeekMessageReceiver{}
+	for i := int64(1); i <= count; i++ {
+		seq := i
+		receiver.messages = append(receiver.messages, &azservicebus.ReceivedMessage{SequenceNumber: &seq, Body: body})
+	}
+	page, _, err := newPeekPage(64<<20).readSource(context.Background(), receiver, count, nil, 1000, "normal", "Normal Queue: orders", nil)
+	first := page.messages
+	if err != nil {
+		t.Fatal(err)
+	}
+	wire, err := json.Marshal(Response{Version: protocolVersion, Type: "response", ID: "00000000-0000-0000-0000-000000000000", OK: true, Result: page.result()})
+	if err != nil || len(wire) >= 32<<20 || len(first) == 0 || len(first) == count {
+		t.Fatalf("first page: %d records, %d encoded bytes, error %v", len(first), len(wire), err)
+	}
+	last, err := parseSequenceNumber(peekField(t, first[len(first)-1], "sequenceNumber"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	next := last + 1
+	second, _, err := newPeekPage(0).readSource(context.Background(), receiver, count, &next, 1000, "normal", "Normal Queue: orders", nil)
+	if err != nil || len(first)+len(second.messages) != count || peekField(t, second.messages[0], "sequenceNumber") != fmt.Sprint(next) {
+		t.Fatalf("continuation after %d: got %d messages, error %v", next-1, len(second.messages), err)
+	}
+}
+
+func TestPeekSharesTheByteLimitAcrossSources(t *testing.T) {
+	first := newPeekPage(0)
+	// Earlier active messages already filled almost all of this response.
+	first.messages = []json.RawMessage{json.RawMessage(`{}`)}
+	first.bytes = peekPageBytes - 100
+	dlq := &fakePeekMessageReceiver{messages: peekTestMessages("dlq", 9007199254740993)}
+	page, _, err := first.readSource(context.Background(), dlq, 1, nil, 1000, "dlq", "Dead Letter Queue: orders", nil)
+	if err != nil || !slices.Equal(page.truncatedSources, []string{"dlq"}) || len(page.messages) != 1 {
+		t.Fatalf("DLQ appended beyond the shared byte limit: %d messages, error %v", len(page.messages), err)
+	}
+	if truncated, _ := page.result()["truncatedSources"].([]string); !slices.Equal(truncated, []string{"dlq"}) {
+		t.Fatalf("response did not identify the interrupted source: %v", truncated)
+	}
+	next, _, err := newPeekPage(0).readSource(context.Background(), dlq, 1, nil, 1000, "dlq", "Dead Letter Queue: orders", nil)
+	if err != nil || len(next.messages) != 1 || peekField(t, next.messages[0], "sequenceNumber") != "9007199254740993" {
+		t.Fatalf("first DLQ record unavailable on continuation: %v", err)
+	}
+	if _, truncated := next.result()["truncatedSources"]; truncated {
+		t.Fatal("completed DLQ page was marked as truncated")
+	}
+}
+
+func TestPeekSourceIsIndependentOfTheEntityName(t *testing.T) {
+	msg := &azservicebus.ReceivedMessage{}
+	normal := peekedMessageRecord(msg, "normal", "Normal Queue: transfer-orders")
+	dead := peekedMessageRecord(msg, "dlq", "Dead Letter Queue: transfer-orders")
+	if normal["sourceSubQueue"] != "active" || dead["sourceSubQueue"] != "deadLetter" {
+		t.Fatalf("unexpected sources for transfer-orders: %v, %v", normal["sourceSubQueue"], dead["sourceSubQueue"])
+	}
+}
+
+func TestPeekIsolatesALargeRecordAndHonorsTheHostLimit(t *testing.T) {
+	receiver := &fakePeekMessageReceiver{messages: peekTestMessages("orders", 1, 2, 3)}
+	receiver.messages[1].Body = []byte(strings.Repeat("x", 32<<20))
+	read := func(start int64, limit int) (peekPage, error) {
+		page, _, err := newPeekPage(limit).readSource(context.Background(), receiver, 3, &start, 1000, "normal", "Normal Queue: orders", nil)
+		return page, err
+	}
+	first, err := read(1, 64<<20)
+	if err != nil || !slices.Equal(first.truncatedSources, []string{"normal"}) || len(first.messages) != 1 {
+		t.Fatalf("expected prefix before the large record: count=%d, error=%v", len(first.messages), err)
+	}
+	large, err := read(2, 64<<20)
+	if err != nil || len(large.messages) != 1 || len(large.messages[0]) <= 32<<20 || len(large.messages[0]) > 64<<20 {
+		t.Fatalf("large record missing from its own page: count=%d, error=%v", len(large.messages), err)
+	}
+	if _, err := read(2, 0); err == nil || !strings.Contains(err.Error(), "message 2") {
+		t.Fatalf("expected an explicit record-size error for an older host: %v", err)
 	}
 }
 
@@ -337,11 +456,11 @@ func TestPeekMessagesResultDoesNotPersistPayloadSnapshots(t *testing.T) {
 		}
 	})
 
-	for _, messages := range [][]map[string]any{
+	for _, messages := range [][]json.RawMessage{
 		nil,
-		{{"messageId": "message-1", "body": "private payload"}},
+		{json.RawMessage(`{"messageId":"message-1","body":"private payload"}`)},
 	} {
-		result := peekMessagesResult(messages)
+		result := (peekPage{messages: messages}).result()
 		if _, ok := result["filename"]; ok {
 			t.Fatal("peek result unexpectedly contains a persisted filename")
 		}
@@ -391,26 +510,26 @@ func TestPeekMessagesBothSourcesHaveIndependentPageBudgets(t *testing.T) {
 	normal := &fakePeekMessageReceiver{messages: peekTestMessages("normal", 1, 2, 3)}
 	dlq := &fakePeekMessageReceiver{messages: peekTestMessages("dlq", 101)}
 
-	normalMessages, _, err := peekMessagesForSource(
-		context.Background(), normal, 2, nil, 1000, "Normal Queue: orders", nil,
+	normalMessages, _, err := newPeekPage(0).readSource(
+		context.Background(), normal, 2, nil, 1000, "normal", "Normal Queue: orders", nil,
 	)
 	if err != nil {
 		t.Fatalf("peek normal messages: %v", err)
 	}
-	dlqMessages, _, err := peekMessagesForSource(
-		context.Background(), dlq, 2, nil, 1000, "Dead Letter Queue: orders", nil,
+	dlqMessages, _, err := newPeekPage(0).readSource(
+		context.Background(), dlq, 2, nil, 1000, "dlq", "Dead Letter Queue: orders", nil,
 	)
 	if err != nil {
 		t.Fatalf("peek dead-letter messages: %v", err)
 	}
 
-	if len(normalMessages) != 2 {
-		t.Fatalf("normal page size = %d, want 2", len(normalMessages))
+	if len(normalMessages.messages) != 2 {
+		t.Fatalf("normal page size = %d, want 2", len(normalMessages.messages))
 	}
-	if len(dlqMessages) != 1 {
-		t.Fatalf("dead-letter page size = %d, want 1", len(dlqMessages))
+	if len(dlqMessages.messages) != 1 {
+		t.Fatalf("dead-letter page size = %d, want 1", len(dlqMessages.messages))
 	}
-	if got := dlqMessages[0]["sourceSubQueue"]; got != "deadLetter" {
+	if got := peekField(t, dlqMessages.messages[0], "sourceSubQueue"); got != "deadLetter" {
 		t.Fatalf("dead-letter source label = %v, want deadLetter", got)
 	}
 	if len(normal.requests) == 0 || normal.requests[0].count != 2 {
@@ -438,23 +557,23 @@ func TestPeekMessagesBothSourcesAllowEitherSideToBeEmpty(t *testing.T) {
 			normal := &fakePeekMessageReceiver{messages: peekTestMessages("normal", tt.normalSeqs...)}
 			dlq := &fakePeekMessageReceiver{messages: peekTestMessages("dlq", tt.dlqSeqs...)}
 
-			normalMessages, _, err := peekMessagesForSource(
-				context.Background(), normal, 2, nil, 1000, "Normal Queue: orders", nil,
+			normalMessages, _, err := newPeekPage(0).readSource(
+				context.Background(), normal, 2, nil, 1000, "normal", "Normal Queue: orders", nil,
 			)
 			if err != nil {
 				t.Fatalf("peek normal messages: %v", err)
 			}
-			dlqMessages, _, err := peekMessagesForSource(
-				context.Background(), dlq, 2, nil, 1000, "Dead Letter Queue: orders", nil,
+			dlqMessages, _, err := newPeekPage(0).readSource(
+				context.Background(), dlq, 2, nil, 1000, "dlq", "Dead Letter Queue: orders", nil,
 			)
 			if err != nil {
 				t.Fatalf("peek dead-letter messages: %v", err)
 			}
 
-			if len(normalMessages) != tt.wantNormal || len(dlqMessages) != tt.wantDLQ {
+			if len(normalMessages.messages) != tt.wantNormal || len(dlqMessages.messages) != tt.wantDLQ {
 				t.Fatalf(
 					"page sizes = normal %d, dead letter %d; want normal %d, dead letter %d",
-					len(normalMessages), len(dlqMessages), tt.wantNormal, tt.wantDLQ,
+					len(normalMessages.messages), len(dlqMessages.messages), tt.wantNormal, tt.wantDLQ,
 				)
 			}
 		})
@@ -467,23 +586,23 @@ func TestPeekMessagesBothSourcesUseIndependentStartCursors(t *testing.T) {
 	normalStart := int64(11)
 	dlqStart := int64(101)
 
-	normalMessages, _, err := peekMessagesForSource(
-		context.Background(), normal, 2, &normalStart, 1000, "Normal Queue: orders", nil,
+	normalMessages, _, err := newPeekPage(0).readSource(
+		context.Background(), normal, 2, &normalStart, 1000, "normal", "Normal Queue: orders", nil,
 	)
 	if err != nil {
 		t.Fatalf("peek normal messages: %v", err)
 	}
-	dlqMessages, _, err := peekMessagesForSource(
-		context.Background(), dlq, 2, &dlqStart, 1000, "Dead Letter Queue: orders", nil,
+	dlqMessages, _, err := newPeekPage(0).readSource(
+		context.Background(), dlq, 2, &dlqStart, 1000, "dlq", "Dead Letter Queue: orders", nil,
 	)
 	if err != nil {
 		t.Fatalf("peek dead-letter messages: %v", err)
 	}
 
-	if got := normalMessages[0]["messageId"]; got != "normal-11" {
+	if got := peekField(t, normalMessages.messages[0], "messageId"); got != "normal-11" {
 		t.Fatalf("first normal message = %v, want normal-11", got)
 	}
-	if got := dlqMessages[0]["messageId"]; got != "dlq-101" {
+	if got := peekField(t, dlqMessages.messages[0], "messageId"); got != "dlq-101" {
 		t.Fatalf("first dead-letter message = %v, want dlq-101", got)
 	}
 	if normal.requests[0].start == nil || *normal.requests[0].start != normalStart {
@@ -803,49 +922,6 @@ func TestGetAdminClientCachesInstance(t *testing.T) {
 	}
 	if c1 == c3 {
 		t.Fatal("expected different client for different connection string")
-	}
-}
-
-func TestHandleGetTopicSubscriptionCountsValidation(t *testing.T) {
-	tests := []struct {
-		name    string
-		params  map[string]any
-		wantErr bool
-	}{
-		{
-			name:    "missing env",
-			params:  map[string]any{"topicName": "t1"},
-			wantErr: true,
-		},
-		{
-			name: "missing topic name",
-			params: map[string]any{
-				"env":       map[string]string{"SERVICE_BUS_CONNECTION_STRING": "Endpoint=sb://x.servicebus.windows.net/;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=dGVzdA=="},
-				"topicName": "",
-			},
-			wantErr: true,
-		},
-		{
-			name: "invalid topic name characters",
-			params: map[string]any{
-				"env":       map[string]string{"SERVICE_BUS_CONNECTION_STRING": "Endpoint=sb://x.servicebus.windows.net/;SharedAccessKeyName=RootManageSharedAccessKey;SharedAccessKey=dGVzdA=="},
-				"topicName": "invalid topic!",
-			},
-			wantErr: true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			raw, _ := json.Marshal(tt.params)
-			_, err := handleGetTopicSubscriptionCounts(raw)
-			if tt.wantErr && err == nil {
-				t.Fatal("expected error, got nil")
-			}
-			if !tt.wantErr && err != nil {
-				t.Fatalf("expected no error, got: %v", err)
-			}
-		})
 	}
 }
 

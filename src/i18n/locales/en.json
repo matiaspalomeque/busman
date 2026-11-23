@@ -313,7 +313,6 @@
       "forwardTo": "Forward To",
       "forwardDeadLetteredMessagesTo": "Forward Dead Letters To",
       "maxMessageSizeInKilobytes": "Max Message Size (KB)",
-      "supportOrdering": "Support Ordering",
       "enableDeadLetteringOnFilterEvaluationExceptions": "Dead Letter on Filter Errors",
       "sizeInBytes": "Size",
       "scheduledMessageCount": "Scheduled Messages",
@@ -322,7 +321,6 @@
       "deadLetterMessageCount": "Dead Letter Messages",
       "transferMessageCount": "Transfer Messages",
       "transferDeadLetterMessageCount": "Transfer Dead Letter Messages",
-      "subscriptionCount": "Subscriptions",
       "createdAt": "Created",
       "updatedAt": "Updated",
       "accessedAt": "Last Accessed",
@@ -333,7 +331,6 @@
       "yes": "Yes",
       "no": "No",
       "typeQueue": "Queue",
-      "typeTopic": "Topic",
       "typeSubscription": "Subscription"
     },
     "rules": {
@@ -420,6 +417,7 @@
       "nextPage": "Next page",
       "lastPage": "Last page",
       "loadedBudget": "Filtering {{count}} / {{max}} loaded messages · {{size}} / {{bytes}} MiB payload",
+      "partialPage": "Page size limit reached ({{sources}}). Select Load More to continue.",
       "clearLoaded": "Clear loaded results",
       "budgetReached": "The loaded-data limit was reached. Some peek results were not retained. Export or clear these results before browsing again."
     },

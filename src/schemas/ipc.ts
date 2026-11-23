@@ -40,6 +40,7 @@ export const PeekedMessageSchema = z.object({
   lockedUntilUtc: z.string().nullable().optional(),
   sourceSubQueue: z.enum(["active", "deadLetter", "transferDeadLetter"]).nullable().optional(),
   body: z.unknown(),
+  bodyIsJson: z.boolean().optional(),
   subject: z.string().nullable(),
   contentType: z.string().nullable(),
   correlationId: z.string().nullable(),
@@ -55,6 +56,7 @@ export const PeekedMessageSchema = z.object({
 
 export const PeekResultSchema = z.object({
   messages: z.array(PeekedMessageSchema),
+  truncatedSources: z.array(z.enum(["normal", "dlq"])).optional(),
 });
 
 export const SessionStateResultSchema = z
@@ -100,11 +102,6 @@ export const SubscriptionCountResultSchema = z.object({
   subscription: z.string(),
   active: z.number(),
   dlq: z.number(),
-});
-
-export const TopicSubscriptionCountsResultSchema = z.object({
-  topic: z.string(),
-  subscriptions: z.array(SubscriptionCountResultSchema),
 });
 
 export const EntityCountsResultSchema = z.object({
@@ -226,26 +223,6 @@ export const QueuePropertiesSchema = z.object({
   scheduledMessageCount: z.number(),
   transferMessageCount: z.number(),
   transferDeadLetterMessageCount: z.number(),
-});
-
-export const TopicPropertiesSchema = z.object({
-  name: z.string(),
-  maxSizeInMegabytes: z.number().nullable(),
-  requiresDuplicateDetection: z.boolean().nullable(),
-  defaultMessageTimeToLive: z.string().nullable(),
-  enablePartitioning: z.boolean().nullable(),
-  enableBatchedOperations: z.boolean().nullable(),
-  status: z.string().nullable(),
-  autoDeleteOnIdle: z.string().nullable(),
-  supportOrdering: z.boolean().nullable(),
-  maxMessageSizeInKilobytes: z.number().nullable(),
-  // Runtime
-  sizeInBytes: z.number(),
-  createdAt: z.string(),
-  updatedAt: z.string(),
-  accessedAt: z.string(),
-  subscriptionCount: z.number(),
-  scheduledMessageCount: z.number(),
 });
 
 export const SubscriptionPropertiesSchema = z.object({

@@ -190,23 +190,43 @@ describe("SendMessageModal", () => {
     expect(mocks.invoke).toHaveBeenCalledTimes(1);
   });
 
-  it("does not infer session requirements for a topic send", async () => {
+  it("sends a legacy queue template to the topic currently shown in Send", async () => {
     const store = configureStore(false);
     store.setExplorerSubscription("events", "processor");
+    localStorage.setItem("busman_message_templates", JSON.stringify([{
+      id: "template", name: "Retry order", entityName: "old-queue", body: "retry", subject: "Order",
+    }]));
     render(<SendMessageModal />);
 
+    fireEvent.change(inputFor("Entity Name"), { target: { value: "edited-topic" } });
+    fireEvent.click(screen.getByRole("button", { name: "Load template…" }));
+    fireEvent.click(screen.getByRole("button", { name: "Retry order" }));
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
 
     await waitFor(() => {
       expect(mocks.invoke).toHaveBeenCalledWith("send_message", {
         args: {
-          entityName: "events",
+          entityName: "edited-topic",
           entityKind: "topic",
           connectionId: CONN.id,
-          message: expect.objectContaining({ sessionId: undefined }),
+          message: expect.objectContaining({ body: "retry", subject: "Order", sessionId: undefined }),
         },
       });
     });
     expect(mocks.invoke).toHaveBeenCalledTimes(1);
+  });
+
+  it("preserves JSON number tokens when formatting and sending a browsed copy", async () => {
+    const original = '{"id":9007199254740993,"amount":1.2300e+30}';
+    openResend({ ...SESSION_MESSAGE, body: original, bodyIsJson: true }, configureStore());
+    render(<SendMessageModal />);
+    expect((screen.getByLabelText("Body") as HTMLTextAreaElement).value).toBe(original);
+    fireEvent.click(screen.getByRole("button", { name: "Format JSON" }));
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(mocks.invoke).toHaveBeenCalledWith("send_message", {
+      args: expect.objectContaining({ message: expect.objectContaining({
+        body: '{\n  "id": 9007199254740993,\n  "amount": 1.2300e+30\n}',
+      }) }),
+    }));
   });
 });

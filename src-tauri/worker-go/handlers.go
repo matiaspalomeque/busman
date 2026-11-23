@@ -39,9 +39,7 @@ func getAdminClient(connectionString string) (*admin.Client, error) {
 const entityNameMaxLen = 260
 const defaultOperationTimeoutMs = 30_000
 const maxReceiveBatchSize = 500
-const maxPeekBatchSize = 500
 const maxPeekPageMessages = 5000
-const maxSearchMatches = 10000
 
 var entityNameRe = regexp.MustCompile(`^[a-zA-Z0-9._\-/]+$`)
 var sequenceNumberRe = regexp.MustCompile(`^(0|[1-9][0-9]*)$`)
@@ -142,18 +140,6 @@ func parseBoolOrDefault(s string, def bool) bool {
 	}
 }
 
-func anyToIntOrDefault(v any, def int) int {
-	switch t := v.(type) {
-	case float64:
-		return int(t)
-	case int:
-		return t
-	case string:
-		return parseIntOrDefault(t, def)
-	}
-	return def
-}
-
 func calculateRate(count int, durationMs int64) int {
 	if durationMs <= 0 {
 		return 0
@@ -194,19 +180,6 @@ func closeWithTimeout(resource interface{ Close(context.Context) error }) {
 	_ = resource.Close(ctx)
 }
 
-// bodyToJSON tries to decode as JSON and returns the value; falls back to string.
-// This matches the JS SDK behaviour where AMQP-encoded messages arrive as parsed values.
-func bodyToJSON(b []byte) any {
-	if len(b) == 0 {
-		return ""
-	}
-	var v any
-	if err := json.Unmarshal(b, &v); err == nil {
-		return v
-	}
-	return string(b)
-}
-
 func derefString(s *string) any {
 	if s == nil {
 		return nil
@@ -232,17 +205,6 @@ func messageStateLabel(state azservicebus.MessageState) string {
 	default:
 		return strconv.FormatInt(int64(state), 10)
 	}
-}
-
-func sourceSubQueueLabel(sourceLabel string) string {
-	lower := strings.ToLower(sourceLabel)
-	if strings.Contains(lower, "transfer") {
-		return "transferDeadLetter"
-	}
-	if strings.Contains(lower, "dead letter") {
-		return "deadLetter"
-	}
-	return "active"
 }
 
 func traceParent(props map[string]any) any {
@@ -410,62 +372,6 @@ func handleGetSubscriptionCount(raw json.RawMessage) (any, error) {
 		dlq = int64(resp.DeadLetterMessageCount)
 	}
 	return subscriptionCountResult{Topic: p.TopicName, Subscription: p.SubscriptionName, Active: active, DLQ: dlq}, nil
-}
-
-// ─── 2c. getTopicSubscriptionCounts (batch) ─────────────────────────────────
-
-type topicSubscriptionCountsParams struct {
-	Env       map[string]string `json:"env"`
-	TopicName string            `json:"topicName"`
-}
-
-type topicSubscriptionCountsResult struct {
-	Topic         string                    `json:"topic"`
-	Subscriptions []subscriptionCountResult `json:"subscriptions"`
-}
-
-func handleGetTopicSubscriptionCounts(raw json.RawMessage) (any, error) {
-	var p topicSubscriptionCountsParams
-	if err := json.Unmarshal(raw, &p); err != nil {
-		return nil, fmt.Errorf("invalid params: %w", err)
-	}
-	cs, err := requireConnectionString(p.Env)
-	if err != nil {
-		return nil, err
-	}
-	if err := validateEntityName(p.TopicName, "Topic"); err != nil {
-		return nil, err
-	}
-
-	adminClient, err := getAdminClient(cs)
-	if err != nil {
-		return nil, err
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
-	defer cancel()
-
-	var subs []subscriptionCountResult
-	pager := adminClient.NewListSubscriptionsRuntimePropertiesPager(p.TopicName, nil)
-	for pager.More() {
-		page, err := pager.NextPage(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("list subscription runtime properties: %w", err)
-		}
-		for _, s := range page.SubscriptionRuntimeProperties {
-			subs = append(subs, subscriptionCountResult{
-				Topic:        p.TopicName,
-				Subscription: s.SubscriptionName,
-				Active:       int64(s.ActiveMessageCount),
-				DLQ:          int64(s.DeadLetterMessageCount),
-			})
-		}
-	}
-
-	if subs == nil {
-		subs = []subscriptionCountResult{}
-	}
-	return topicSubscriptionCountsResult{Topic: p.TopicName, Subscriptions: subs}, nil
 }
 
 type entityCountsParams struct {

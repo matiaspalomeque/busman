@@ -21,7 +21,10 @@ use tokio::{
 use uuid::Uuid;
 
 const WORKER_PROTOCOL_VERSION: u8 = 2;
-const MAX_WORKER_LINE_BYTES: usize = 32 * 1024 * 1024;
+const MAX_STDERR_LINE_BYTES: usize = 32 * 1024 * 1024;
+// A single browsed record may fill the grid's 64 MiB budget. Allow its response envelope too.
+pub(super) const MAX_PEEK_RECORD_BYTES: usize = 64 * 1024 * 1024;
+const MAX_RESPONSE_LINE_BYTES: usize = MAX_PEEK_RECORD_BYTES + 1024;
 pub(crate) const WORKER_CANCELLED_PREFIX: &str = "[worker:cancelled] ";
 
 pub(crate) static WORKER_PID: AtomicU32 = AtomicU32::new(0);
@@ -60,8 +63,6 @@ enum WorkerMessage {
         kind: String,
         line: Option<String>,
         text: Option<String>,
-        #[serde(rename = "match")]
-        match_data: Option<Value>,
         counts: Option<crate::operation_outcome::OperationCounts>,
         #[serde(rename = "isStderr")]
         is_stderr: Option<bool>,
@@ -215,7 +216,6 @@ struct WorkerEventParams {
     kind: String,
     line: Option<String>,
     text: Option<String>,
-    match_data: Option<Value>,
     counts: Option<crate::operation_outcome::OperationCounts>,
     is_stderr: Option<bool>,
     elapsed_ms: Option<u64>,
@@ -259,11 +259,6 @@ fn emit_worker_event(app: &AppHandle, params: &WorkerEventParams) {
                     elapsed_ms: elapsed,
                 },
             );
-        }
-        "searchMatch" => {
-            if let Some(ref data) = params.match_data {
-                let _ = app.emit(&format!("search-match:{run_id}"), data);
-            }
         }
         _ => {}
     }
@@ -318,7 +313,7 @@ async fn spawn_worker(app: &AppHandle) -> Result<ActiveWorker, String> {
     let reader_handle = tokio::spawn(reader_loop(
         BufReader::new(stdout),
         reader_pending,
-        MAX_WORKER_LINE_BYTES,
+        MAX_RESPONSE_LINE_BYTES,
         move |params| emit_worker_event(&reader_app, params),
     ));
 
@@ -334,7 +329,7 @@ async fn log_worker_stderr(stderr: ChildStderr) {
     let mut reader = BufReader::new(stderr);
     let mut line = Vec::with_capacity(8 * 1024);
     loop {
-        match read_bounded_line(&mut reader, &mut line, MAX_WORKER_LINE_BYTES).await {
+        match read_bounded_line(&mut reader, &mut line, MAX_STDERR_LINE_BYTES).await {
             Ok(BoundedLineRead::Eof) => break,
             Ok(BoundedLineRead::Oversized) => {
                 log::warn!("Worker stderr line exceeded the bounded line limit");
@@ -495,7 +490,6 @@ async fn reader_loop<R, F>(
                 kind,
                 line,
                 text,
-                match_data,
                 counts,
                 is_stderr,
                 elapsed_ms,
@@ -523,7 +517,6 @@ async fn reader_loop<R, F>(
                         kind,
                         line,
                         text,
-                        match_data,
                         counts,
                         is_stderr,
                         elapsed_ms,
@@ -955,6 +948,39 @@ mod tests {
             }
             error => panic!("unexpected cancellation error: {error:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn reader_accepts_a_single_large_browse_record_and_the_next_response() {
+        let pending = pending_map();
+        let browse = register_pending(&pending, "browse");
+        let next = register_pending(&pending, "next");
+        let body_bytes = (32 << 20) + 1;
+        let mut input = serde_json::to_vec(&serde_json::json!({
+            "version": WORKER_PROTOCOL_VERSION,
+            "type": "response",
+            "id": "browse",
+            "ok": true,
+            "result": { "messages": [{ "body": "x".repeat(body_bytes) }] }
+        }))
+        .unwrap();
+        input.push(b'\n');
+        input.extend_from_slice(&success_response("next"));
+
+        reader_loop(
+            BufReader::new(input.as_slice()),
+            pending,
+            MAX_RESPONSE_LINE_BYTES,
+            |_| {},
+        )
+        .await;
+
+        let result = browse.await.unwrap().unwrap();
+        assert_eq!(
+            result["messages"][0]["body"].as_str().unwrap().len(),
+            body_bytes
+        );
+        assert_eq!(next.await.unwrap().unwrap()["received"], true);
     }
 
     #[tokio::test]

@@ -5,241 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/messaging/azservicebus"
 )
-
-// ─── 5. searchMessages ───────────────────────────────────────────────────────
-
-type searchMessagesParams struct {
-	QueueName    string            `json:"queueName"`
-	SearchString string            `json:"searchString"`
-	Mode         string            `json:"mode"`
-	MaxMatches   any               `json:"maxMatches"`
-	Env          map[string]string `json:"env"`
-	RunID        string            `json:"runId"`
-}
-
-func handleSearchMessages(requestCtx context.Context, raw json.RawMessage) (any, error) {
-	var p searchMessagesParams
-	if err := json.Unmarshal(raw, &p); err != nil {
-		return nil, fmt.Errorf("invalid params: %w", err)
-	}
-	cs, err := requireConnectionString(p.Env)
-	if err != nil {
-		return nil, err
-	}
-	mode, err := validateMode(p.Mode, "both")
-	if err != nil {
-		return nil, err
-	}
-	if err := validateEntityName(p.QueueName, "Queue"); err != nil {
-		return nil, err
-	}
-
-	searchStr := strings.TrimSpace(p.SearchString)
-	if searchStr == "" {
-		return nil, fmt.Errorf("search string is required")
-	}
-
-	maxMatches := anyToIntOrDefault(p.MaxMatches, 50)
-	if maxMatches < 1 {
-		return nil, fmt.Errorf("max matches must be a positive integer")
-	}
-	if maxMatches > maxSearchMatches {
-		maxMatches = maxSearchMatches
-	}
-
-	batchSize := boundedIntFromEnv(p.Env, "BATCH_SIZE", 50, maxPeekBatchSize)
-	maxWaitMs := parseIntOrDefault(p.Env["MAX_WAIT_TIME_IN_MS"], 60000)
-	caseSensitive := p.Env["CASE_SENSITIVE"] == "true"
-	startedAt := time.Now()
-
-	client, err := azservicebus.NewClientFromConnectionString(cs, nil)
-	if err != nil {
-		return nil, fmt.Errorf("service bus client error: %w", err)
-	}
-	defer closeWithTimeout(client)
-
-	grandChecked := 0
-	grandMatches := 0
-	reachedLimit := false
-
-	searchLower := strings.ToLower(searchStr)
-
-	runOne := func(receiver *azservicebus.Receiver, queueType string) error {
-		defer closeWithTimeout(receiver)
-		if reachedLimit {
-			return nil
-		}
-
-		totalChecked := 0
-		matchesFound := 0
-		var fromSequenceNumber *int64
-		canAdvanceCursor := true
-		stageStart := time.Now()
-
-		emitOutput(p.RunID, "🔍 Searching "+queueType+"...", false, elapsedSince(startedAt))
-		emitOutput(p.RunID,
-			fmt.Sprintf(`   Looking for: "%s" (caseSensitive=%v) | Max matches: %d`,
-				searchStr, caseSensitive, maxMatches),
-			false, elapsedSince(startedAt))
-
-		for {
-			if reachedLimit {
-				break
-			}
-
-			var opts *azservicebus.PeekMessagesOptions
-			if fromSequenceNumber != nil {
-				opts = &azservicebus.PeekMessagesOptions{FromSequenceNumber: fromSequenceNumber}
-			}
-			peekCtx, peekCancel := context.WithTimeout(requestCtx, time.Duration(maxWaitMs)*time.Millisecond)
-			messages, err := receiver.PeekMessages(peekCtx, batchSize, opts)
-			peekCancel()
-			if err != nil {
-				return fmt.Errorf("peek error: %w", err)
-			}
-			if len(messages) == 0 {
-				emitOutput(p.RunID, "✨ No more messages found in "+queueType+".", false, elapsedSince(startedAt))
-				break
-			}
-
-			for _, msg := range messages {
-				totalChecked++
-				body := string(msg.Body)
-				var contains bool
-				if caseSensitive {
-					contains = strings.Contains(body, searchStr)
-				} else {
-					contains = strings.Contains(strings.ToLower(body), searchLower)
-				}
-
-				if contains {
-					matchesFound++
-					grandMatches++
-					matchRecord := map[string]any{
-						"messageId":                  msg.MessageID,
-						"sequenceNumber":             sequenceNumberValue(msg.SequenceNumber),
-						"sessionId":                  derefString(msg.SessionID),
-						"state":                      messageStateLabel(msg.State),
-						"deliveryCount":              msg.DeliveryCount,
-						"lockedUntilUtc":             derefTime(msg.LockedUntil),
-						"sourceSubQueue":             sourceSubQueueLabel(queueType),
-						"body":                       bodyToJSON(msg.Body),
-						"subject":                    derefString(msg.Subject),
-						"contentType":                derefString(msg.ContentType),
-						"correlationId":              derefString(msg.CorrelationID),
-						"partitionKey":               derefString(msg.PartitionKey),
-						"traceParent":                traceParent(msg.ApplicationProperties),
-						"applicationProperties":      msg.ApplicationProperties,
-						"enqueuedTimeUtc":            msg.EnqueuedTime,
-						"expiresAtUtc":               msg.ExpiresAt,
-						"deadLetterReason":           derefString(msg.DeadLetterReason),
-						"deadLetterErrorDescription": derefString(msg.DeadLetterErrorDescription),
-						"_source":                    queueType,
-					}
-					emitSearchMatch(p.RunID, matchRecord, elapsedSince(startedAt))
-					emitOutput(p.RunID, fmt.Sprintf("🎯 MATCH # %d", matchesFound), false, elapsedSince(startedAt))
-
-					emitOutput(p.RunID, "   MessageId: "+msg.MessageID, false, elapsedSince(startedAt))
-
-					seqStr := "—"
-					if msg.SequenceNumber != nil {
-						seqStr = strconv.FormatInt(*msg.SequenceNumber, 10)
-					}
-					emitOutput(p.RunID, "   SequenceNumber: "+seqStr, false, elapsedSince(startedAt))
-
-					enqueuedStr := "—"
-					if msg.EnqueuedTime != nil {
-						enqueuedStr = msg.EnqueuedTime.String()
-					}
-					emitOutput(p.RunID, "   Enqueued: "+enqueuedStr, false, elapsedSince(startedAt))
-
-					if msg.DeadLetterReason != nil {
-						emitOutput(p.RunID, "   DeadLetter Reason: "+*msg.DeadLetterReason, false, elapsedSince(startedAt))
-					}
-					if msg.DeadLetterErrorDescription != nil {
-						emitOutput(p.RunID, "   DeadLetter Error: "+*msg.DeadLetterErrorDescription, false, elapsedSince(startedAt))
-					}
-
-					preview := body
-					if len(preview) > 300 {
-						preview = preview[:300] + "..."
-					}
-					emitOutput(p.RunID, "   Body Preview: "+preview, false, elapsedSince(startedAt))
-
-					if grandMatches >= maxMatches {
-						reachedLimit = true
-						emitOutput(p.RunID,
-							fmt.Sprintf("⏹ Reached max matches (%d). Stopping search.", maxMatches),
-							false, elapsedSince(startedAt))
-						break
-					}
-				}
-
-				if msg.SequenceNumber != nil {
-					next, ok := nextSequenceNumber(*msg.SequenceNumber)
-					if !ok {
-						canAdvanceCursor = false
-						break
-					}
-					fromSequenceNumber = &next
-				} else {
-					emitOutput(p.RunID,
-						"⚠ Unable to advance sequence number. Stopping current search stream.",
-						true, elapsedSince(startedAt))
-					canAdvanceCursor = false
-					break
-				}
-			}
-
-			emitProgress(p.RunID,
-				fmt.Sprintf("👀 Checked: %d | Matches: %d", totalChecked, matchesFound),
-				elapsedSince(startedAt))
-
-			if !canAdvanceCursor || reachedLimit {
-				break
-			}
-		}
-
-		emitOutput(p.RunID,
-			fmt.Sprintf("✅ Finished %s. Checked: %d, Matches: %d in %.1fs",
-				queueType, totalChecked, matchesFound, time.Since(stageStart).Seconds()),
-			false, elapsedSince(startedAt))
-		grandChecked += totalChecked
-		return nil
-	}
-
-	if mode == "normal" || mode == "both" {
-		receiver, err := client.NewReceiverForQueue(p.QueueName, nil)
-		if err != nil {
-			return nil, err
-		}
-		if err := runOne(receiver, "normal queue"); err != nil {
-			return nil, err
-		}
-	}
-	if !reachedLimit && (mode == "dlq" || mode == "both") {
-		receiver, err := client.NewReceiverForQueue(p.QueueName,
-			&azservicebus.ReceiverOptions{SubQueue: azservicebus.SubQueueDeadLetter})
-		if err != nil {
-			return nil, err
-		}
-		if err := runOne(receiver, "dead letter queue"); err != nil {
-			return nil, err
-		}
-	}
-
-	return map[string]any{
-		"checked":      grandChecked,
-		"matches":      grandMatches,
-		"maxMatches":   maxMatches,
-		"reachedLimit": reachedLimit,
-	}, nil
-}
 
 // ─── 6. peekMessages ─────────────────────────────────────────────────────────
 
@@ -247,7 +16,11 @@ type peekMessageReceiver interface {
 	PeekMessages(context.Context, int, *azservicebus.PeekMessagesOptions) ([]*azservicebus.ReceivedMessage, error)
 }
 
-func peekedMessageRecord(msg *azservicebus.ReceivedMessage, sourceLabel string) map[string]any {
+func peekedMessageRecord(msg *azservicebus.ReceivedMessage, source, sourceLabel string) map[string]any {
+	subQueue := "active"
+	if source == "dlq" {
+		subQueue = "deadLetter"
+	}
 	return map[string]any{
 		"messageId":                  msg.MessageID,
 		"sequenceNumber":             sequenceNumberValue(msg.SequenceNumber),
@@ -255,8 +28,9 @@ func peekedMessageRecord(msg *azservicebus.ReceivedMessage, sourceLabel string) 
 		"state":                      messageStateLabel(msg.State),
 		"deliveryCount":              msg.DeliveryCount,
 		"lockedUntilUtc":             derefTime(msg.LockedUntil),
-		"sourceSubQueue":             sourceSubQueueLabel(sourceLabel),
-		"body":                       bodyToJSON(msg.Body),
+		"sourceSubQueue":             subQueue,
+		"body":                       string(msg.Body),
+		"bodyIsJson":                 json.Valid(msg.Body),
 		"subject":                    derefString(msg.Subject),
 		"contentType":                derefString(msg.ContentType),
 		"correlationId":              derefString(msg.CorrelationID),
@@ -271,30 +45,47 @@ func peekedMessageRecord(msg *azservicebus.ReceivedMessage, sourceLabel string) 
 	}
 }
 
-// peekMessagesForSource retrieves one source-local page. In "both" mode the
-// caller invokes it once for the active entity and once for its dead-letter
-// subqueue, so count and cursor progression remain independent.
-func peekMessagesForSource(
+// Leave space in a 32 MiB worker frame for its envelope, request ID and newline.
+const peekPageBytes = (32 << 20) - 1024
+
+type peekPage struct {
+	messages         []json.RawMessage
+	bytes            int
+	truncatedSources []string
+	recordLimit      int
+}
+
+func newPeekPage(hostRecordLimit int) peekPage {
+	// Older hosts read at most 32 MiB per response.
+	if hostRecordLimit <= 0 {
+		hostRecordLimit = peekPageBytes
+	}
+	return peekPage{recordLimit: min(hostRecordLimit, 64<<20)}
+}
+
+// Read a bounded prefix. Active and dead-letter sources share the response byte
+// budget but keep independent counts and cursors. Returning a value also lets a
+// failed SDK peek retry through the management link from the original page.
+func (page peekPage) readSource(
 	requestCtx context.Context,
 	receiver peekMessageReceiver,
 	count int,
 	startSeqNum *int64,
 	maxWaitMs int,
-	sourceLabel string,
+	source, sourceLabel string,
 	onProgress func(int),
-) ([]map[string]any, bool, error) {
+) (peekPage, bool, error) {
 	const innerBatchSize = 250
-
-	messagesForSource := make([]map[string]any, 0, count)
+	start := len(page.messages)
 	fromSeqNum := startSeqNum
 	canAdvanceCursor := true
 
-	for len(messagesForSource) < count {
-		fetchCount := count - len(messagesForSource)
-		if fetchCount > innerBatchSize {
-			fetchCount = innerBatchSize
+	for len(page.messages)-start < count {
+		if page.bytes >= peekPageBytes {
+			page.truncatedSources = append(page.truncatedSources, source)
+			break
 		}
-
+		fetchCount := min(count-(len(page.messages)-start), innerBatchSize)
 		var opts *azservicebus.PeekMessagesOptions
 		if fromSeqNum != nil {
 			opts = &azservicebus.PeekMessagesOptions{FromSequenceNumber: fromSeqNum}
@@ -303,50 +94,66 @@ func peekMessagesForSource(
 		messages, err := receiver.PeekMessages(peekCtx, fetchCount, opts)
 		peekCancel()
 		if err != nil {
-			return nil, canAdvanceCursor, fmt.Errorf("peek error: %w", err)
+			return page, canAdvanceCursor, fmt.Errorf("peek error: %w", err)
 		}
 		if len(messages) == 0 {
 			break
 		}
 
 		for _, msg := range messages {
-			messagesForSource = append(messagesForSource, peekedMessageRecord(msg, sourceLabel))
+			record, err := json.Marshal(peekedMessageRecord(msg, source, sourceLabel))
+			if err != nil {
+				return page, canAdvanceCursor, fmt.Errorf("encode browsed message: %w", err)
+			}
+			if len(page.messages) != 0 && page.bytes+1+len(record) > peekPageBytes {
+				page.truncatedSources = append(page.truncatedSources, source)
+				return page, canAdvanceCursor, nil
+			}
+			// A single record can use the full byte capacity advertised by the host.
+			if len(record) > page.recordLimit {
+				return page, canAdvanceCursor, fmt.Errorf("message %v in %s needs %d encoded bytes, exceeding the browse limit of %d bytes",
+					sequenceNumberValue(msg.SequenceNumber), sourceLabel, len(record), page.recordLimit)
+			}
+			page.messages = append(page.messages, record)
+			page.bytes += len(record) + 1
 
 			if msg.SequenceNumber != nil {
 				next, ok := nextSequenceNumber(*msg.SequenceNumber)
-				if !ok {
-					canAdvanceCursor = false
-					break
+				if ok {
+					fromSeqNum = &next
+					continue
 				}
-				fromSeqNum = &next
-			} else {
-				canAdvanceCursor = false
-				break
 			}
+			canAdvanceCursor = false
+			break
 		}
 
 		if onProgress != nil {
-			onProgress(len(messagesForSource))
+			onProgress(len(page.messages) - start)
 		}
 		if !canAdvanceCursor {
 			break
 		}
 	}
-
-	return messagesForSource, canAdvanceCursor, nil
+	return page, canAdvanceCursor, nil
 }
 
 type peekMessagesParams struct {
-	Argv  []string          `json:"argv"`
-	Env   map[string]string `json:"env"`
-	RunID string            `json:"runId"`
+	MaxRecordBytes int               `json:"maxRecordBytes"`
+	Argv           []string          `json:"argv"`
+	Env            map[string]string `json:"env"`
+	RunID          string            `json:"runId"`
 }
 
-func peekMessagesResult(messages []map[string]any) map[string]any {
-	if messages == nil {
-		messages = []map[string]any{}
+func (page peekPage) result() map[string]any {
+	if page.messages == nil {
+		page.messages = []json.RawMessage{}
 	}
-	return map[string]any{"messages": messages}
+	result := map[string]any{"messages": page.messages}
+	if len(page.truncatedSources) > 0 {
+		result["truncatedSources"] = page.truncatedSources
+	}
+	return result
 }
 
 func parsePeekCount(countArg string) (int, error) {
@@ -471,9 +278,9 @@ func handlePeekMessages(requestCtx context.Context, raw json.RawMessage) (any, e
 	}
 	defer closeWithTimeout(client)
 
-	allMessages := []map[string]any{}
+	page := newPeekPage(p.MaxRecordBytes)
 
-	runOne := func(receiver *azservicebus.Receiver, sourceLabel, activePath string) error {
+	runOne := func(receiver *azservicebus.Receiver, source, sourceLabel, activePath string) error {
 		defer closeWithTimeout(receiver)
 
 		seqNumHint := ""
@@ -491,14 +298,14 @@ func handlePeekMessages(requestCtx context.Context, raw json.RawMessage) (any, e
 					elapsedSince(startedAt))
 			}
 		}
-		messages, canAdvanceCursor, err := peekMessagesForSource(
-			requestCtx, receiver, count, startSeqNum, maxWaitMs, sourceLabel, onProgress,
+		nextPage, canAdvanceCursor, err := page.readSource(
+			requestCtx, receiver, count, startSeqNum, maxWaitMs, source, sourceLabel, onProgress,
 		)
 		if activePath != "" && isSessionRequiredForBrowse(err) {
 			peeker := &managementPeekReceiver{connectionString: cs, entityPath: activePath}
 			defer peeker.close()
-			messages, canAdvanceCursor, err = peekMessagesForSource(
-				requestCtx, peeker, count, startSeqNum, maxWaitMs, sourceLabel, onProgress,
+			nextPage, canAdvanceCursor, err = page.readSource(
+				requestCtx, peeker, count, startSeqNum, maxWaitMs, source, sourceLabel, onProgress,
 			)
 		}
 		if err != nil {
@@ -509,10 +316,11 @@ func handlePeekMessages(requestCtx context.Context, raw json.RawMessage) (any, e
 				"⚠ Unable to advance sequence number. Returning collected messages.",
 				true, elapsedSince(startedAt))
 		}
-		allMessages = append(allMessages, messages...)
+		retrieved := len(nextPage.messages) - len(page.messages)
+		page = nextPage
 
 		emitOutput(p.RunID,
-			fmt.Sprintf("✨ Found %d messages in %s.", len(messages), sourceLabel),
+			fmt.Sprintf("✨ Found %d messages in %s.", retrieved, sourceLabel),
 			false, elapsedSince(startedAt))
 		return nil
 	}
@@ -523,7 +331,7 @@ func handlePeekMessages(requestCtx context.Context, raw json.RawMessage) (any, e
 			if err != nil {
 				return nil, err
 			}
-			if err := runOne(receiver, "Normal Queue: "+entityName, entityName); err != nil {
+			if err := runOne(receiver, "normal", "Normal Queue: "+entityName, entityName); err != nil {
 				return nil, err
 			}
 		} else {
@@ -532,7 +340,7 @@ func handlePeekMessages(requestCtx context.Context, raw json.RawMessage) (any, e
 				return nil, err
 			}
 			path := entityName + "/Subscriptions/" + subscription
-			if err := runOne(receiver, "Normal Subscription: "+entityName+"/"+subscription, path); err != nil {
+			if err := runOne(receiver, "normal", "Normal Subscription: "+entityName+"/"+subscription, path); err != nil {
 				return nil, err
 			}
 		}
@@ -545,7 +353,7 @@ func handlePeekMessages(requestCtx context.Context, raw json.RawMessage) (any, e
 			if err != nil {
 				return nil, err
 			}
-			if err := runOne(receiver, "Dead Letter Queue: "+entityName, ""); err != nil {
+			if err := runOne(receiver, "dlq", "Dead Letter Queue: "+entityName, ""); err != nil {
 				return nil, err
 			}
 		} else {
@@ -553,11 +361,14 @@ func handlePeekMessages(requestCtx context.Context, raw json.RawMessage) (any, e
 			if err != nil {
 				return nil, err
 			}
-			if err := runOne(receiver, "Dead Letter Subscription: "+entityName+"/"+subscription, ""); err != nil {
+			if err := runOne(receiver, "dlq", "Dead Letter Subscription: "+entityName+"/"+subscription, ""); err != nil {
 				return nil, err
 			}
 		}
 	}
 
-	return peekMessagesResult(allMessages), nil
+	if len(page.truncatedSources) > 0 {
+		emitOutput(p.RunID, "Browse reached the page byte limit. Load More resumes the interrupted source first.", false, elapsedSince(startedAt))
+	}
+	return page.result(), nil
 }

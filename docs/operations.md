@@ -2,6 +2,8 @@
 
 Browse is non-destructive. It loads a local view; filters search only those loaded messages. The view retains at most 5,000 messages and 64 MiB of serialized payload. Actual process memory can be higher because parsed objects, rendering, and search text also occupy memory. A visible notice identifies truncated results. Clear releases the loaded view. Cursors advance only through retained messages.
 
+Browse sizes pages using the encoded records, including escaped JSON text. A page can return fewer messages than requested when it reaches 32 MiB. The grid identifies the interrupted sources. In **Both** mode, **Load More** resumes the last interrupted source first, using each source’s own sequence cursor. A single larger record can occupy its own page up to the 64 MiB limit.
+
 Move captures the connection and source when its dialog opens, starts from the explorer's Normal/DLQ/Both selection, and shows its destination and bulk scope. Changing connections disables the captured dialog. Bulk operations consume all available messages until the source has been idle for the configured receive interval; the browse count and grid filters do not limit them. Drain / delete messages permanently removes source messages.
 
 ## Lifecycle

@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import "../../i18n";
 import { useAppStore } from "../../store/appStore";
@@ -7,6 +7,7 @@ import { messageOperationKey } from "../../utils/messageOperation";
 import { MessageGrid } from "./MessageGrid";
 import { AtomicOperationBanner, OperationStatusTray } from "./OperationStatus";
 import { invoke } from "@tauri-apps/api/core";
+import { save } from "@tauri-apps/plugin-dialog";
 import fixture from "../../../contracts/operation-outcome.json";
 import { OperationOutcomeSchema } from "../../schemas/operation";
 
@@ -57,6 +58,36 @@ describe("MessageGrid", () => {
 
     expect(useAppStore.getState().hasBrowsed).toBe(true);
     expect(screen.getByText("No messages returned from the selected source.")).toBeTruthy();
+  });
+
+  it("shows the partial-page notice only for interrupted sources in the selected mode", () => {
+    const store = useAppStore.getState();
+    store.setPeekMode("both");
+    store.setPeekResults([message("1", "Normal Queue: q1")], ["dlq"]);
+    render(<MessageGrid />);
+    expect(screen.getByText(/Page size limit reached \(DLQ\)/)).toBeTruthy();
+
+    act(() => store.setPeekMode("normal"));
+    expect(screen.queryByText(/Page size limit reached/)).toBeNull();
+
+    act(() => store.setPeekMode("dlq"));
+    expect(screen.getByText(/Page size limit reached \(DLQ\)/)).toBeTruthy();
+  });
+
+  it("exports JSON as its original value and plain text as a string", async () => {
+    const raw = '{"id":9007199254740993,"amount":1.250e400,"id":-0}';
+    const json = { ...message("1", "Normal Queue: q1"), body: raw, bodyIsJson: true };
+    const text = { ...message("2", "Normal Queue: q1"), body: "plain text", bodyIsJson: false };
+    useAppStore.getState().setPeekResults([json, text]);
+    vi.mocked(save).mockResolvedValueOnce("orders.json");
+    render(<MessageGrid />);
+    fireEvent.click(screen.getByRole("button", { name: "Export JSON" }));
+    await waitFor(() => expect(invoke).toHaveBeenCalledWith("write_json_file", {
+      path: "orders.json", content: expect.stringContaining(raw),
+    }));
+    const args = vi.mocked(invoke).mock.lastCall?.[1] as { content: string };
+    expect(JSON.parse(args.content)).toMatchObject([{ messageId: json.messageId, body: { id: -0 } }, { body: "plain text" }]);
+    expect(args.content).not.toContain("bodyIsJson");
   });
 
   it("keeps the grid visible and renders pending message rows as loading rows", () => {

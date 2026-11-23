@@ -1,9 +1,11 @@
-import { bodyString, filterMessages } from "../src/utils/messageSearch";
+import { bodyString } from "../src/utils/messageBody";
+import { filterMessages } from "../src/utils/messageSearch";
 import type { PeekedMessage } from "../src/types";
 
 const messages = Array.from({ length: 5000 }, (_, index) => ({
   messageId: `order-${index}`, sequenceNumber: String(index + 1),
-  body: { orderId: index, description: "Realistic order line description. ".repeat(300), status: index % 3 ? "fulfilled" : "retry" },
+  body: JSON.stringify({ orderId: index, description: "Realistic order line description. ".repeat(300), status: index % 3 ? "fulfilled" : "retry" }),
+  bodyIsJson: true,
   subject: "OrderSubmitted", contentType: "application/json", correlationId: null, partitionKey: null,
   traceParent: null, applicationProperties: null, enqueuedTimeUtc: null, expiresAtUtc: null, _source: "dlq",
 } satisfies PeekedMessage));

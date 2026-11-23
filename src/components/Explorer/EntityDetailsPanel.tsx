@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { useAppStore, selectActiveConnection } from "../../store/appStore";
-import type { EntityProperties, QueueProperties, SubscriptionProperties, TopicProperties } from "../../types";
+import type { EntityProperties, QueueProperties, SubscriptionProperties } from "../../types";
 import { formatBytes, formatDuration, formatTimestamp } from "./entityDetailsFormat";
 import { extractNamespace } from "../../utils/connection";
 
@@ -75,33 +75,6 @@ function QueueDetails({ data, t }: { data: QueueProperties; t: (key: string) => 
   );
 }
 
-function TopicDetails({ data, t }: { data: TopicProperties; t: (key: string) => string }) {
-  const neverLabel = t("explorer.entityDetails.never");
-
-  return (
-    <>
-      <SectionHeader label={t("explorer.entityDetails.configuration")} />
-      {data.status != null && <PropRow label={t("explorer.entityDetails.status")} value={data.status} />}
-      {data.maxSizeInMegabytes != null && <PropRow label={t("explorer.entityDetails.maxSizeInMegabytes")} value={data.maxSizeInMegabytes.toLocaleString()} />}
-      {data.maxMessageSizeInKilobytes != null && <PropRow label={t("explorer.entityDetails.maxMessageSizeInKilobytes")} value={data.maxMessageSizeInKilobytes.toLocaleString()} />}
-      <PropRow label={t("explorer.entityDetails.defaultMessageTimeToLive")} value={formatDuration(data.defaultMessageTimeToLive, neverLabel)} />
-      <BoolRow label={t("explorer.entityDetails.enablePartitioning")} value={data.enablePartitioning} t={t} />
-      <BoolRow label={t("explorer.entityDetails.requiresDuplicateDetection")} value={data.requiresDuplicateDetection} t={t} />
-      <BoolRow label={t("explorer.entityDetails.supportOrdering")} value={data.supportOrdering} t={t} />
-      <BoolRow label={t("explorer.entityDetails.enableBatchedOperations")} value={data.enableBatchedOperations} t={t} />
-      <PropRow label={t("explorer.entityDetails.autoDeleteOnIdle")} value={formatDuration(data.autoDeleteOnIdle, neverLabel)} />
-
-      <SectionHeader label={t("explorer.entityDetails.runtime")} />
-      <PropRow label={t("explorer.entityDetails.sizeInBytes")} value={formatBytes(data.sizeInBytes)} />
-      <PropRow label={t("explorer.entityDetails.subscriptionCount")} value={data.subscriptionCount.toLocaleString()} />
-      <PropRow label={t("explorer.entityDetails.scheduledMessageCount")} value={data.scheduledMessageCount.toLocaleString()} />
-      <PropRow label={t("explorer.entityDetails.createdAt")} value={formatTimestamp(data.createdAt)} />
-      <PropRow label={t("explorer.entityDetails.updatedAt")} value={formatTimestamp(data.updatedAt)} />
-      <PropRow label={t("explorer.entityDetails.accessedAt")} value={formatTimestamp(data.accessedAt)} />
-    </>
-  );
-}
-
 function SubscriptionDetails({ data, t }: { data: SubscriptionProperties; t: (key: string) => string }) {
   const hasForwarding = data.forwardTo || data.forwardDeadLetteredMessagesTo;
   const neverLabel = t("explorer.entityDetails.never");
@@ -167,8 +140,6 @@ function EntityDetailsContent({ props }: { props: EntityProperties }) {
   switch (props.kind) {
     case "queue":
       return <QueueDetails data={props.data} t={t} />;
-    case "topic":
-      return <TopicDetails data={props.data} t={t} />;
     case "subscription":
       return <SubscriptionDetails data={props.data} t={t} />;
   }
@@ -177,7 +148,6 @@ function EntityDetailsContent({ props }: { props: EntityProperties }) {
 function entityTypeLabel(props: EntityProperties, t: (key: string) => string): string {
   switch (props.kind) {
     case "queue": return t("explorer.entityDetails.typeQueue");
-    case "topic": return t("explorer.entityDetails.typeTopic");
     case "subscription": return t("explorer.entityDetails.typeSubscription");
   }
 }

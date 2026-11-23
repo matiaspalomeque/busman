@@ -4,8 +4,6 @@ export interface MessageTemplate {
   id: string;
   name: string;
   createdAt: string;
-  /** The entity (queue or topic) this template was saved from, if any. */
-  entityName?: string;
   body: string;
   contentType?: string;
   subject?: string;
@@ -45,13 +43,11 @@ export function useMessageTemplates() {
         sessionId?: string;
         applicationProperties?: Record<string, unknown>;
       },
-      entityName?: string,
     ): MessageTemplate => {
       const template: MessageTemplate = {
         id: crypto.randomUUID(),
         name: name.trim(),
         createdAt: new Date().toISOString(),
-        entityName: entityName || undefined,
         body: draft.body,
         contentType: draft.contentType || undefined,
         subject: draft.subject || undefined,

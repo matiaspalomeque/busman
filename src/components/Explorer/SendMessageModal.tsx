@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { useAppStore, selectActiveConnection } from "../../store/appStore";
 import { Icon } from "../Common/Icon";
 import { extractNamespace } from "../../utils/connection";
+import { formatBodyJson } from "../../utils/messageBody";
 import { useDialogFocus } from "../../hooks/useDialogFocus";
 import { useMessageTemplates, type MessageTemplate } from "../../hooks/useMessageTemplates";
 import type { ExplorerSelection } from "../../types";
@@ -90,7 +91,6 @@ export function SendMessageModal() {
     setSubject(tpl.subject ?? "");
     setCorrelationId(tpl.correlationId ?? "");
     setSessionId(tpl.sessionId ?? "");
-    if (tpl.entityName) setEntityName(tpl.entityName);
     setAppProps(propertyRows(tpl.applicationProperties));
     setTplDropdownOpen(false);
   };
@@ -112,7 +112,6 @@ export function SendMessageModal() {
         sessionId: sessionId || undefined,
         applicationProperties: Object.keys(applicationProperties).length > 0 ? applicationProperties : undefined,
       },
-      entityName || undefined,
     );
     finishNaming();
     if (saveFlashTimer.current) clearTimeout(saveFlashTimer.current);
@@ -143,14 +142,6 @@ export function SendMessageModal() {
       close();
     }
   });
-
-  const formatJson = () => {
-    try {
-      setBody(JSON.stringify(JSON.parse(body), null, 2));
-    } catch {
-      /* ignore */
-    }
-  };
 
   const handleSend = async () => {
     if (!conn || !entityName.trim()) return;
@@ -308,11 +299,6 @@ export function SendMessageModal() {
                             <span className="block truncate text-xs font-medium text-azure-dark dark:text-zinc-200">
                               {tpl.name}
                             </span>
-                            {tpl.entityName && (
-                              <span className="text-[10px] font-mono text-zinc-400 truncate block">
-                                {tpl.entityName}
-                              </span>
-                            )}
                           </button>
                           <button
                             type="button"
@@ -419,7 +405,7 @@ export function SendMessageModal() {
             <div className="flex items-center justify-between">
               <label htmlFor="send-body" className="text-xs font-medium text-zinc-600 dark:text-zinc-300">{t("explorer.sendModal.body")}</label>
               <button
-                onClick={formatJson}
+                onClick={() => setBody(formatBodyJson(body))}
                 className="text-[10px] text-azure-primary hover:underline"
               >
                 {t("explorer.sendModal.formatJson")}

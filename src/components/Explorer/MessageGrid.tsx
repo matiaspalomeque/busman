@@ -7,6 +7,7 @@ import { save } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
 import { useAppStore } from "../../store/appStore";
 import type { PeekedMessage } from "../../types";
+import { serializeMessage } from "../../utils/messageBody";
 import { EntityDetailsPanel } from "./EntityDetailsPanel";
 import { messageOperationKey, type MessageOperation } from "../../utils/messageOperation";
 import { logHandledError } from "../../utils/logging";
@@ -27,6 +28,8 @@ export function MessageGrid() {
     peekMessages,
     loadedMessageBytes,
     messageBudgetReached,
+    peekMode,
+    truncatedPeekSources,
     clearPeekResults,
     hasBrowsed,
     explorerSelection,
@@ -49,6 +52,8 @@ export function MessageGrid() {
     peekMessages: state.peekMessages,
     loadedMessageBytes: state.loadedMessageBytes,
     messageBudgetReached: state.messageBudgetReached,
+    peekMode: state.peekMode,
+    truncatedPeekSources: state.truncatedPeekSources,
     clearPeekResults: state.clearPeekResults,
     hasBrowsed: state.hasBrowsed,
     explorerSelection: state.explorerSelection,
@@ -109,7 +114,7 @@ export function MessageGrid() {
         filters: [{ name: "JSON", extensions: ["json"] }],
       });
       if (!path) return;
-      await invoke("write_json_file", { path, content: JSON.stringify(peekMessages, null, 2) });
+      await invoke("write_json_file", { path, content: `[\n${peekMessages.map(serializeMessage).join(",\n")}\n]` });
     } catch (err) {
       logHandledError("Failed to export messages", err, {
         messageCount: peekMessages.length,
@@ -154,6 +159,7 @@ export function MessageGrid() {
   const pageRows = filtered.slice(pageStart, pageEnd);
 
   const hasSelection = explorerSelection.kind !== "none";
+  const interrupted = truncatedPeekSources.filter((source) => peekMode === "both" || peekMode === source);
   // Preserve the current workspace while bulk operations run. Progress is shown
   // in a floating tray so the details or message grid never gets replaced.
   const showEntityDetails = hasSelection && !hasBrowsed;
@@ -164,12 +170,17 @@ export function MessageGrid() {
         <span>{t("explorer.grid.loadedBudget", { count: peekMessages.length, max: MAX_LOADED_MESSAGES, size: (loadedMessageBytes / 1024 / 1024).toFixed(1), bytes: MAX_LOADED_BYTES / 1024 / 1024 })}</span>
         <button onClick={clearPeekResults} className="ml-auto text-azure-primary hover:underline">{t("explorer.grid.clearLoaded")}</button>
         {messageBudgetReached && <p role="status" className="w-full text-amber-700 dark:text-amber-300">{t("explorer.grid.budgetReached")}</p>}
+        {!messageBudgetReached && interrupted.length > 0 && (
+          <p role="status" className="w-full">{t("explorer.grid.partialPage", {
+            sources: interrupted.map((source) => t(`modeSelector.${source}`)).join(", "),
+          })}</p>
+        )}
       </div>}
       {/* Error banner */}
       {lastBrowseError && (
         <div className="shrink-0 flex items-start gap-2 px-3 py-2 bg-red-50 dark:bg-red-900/20 border-b border-red-200 dark:border-red-800 text-xs text-red-700 dark:text-red-400">
           <span className="font-semibold shrink-0">{t("explorer.grid.browseError")}</span>
-          <span className="selectable break-all">{lastBrowseError}</span>
+          <span className="selectable whitespace-pre-line break-all">{lastBrowseError}</span>
         </div>
       )}
 

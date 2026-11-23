@@ -90,7 +90,6 @@ type Event struct {
 	Line      string           `json:"line,omitempty"`
 	IsStderr  bool             `json:"isStderr,omitempty"`
 	Text      string           `json:"text,omitempty"`
-	Match     any              `json:"match,omitempty"`
 	ElapsedMs int64            `json:"elapsedMs"`
 }
 
@@ -122,13 +121,6 @@ func emitProgress(runID, text string, elapsedMs int64) {
 	writeLine(Event{Version: protocolVersion, Type: "event", RunID: runID, Kind: "progress", Counts: operationCounts(runID), Text: text, ElapsedMs: elapsedMs})
 }
 
-func emitSearchMatch(runID string, match any, elapsedMs int64) {
-	if runID == "" {
-		return
-	}
-	writeLine(Event{Version: protocolVersion, Type: "event", RunID: runID, Kind: "searchMatch", Match: match, ElapsedMs: elapsedMs})
-}
-
 func elapsedSince(start time.Time) int64 {
 	return time.Since(start).Milliseconds()
 }
@@ -139,34 +131,31 @@ type handlerFn func(params json.RawMessage) (any, error)
 type cancellableHandlerFn func(ctx context.Context, params json.RawMessage) (any, error)
 
 var handlers = map[string]handlerFn{
-	"health":                     handleHealth,
-	"listEntities":               handleListEntities,
-	"getQueueCount":              handleGetQueueCount,
-	"getSubscriptionCount":       handleGetSubscriptionCount,
-	"getTopicSubscriptionCounts": handleGetTopicSubscriptionCounts,
-	"getEntityCounts":            handleGetEntityCounts,
-	"sendMessage":                handleSendMessage,
-	"createQueue":                handleCreateQueue,
-	"createTopic":                handleCreateTopic,
-	"createSubscription":         handleCreateSubscription,
-	"deleteQueue":                handleDeleteQueue,
-	"deleteTopic":                handleDeleteTopic,
-	"deleteSubscription":         handleDeleteSubscription,
-	"getQueueProperties":         handleGetQueueProperties,
-	"getTopicProperties":         handleGetTopicProperties,
-	"getSubscriptionProperties":  handleGetSubscriptionProperties,
-	"sessionState":               handleSessionState,
-	"listSubscriptionRules":      handleListSubscriptionRules,
-	"createSubscriptionRule":     handleCreateSubscriptionRule,
-	"updateSubscriptionRule":     handleUpdateSubscriptionRule,
-	"deleteSubscriptionRule":     handleDeleteSubscriptionRule,
+	"health":                    handleHealth,
+	"listEntities":              handleListEntities,
+	"getQueueCount":             handleGetQueueCount,
+	"getSubscriptionCount":      handleGetSubscriptionCount,
+	"getEntityCounts":           handleGetEntityCounts,
+	"sendMessage":               handleSendMessage,
+	"createQueue":               handleCreateQueue,
+	"createTopic":               handleCreateTopic,
+	"createSubscription":        handleCreateSubscription,
+	"deleteQueue":               handleDeleteQueue,
+	"deleteTopic":               handleDeleteTopic,
+	"deleteSubscription":        handleDeleteSubscription,
+	"getQueueProperties":        handleGetQueueProperties,
+	"getSubscriptionProperties": handleGetSubscriptionProperties,
+	"sessionState":              handleSessionState,
+	"listSubscriptionRules":     handleListSubscriptionRules,
+	"createSubscriptionRule":    handleCreateSubscriptionRule,
+	"updateSubscriptionRule":    handleUpdateSubscriptionRule,
+	"deleteSubscriptionRule":    handleDeleteSubscriptionRule,
 }
 
 var cancellableHandlers = map[string]cancellableHandlerFn{
 	"emptyMessages":            handleEmptyMessages,
 	"moveMessages":             handleMoveMessages,
 	"republishSubscriptionDlq": handleRepublishSubscriptionDlq,
-	"searchMessages":           handleSearchMessages,
 	"peekMessages":             handlePeekMessages,
 	"singleMessageAction":      handleSingleMessageAction,
 }

@@ -1,6 +1,6 @@
 use super::worker::{
     call_worker, emit_done, redact_secrets, resolve_sidecar_path, scripts_dir, worker_sidecar_name,
-    WORKER_CANCELLED_PREFIX,
+    MAX_PEEK_RECORD_BYTES, WORKER_CANCELLED_PREFIX,
 };
 use crate::models::ScriptOutputLine;
 use crate::store;
@@ -260,48 +260,17 @@ pub async fn republish_subscription_dlq(
     .await
 }
 
-#[derive(serde::Deserialize)]
-pub struct SearchMessagesArgs {
-    #[serde(rename = "queueName")]
-    pub queue_name: String,
-    #[serde(rename = "searchString")]
-    pub search_string: String,
-    pub mode: String,
-    #[serde(rename = "maxMatches")]
-    pub max_matches: u32,
-    #[serde(rename = "connectionId")]
-    pub connection_id: String,
-    #[serde(rename = "runId")]
-    pub run_id: String,
-}
-
-#[tauri::command]
-pub async fn search_messages(
-    app: AppHandle,
-    args: SearchMessagesArgs,
-) -> Result<OperationCompletion, String> {
-    let env = store::resolve_connection_env(&app, &args.connection_id)?;
-    run_worker_operation(
-        &app,
-        "searchMessages",
-        json!({
-            "queueName": args.queue_name,
-            "searchString": args.search_string,
-            "mode": args.mode,
-            "maxMatches": args.max_matches,
-            "env": env,
-            "runId": args.run_id,
-        }),
-        &args.run_id,
-    )
-    .await
-}
-
 // ─── Peek messages ──────────────────────────────────────────────────────────
 
 #[derive(serde::Serialize, Deserialize)]
 pub struct PeekResult {
     pub messages: serde_json::Value,
+    #[serde(
+        default,
+        rename = "truncatedSources",
+        skip_serializing_if = "Vec::is_empty"
+    )]
+    pub truncated_sources: Vec<String>,
 }
 
 const PEEK_REQUEST_TIMEOUT: Duration = Duration::from_secs(180);
@@ -326,6 +295,7 @@ pub async fn peek_messages(app: AppHandle, args: PeekArgs) -> Result<PeekResult,
         "peekMessages",
         json!({
           "argv": args.argv,
+          "maxRecordBytes": MAX_PEEK_RECORD_BYTES,
           "env": env,
           "runId": run_id,
         }),

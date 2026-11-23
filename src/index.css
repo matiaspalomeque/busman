@@ -2,6 +2,32 @@
 @tailwind components;
 @tailwind utilities;
 
+.message-workspace {
+  container: messages / inline-size;
+}
+
+.entity-sidebar,
+.message-panes > .message-detail {
+  /* Leave room for the five grid columns and a classic scrollbar. */
+  max-width: calc(100% - 30rem - 8px);
+}
+
+@container messages (max-width: 50rem) {
+  .message-panes {
+    flex-direction: column;
+  }
+  .message-panes > .message-detail {
+    flex: 0 0 50%;
+    min-width: 100%;
+    max-width: 100%;
+    border-left-width: 0;
+    border-top-width: 1px;
+  }
+  .message-detail-resizer {
+    display: none;
+  }
+}
+
 @layer base {
   :root {
     --bb-ui-font: "Inter", "Segoe UI", "SF Pro Text", "Helvetica Neue", sans-serif;

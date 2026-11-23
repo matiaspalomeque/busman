@@ -144,7 +144,7 @@ Click **Send** to open the send dialog. Fill in the message body and content typ
 
 ### Message Templates
 
-Save frequently-used message payloads as named templates directly from the Send dialog. Click **Save as template** to store the current body and properties, then reload any saved template with a single click. Templates are saved locally. Loading a template restores its saved destination name when present. The Explorer selection determines whether Send treats that name as a queue or a topic.
+Save frequently-used message payloads as named templates directly from the Send dialog. Click **Save as template** to store the current body and properties locally. Loading a template keeps the destination currently shown in Send, including when loading an older template.
 
 ### Move Messages
 

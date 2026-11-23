@@ -155,12 +155,6 @@ pub async fn get_subscription_count(
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
-pub struct TopicSubscriptionCountsResult {
-    pub topic: String,
-    pub subscriptions: Vec<SubscriptionCountResult>,
-}
-
-#[derive(serde::Serialize, serde::Deserialize)]
 pub struct EntityCountError {
     pub kind: String,
     pub name: String,
@@ -236,35 +230,6 @@ pub struct DeleteSubscriptionRuleArgs {
     pub subscription_name: String,
     #[serde(rename = "ruleName")]
     pub rule_name: String,
-}
-
-#[derive(serde::Deserialize)]
-pub struct GetTopicSubscriptionCountsArgs {
-    #[serde(rename = "connectionId")]
-    pub connection_id: String,
-    #[serde(rename = "topicName")]
-    pub topic_name: String,
-}
-
-#[tauri::command]
-pub async fn get_topic_subscription_counts(
-    app: AppHandle,
-    args: GetTopicSubscriptionCountsArgs,
-) -> Result<TopicSubscriptionCountsResult, String> {
-    let env = store::resolve_connection_env(&app, &args.connection_id)?;
-    let value = call_worker(
-        &app,
-        "getTopicSubscriptionCounts",
-        serde_json::json!({
-            "env": env,
-            "topicName": args.topic_name,
-        }),
-        Some(Duration::from_secs(30)),
-    )
-    .await
-    .map_err(|e| redact_secrets(&e))?;
-    serde_json::from_value(value)
-        .map_err(|e| format!("Failed to parse topic subscription counts: {e}"))
 }
 
 #[tauri::command]
@@ -373,30 +338,6 @@ pub async fn get_queue_properties(
         &app,
         "getQueueProperties",
         json!({ "env": env, "queueName": args.queue_name }),
-        Some(Duration::from_secs(30)),
-    )
-    .await
-    .map_err(|e| redact_secrets(&e))
-}
-
-#[derive(serde::Deserialize)]
-pub struct GetTopicPropertiesArgs {
-    #[serde(rename = "connectionId")]
-    pub connection_id: String,
-    #[serde(rename = "topicName")]
-    pub topic_name: String,
-}
-
-#[tauri::command]
-pub async fn get_topic_properties(
-    app: AppHandle,
-    args: GetTopicPropertiesArgs,
-) -> Result<serde_json::Value, String> {
-    let env = store::resolve_connection_env(&app, &args.connection_id)?;
-    call_worker(
-        &app,
-        "getTopicProperties",
-        json!({ "env": env, "topicName": args.topic_name }),
         Some(Duration::from_secs(30)),
     )
     .await

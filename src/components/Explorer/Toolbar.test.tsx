@@ -1,8 +1,9 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { invoke } from "@tauri-apps/api/core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import "../../i18n";
 import { useAppStore } from "../../store/appStore";
+import { MAX_LOADED_BYTES, messageBytes } from "../../store/messageSlice";
 import type { PeekedMessage } from "../../types";
 import { Toolbar } from "./Toolbar";
 
@@ -211,6 +212,73 @@ describe("Toolbar", () => {
     });
   });
 
+  it.each([
+    { action: "Browse", reset: "reselecting the queue" },
+    { action: "Load More", reset: "reselecting the queue" },
+    { action: "Load More", reset: "clearing the results" },
+  ])("discards a pending $action after $reset", async ({ action, reset }) => {
+    const store = useAppStore.getState();
+    store.setExplorerQueue("orders");
+    store.setPeekMode("both");
+    store.setPeekResults([peekedMessage("normal-1", "1", "Normal Queue: orders")], ["dlq"]);
+
+    const page = peekResult([peekedMessage("normal-2", "2", "Normal Queue: orders")]);
+    let finishRead!: () => void;
+    const pending = new Promise<void>((resolve) => { finishRead = resolve; });
+    mockInvoke.mockImplementationOnce(async () => {
+      await pending;
+      if (action === "Load More") throw new Error("DLQ read failed");
+      return page;
+    }).mockResolvedValueOnce(page);
+
+    render(<Toolbar />);
+    fireEvent.click(screen.getByRole("button", { name: action }));
+    expect(mockInvoke).toHaveBeenCalledTimes(1);
+    act(() => {
+      if (reset === "clearing the results") store.clearPeekResults();
+      else {
+        store.setExplorerQueue("billing");
+        store.setExplorerQueue("orders");
+      }
+    });
+    await act(async () => finishRead());
+
+    expect(mockInvoke).toHaveBeenCalledTimes(1);
+    expect(useAppStore.getState()).toMatchObject({
+      hasBrowsed: false,
+      peekMessages: [],
+      lastPeekNormalMaxSeqNum: null,
+      lastPeekDlqMaxSeqNum: null,
+      lastBrowseError: null,
+      eventLog: [expect.objectContaining({ status: "stopped" })],
+    });
+  });
+
+  it("loads a DLQ record deferred by the shared frame before more Normal records fill the view", async () => {
+    useAppStore.getState().setExplorerQueue("orders");
+    const normal = peekedMessage("normal-1", "1", "Normal Queue: orders");
+    const dlq = peekedMessage("dlq-501", "501", "Dead Letter Queue: orders");
+    mockInvoke.mockImplementation(async (_command, payload) => {
+      const { argv } = (payload as { args: { argv: string[] } }).args;
+      if (argv[3] === "both") return { messages: [normal], truncatedSources: ["dlq"] };
+      if (argv[3] === "dlq") return peekResult([dlq]);
+      return peekResult([peekedMessage("normal-2", "2", "Normal Queue: orders")]);
+    });
+    render(<Toolbar />);
+    fireEvent.click(screen.getByRole("button", { name: "Both" }));
+    fireEvent.click(screen.getByRole("button", { name: "Browse" }));
+    await waitFor(() => expect(useAppStore.getState().peekMessages).toHaveLength(1));
+    // Exactly one DLQ record still fits. Keep the regression fixture small.
+    useAppStore.setState({ loadedMessageBytes: MAX_LOADED_BYTES - messageBytes(dlq) });
+    fireEvent.click(screen.getByRole("button", { name: "Load More" }));
+    await waitFor(() => expect(useAppStore.getState().eventLog[0].status).toBe("success"));
+    const state = useAppStore.getState();
+    expect(state.peekMessages.map((message) => message.messageId)).toEqual(["normal-1", "dlq-501"]);
+    expect([state.lastPeekNormalMaxSeqNum, state.lastPeekDlqMaxSeqNum]).toEqual(["1", "501"]);
+    expect(state.messageBudgetReached).toBe(true);
+    expect(mockInvoke).toHaveBeenCalledTimes(2);
+  });
+
   it("increments a large cursor exactly and skips a source already at i64 max", async () => {
     useAppStore.getState().setExplorerQueue("orders");
     useAppStore.getState().setPeekResults(
@@ -242,6 +310,59 @@ describe("Toolbar", () => {
       expect(state.lastPeekNormalMaxSeqNum).toBe("9288674231451771");
       expect(state.lastPeekDlqMaxSeqNum).toBe("9223372036854775807");
     });
+  });
+
+  it("keeps the oversized DLQ error and advances Normal on the same Load More", async () => {
+    const store = useAppStore.getState();
+    store.setExplorerQueue("orders");
+    store.setPeekMode("both");
+    store.setPeekResults([peekedMessage("normal-1", "1", "Normal Queue: orders")], ["dlq"]);
+    const sizeError = "message 501 in Dead Letter Queue: orders needs 68157886 encoded bytes, exceeding the browse limit of 67108864 bytes";
+    mockInvoke.mockRejectedValueOnce(new Error(sizeError))
+      .mockResolvedValueOnce(peekResult([peekedMessage("normal-2", "2", "Normal Queue: orders")]));
+    render(<Toolbar />);
+    fireEvent.click(screen.getByRole("button", { name: "Load More" }));
+    await waitFor(() => expect(useAppStore.getState().eventLog[0].status).toBe("error"));
+    const state = useAppStore.getState();
+    expect(state.peekMessages.map((row) => row.messageId)).toEqual(["normal-1", "normal-2"]);
+    expect([state.lastPeekNormalMaxSeqNum, state.lastPeekDlqMaxSeqNum]).toEqual(["2", null]);
+    expect(state.lastBrowseError).toContain(sizeError);
+    expect(state.eventLog[0].errorMessage).toBe(state.lastBrowseError);
+    expect(state.truncatedPeekSources).toEqual(["dlq"]);
+  });
+
+  it.each([
+    { first: "Operation cancelled.", calls: 1, error: "DLQ: Operation cancelled." },
+    { first: "DLQ read failed", calls: 2, error: "DLQ: DLQ read failed\nNormal: Normal read failed" },
+  ])("finishes Both after $calls source reads when the first reports $first", async ({ first, calls, error }) => {
+    const store = useAppStore.getState();
+    store.setExplorerQueue("orders");
+    store.setPeekMode("both");
+    store.setPeekResults([peekedMessage("normal-1", "1", "Normal Queue: orders")], ["dlq"]);
+    mockInvoke.mockRejectedValueOnce(first).mockRejectedValueOnce("Normal read failed");
+    render(<Toolbar />);
+    fireEvent.click(screen.getByRole("button", { name: "Load More" }));
+    await waitFor(() => expect(useAppStore.getState().eventLog[0].status).toBe("error"));
+    expect(mockInvoke).toHaveBeenCalledTimes(calls);
+    expect(useAppStore.getState().lastBrowseError).toBe(error);
+  });
+
+  it("retains a fitting record from the other source when the interrupted source cannot fit", async () => {
+    const store = useAppStore.getState();
+    store.setExplorerQueue("orders");
+    store.setPeekMode("both");
+    const normal = peekedMessage("normal-2", "2", "Normal Queue: orders");
+    const dlq = { ...peekedMessage("dlq-501", "501", "Dead Letter Queue: orders"), body: "x".repeat(200) };
+    store.setPeekResults([peekedMessage("normal-1", "1", "Normal Queue: orders")], ["dlq"]);
+    useAppStore.setState({ loadedMessageBytes: MAX_LOADED_BYTES - messageBytes(normal) - 1 });
+    mockInvoke.mockResolvedValueOnce(peekResult([dlq])).mockResolvedValueOnce(peekResult([normal]));
+    render(<Toolbar />);
+    fireEvent.click(screen.getByRole("button", { name: "Load More" }));
+    await waitFor(() => expect(useAppStore.getState().eventLog[0].status).toBe("success"));
+    const state = useAppStore.getState();
+    expect(state.peekMessages.map((record) => record.messageId)).toEqual(["normal-1", "normal-2"]);
+    expect([state.lastPeekNormalMaxSeqNum, state.lastPeekDlqMaxSeqNum]).toEqual(["2", null]);
+    expect(state.messageBudgetReached).toBe(true);
   });
 
   it("rechecks an initially empty Both source without resetting the other cursor", async () => {

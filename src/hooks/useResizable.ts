@@ -32,7 +32,7 @@ export function useResizable({ initialWidth, minWidth, maxWidth, onDragEnd, dire
       handle.setPointerCapture(e.pointerId);
 
       const startX = e.clientX;
-      const startWidth = widthRef.current;
+      const startWidth = handle.parentElement?.getBoundingClientRect().width || widthRef.current;
 
       function onPointerMove(moveEvent: PointerEvent) {
         const rawDelta = moveEvent.clientX - startX;

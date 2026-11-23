@@ -66,7 +66,8 @@ function computeInsights(messages: PeekedMessage[]) {
     }
 
     // Body analysis
-    const body = m.body;
+    // Insights uses field names only. Keep the original text on the message.
+    const body: unknown = m.bodyIsJson && typeof m.body === "string" ? JSON.parse(m.body) : m.body;
     if (
       body === null ||
       body === undefined ||

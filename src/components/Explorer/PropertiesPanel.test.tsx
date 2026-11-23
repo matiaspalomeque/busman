@@ -9,7 +9,7 @@ import type { PeekedMessage } from "../../types";
 const runOperation = vi.hoisted(() => vi.fn());
 vi.mock("../../hooks/useScript", () => ({ useScript: () => ({ runOperation, isRunning: false }) }));
 
-const message: PeekedMessage = { messageId: "order-1", sequenceNumber: "9007199254740993", body: '{"orderId":42,"status":"retry"}',
+const message: PeekedMessage = { messageId: "order-1", sequenceNumber: "9007199254740993", body: '{\r\n"orderId":9007199254740993,\r"status":"retry"}', bodyIsJson: true,
   subject: null, contentType: "application/json", correlationId: null, partitionKey: null, traceParent: null,
   applicationProperties: { system: "orders" }, enqueuedTimeUtc: null, expiresAtUtc: null, _source: "Dead Letter Queue: orders",
   deadLetterReason: "Delivery limit", deadLetterErrorDescription: "Payment timed out" };
@@ -21,9 +21,9 @@ describe("message inspection", () => {
     Object.defineProperty(navigator, "clipboard", { value: { writeText: copy }, configurable: true });
     render(<PropertiesPanel />);
     const body = screen.getByRole("textbox", { name: "Body" }) as HTMLTextAreaElement;
-    expect(body.value).toContain('\n  "orderId": 42');
+    expect(body.value).toContain('\n  "orderId": 9007199254740993');
     fireEvent.click(screen.getByRole("button", { name: "Formatted" }));
-    expect(body.value).toBe(message.body);
+    expect(body.value).toBe('{\n"orderId":9007199254740993,\n"status":"retry"}');
     fireEvent.click(screen.getByRole("button", { name: "Copy" }));
     await waitFor(() => expect(copy).toHaveBeenCalledWith(message.body));
     fireEvent.change(screen.getByRole("textbox", { name: "Find in body" }), { target: { value: "retry" } });
